@@ -986,7 +986,9 @@ class KnowledgeService:
             receipt = self.repository._put_record_for_operation(
                 project_id, document, expected_version=prior['version'] if prior else 0, operation=operation_context)
         run=self.repository.create_ingest_run(project_id,doc_id,receipt['version_id'])
-        run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='running',active_stage='chunking')
+        has_prepared_chunks='_prepared_chunks' in request
+        chunk_stage='reusing_chunks' if has_prepared_chunks else 'chunking'
+        run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='running',active_stage=chunk_stage)
         metadata['run_id']=run['id']
         event(f'原文收据已保存 · 文档 ID {doc_id}',8)
         try:
@@ -998,12 +1000,16 @@ class KnowledgeService:
             review_candidates = []
             discovery_candidates = []
             # 重叠段落保留来源偏移，并继承文档元数据/有效性。
-            from .chunking import split_document
             if checkpoint_context:
-                checkpoint_context.update_progress('chunking', 10)
-            with stage(f"切片 · 策略 {request.get('chunk_strategy','fixed')} · 长度 {request.get('chunk_size',1800)} · 重叠 {request.get('chunk_overlap',200)}",10):
-                chunks=request['_prepared_chunks'] if '_prepared_chunks' in request else split_document(request['text'], request)
-            event(f'切片完成 · 共 {len(chunks)} 片',12)
+                checkpoint_context.update_progress(chunk_stage, 10)
+            if has_prepared_chunks:
+                chunks=request['_prepared_chunks']
+                event(f'已复用解析切片 · 共 {len(chunks)} 片',12)
+            else:
+                from .chunking import split_document
+                with stage(f"切片 · 策略 {request.get('chunk_strategy','fixed')} · 长度 {request.get('chunk_size',1800)} · 重叠 {request.get('chunk_overlap',200)}",10):
+                    chunks=split_document(request['text'], request)
+                event(f'切片完成 · 共 {len(chunks)} 片',12)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
                 counts_patch={'chunks_total':len(chunks),'chunks_succeeded':len(chunks)})
             for index, chunk in enumerate(chunks):

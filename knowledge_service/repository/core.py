@@ -1305,6 +1305,23 @@ class Repository:
             rows = self._db.execute('SELECT * FROM record_versions WHERE project_id=? AND id=? ORDER BY version', (project_id, record_id)).fetchall()
         return [self._record(row) for row in rows]
 
+    def latest_record_revision(self, project_id, record_id):
+        """Read the last historical revision, even if it is no longer visible."""
+        with self._lock:
+            row = self._db.execute(
+                '''SELECT revision.* FROM projects p
+                   LEFT JOIN LATERAL (
+                       SELECT * FROM record_versions
+                       WHERE project_id=p.id AND id=?
+                       ORDER BY version DESC LIMIT 1
+                   ) revision ON TRUE WHERE p.id=?''',
+                (record_id, project_id)).fetchone()
+        if row is None:
+            raise KeyError(project_id)
+        if row['version'] is None:
+            raise KeyError(record_id)
+        return self._record(row)
+
     def ontology_record_history(self, project_id, ontology_id, current_rows):
         """Aggregate record history bound to one known ontology identifier.
 
@@ -2048,8 +2065,7 @@ class Repository:
         # 这个项目里"，不要求等于 latest —— 否则回退会在最后一步（事务内复核）被拦下，
         # 出现"预检通过、发布失败"这种最难查的半通状态。
         if draft.get('source_kind') == 'revert':
-            known = {row['id'] for row in self.list_ontologies(project_id)}
-            if draft['base_ontology_id'] not in known:
+            if draft['base_ontology_id'] not in self.ontology_version_signature(project_id):
                 raise OntologyPublicationConflict(
                     'stale_base', 'revert base is not a version of this project',
                     details={'base_ontology_id': draft['base_ontology_id'],
@@ -2484,6 +2500,11 @@ class Repository:
         with self._lock:
             return self._ordered_ontology_versions(project_id)
 
+    def list_ontology_version_metadata(self, project_id):
+        self.get_project(project_id)
+        with self._lock:
+            return self._ontology_version_meta(project_id)
+
     def ontology_relation_terms(self, project_id, *, ontology_ids=None, known_at=None):
         """Read the predicate vocabulary from the selected published versions."""
         statement = "SELECT (summary::jsonb->'relations')::text AS relations FROM ontologies WHERE project_id=?"
@@ -2543,7 +2564,8 @@ class Repository:
                     'ontology discovery runs must use create_discovery_run or '
                     'transition_discovery_run')
             if item.get('project_id'): self.get_project(item['project_id'])
-            self._db.execute('INSERT INTO artifacts VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
+            self._db.execute('INSERT INTO artifacts(id,kind,project_id,payload) VALUES (?,?,?,?) '
+                             'ON CONFLICT(id) DO UPDATE SET payload=excluded.payload',
                              (item['id'], kind, item.get('project_id'), _json(item)))
         return item
 
@@ -2579,6 +2601,29 @@ class Repository:
             row = self._db.execute('SELECT payload FROM artifacts WHERE id=? AND kind=?', (artifact_id, kind)).fetchone()
         if not row: raise KeyError(artifact_id)
         return json.loads(row[0])
+
+    def list_snapshot_summaries(self, project_id, *, limit=None, before=None):
+        conditions = ["kind='snapshot'", 'project_id=?']
+        params = [project_id]
+        if before is not None:
+            conditions.append('seq<?')
+            params.append(before)
+        page_limit = 'LIMIT ?' if limit is not None else ''
+        if limit is not None:
+            params.append(limit + 1)
+        with self.independent_read_view() as reader:
+            reader.get_project(project_id)
+            # Older snapshots have no stored summary. Only project the rows
+            # in the selected page, using the same field exclusion as before.
+            rows = reader._db.execute(f'''SELECT page_key, COALESCE(snapshot_summary,
+                    (payload::jsonb - ARRAY['records', 'ontologies'])::text) AS summary
+                FROM (SELECT seq AS page_key, snapshot_summary, payload FROM artifacts
+                    WHERE {' AND '.join(conditions)} ORDER BY seq DESC {page_limit}) page
+                ORDER BY page_key DESC''', params).fetchall()
+        result = {'snapshots': [json.loads(row['summary']) for row in rows[:limit]]}
+        if limit is not None:
+            result['next_cursor'] = rows[limit - 1]['page_key'] if len(rows) > limit else None
+        return result
 
     def list_artifacts(self, kind, project_id=None):
         """列出某一类型的工件，可按项目收窄范围。

@@ -24,7 +24,7 @@ test('preparing a merge returns confirmed winners with the same preview fingerpr
     nodes.push(node);return node;};
   const data={keep:{text:'keep'},drop:{text:'drop'},expected_versions:{keep:2,drop:3},
     attribute_conflicts:[],affected_records:{relations:1,attributes:2},preview_fingerprint:'f'.repeat(64)};
-  const context={window:{},current:'p',endpoint:suffix=>'/p'+suffix,
+  const context={window:{DisplayTime:require('../../knowledge_service/web/display-time.js')},current:'p',endpoint:suffix=>'/p'+suffix,
     document:{createElement:element,body:{append(){}}},api:async url=>url.endsWith('/preview')?data:{version:1}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/entity-governance.js'),'utf8'),context);
   const pending=context.window.EntityGovernance.prepareMerge('keep','drop');

@@ -90,8 +90,14 @@ def install(app, service):
         return repository.rename_project(project_id, request.name)
 
     @router.delete('/api/projects/{project_id}')
-    def delete_project(project_id: str):
+    def delete_project(project_id: str, defer_cleanup: bool = False):
         deleted = repository.delete_project(project_id)
+        if defer_cleanup:
+            # Deletion has committed both the authoritative changes and the
+            # cleanup events. The signal only wakes the existing worker.
+            app.state.projection_worker.wake()
+            return {'deleted': deleted, 'cleaned': {'milvus': False, 'neo4j': False},
+                    'cleanup_queued': True}
         cleaned = _cleanup_project_projections(
             app, service, repository, project_id)
         return {'deleted': deleted, 'cleaned': cleaned}

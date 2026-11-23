@@ -1,8 +1,10 @@
 """Complete graph sessions and explicitly budgeted local exploration."""
+from datetime import date
+from typing import Annotated, Literal
+
 from fastapi import APIRouter, Request as HttpRequest
 from fastapi.responses import JSONResponse
-from pydantic import Field, model_validator
-from typing import Literal
+from pydantic import Field, StringConstraints, model_validator
 
 from ..models import Scope, Request
 from ..services.graph_workspace import GraphWorkspace
@@ -26,6 +28,29 @@ class GraphNeighborhood(Scope):
     direction: Literal['forward', 'backward', 'both'] = 'both'
     max_nodes: int = Field(default=500, ge=1, le=10000)
     max_edges: int = Field(default=1000, ge=1, le=10000)
+
+
+class GraphFilterStep(Request):
+    field: Literal['entity_type', 'entity_name', 'attribute_value', 'source_platform',
+                   'source_published_date', 'source_keyword']
+    value: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+
+    @model_validator(mode='after')
+    def validate_publication_date(self):
+        if self.field == 'source_published_date':
+            try:
+                if date.fromisoformat(self.value).isoformat() != self.value:
+                    raise ValueError
+            except ValueError as exc:
+                raise ValueError('资料发布日期必须采用 YYYY-MM-DD 格式') from exc
+        return self
+
+
+class GraphProgressiveSearch(GraphNeighborhood):
+    hops: int = Field(default=2, ge=0, le=10, strict=True)
+    relationship_types: list[Annotated[str, StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=2000)]] = Field(default_factory=list, max_length=100)
+    filter_steps: list[GraphFilterStep] = Field(default_factory=list, max_length=50)
 
 
 class RecordsPage(Scope):
@@ -62,6 +87,10 @@ def install(app, service):
     @router.post('/graph-neighborhood')
     def neighborhood(project: str, body: GraphNeighborhood):
         return workspace.neighborhood(project, body.model_dump())
+
+    @router.post('/graph-neighborhood/search')
+    def neighborhood_search(project: str, body: GraphProgressiveSearch):
+        return workspace.neighborhood_search(project, body.model_dump())
 
     @router.post('/records/page')
     def records_page(project: str, body: RecordsPage):

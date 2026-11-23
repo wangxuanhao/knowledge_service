@@ -10,6 +10,8 @@
     const title=header.querySelector(':scope > h2');
     if(title)heading.append(title);
     const project=document.createElement('span');project.className='retrieval-project-name';heading.append(project);
+    const graphStatus=get('graph-workspace-state');
+    if(graphStatus)heading.append(graphStatus);
     const searchOptions=header.querySelector('.search-options');
     if(searchOptions){
       header.querySelector('.searchbar')?.append(searchOptions);
@@ -24,6 +26,40 @@
     const syncProject=()=>{project.textContent=get('project')?.selectedOptions?.[0]?.textContent||'';};
     get('project')?.addEventListener('change',syncProject);syncProject();
     header.prepend(heading);
+
+    const query=get('query'),searchButton=get('search');
+    const kindButtons=[...header.querySelectorAll('[data-retrieval-kind]')];
+    const layout=window.GraphWorkspaceLayout;
+    const queryFields={
+      knowledge:[query.getAttribute('aria-label'),query.placeholder],
+      neighborhood:['邻域检索关键词','输入实体名称或 ID，查找邻域起点'],
+      community:['社区检索关键词','输入主题、实体或原文关键词'],
+    };
+    function select(kind,{reuseQuery=true}={}){
+      page.dataset.retrievalMode=kind;
+      for(const button of kindButtons){
+        button.setAttribute('aria-pressed',String(button.dataset.retrievalKind===kind));
+      }
+      const [label,placeholder]=queryFields[kind];
+      query.setAttribute('aria-label',label);
+      query.placeholder=placeholder;
+      searchButton.disabled=kind==='knowledge'&&searchButton.dataset.knowledgeBusy==='true';
+      if(kind!=='knowledge'&&searchOptions)searchOptions.open=false;
+      if(kind!=='neighborhood'&&layout?.snapshot().panel==='neighborhood')layout.closePanel();
+      window.CommunityWorkspace?.setBrowserVisible(kind==='community',reuseQuery?query.value:undefined);
+      if(kind==='neighborhood')window.NeighborhoodSearch?.open();
+      layout?.resize();
+    }
+    function routeQuery(){
+      const mode=page.dataset.retrievalMode;
+      if(mode==='community')window.CommunityWorkspace?.searchForKeyword(query.value);
+      else if(mode==='neighborhood')window.NeighborhoodSearch?.searchForEntity(query.value);
+      else return false;
+      return true;
+    }
+    for(const button of kindButtons)button.addEventListener('click',()=>select(button.dataset.retrievalKind));
+    window.RetrievalWorkspace=Object.freeze({select,routeQuery,get mode(){return page.dataset.retrievalMode;}});
+
     const modes=stage.querySelector('.full-graph-mode');
     if(modes)stage.querySelector('.graph-stage-heading').prepend(modes);
     get('graph-heading')?.classList.add('sr-only');

@@ -13,8 +13,13 @@ function setup(){
     dispatch(type){for(const fn of this.listeners[type]||[])fn({target:this});},
     classList:{toggle(){},add(){},remove(){}},closest(){return {classList:{toggle(){}}};},replaceChildren(){},append(){}}]));
   for(const id of ['doc-platforms-mode','doc-businesses-mode','doc-audiences-mode'])fields[id].value='unknown';
+  for(const dimension of ['platforms','businesses','audiences']){
+    const picker=fields['query-'+dimension];
+    picker.checkedValues=[];
+    picker.querySelectorAll=selector=>selector==='input:checked'?picker.checkedValues.map(value=>({value})):[];
+  }
   const modes=[{value:'file',checked:false,addEventListener(){}},{value:'text',checked:true,addEventListener(){}}];
-  const window={};
+  const window={DisplayTime:require('../../knowledge_service/web/display-time.js')};
   const document={getElementById:id=>fields[id]||null,querySelectorAll:()=>modes,
     querySelector:()=>null,createElement:()=>({className:'',textContent:'',dataset:{},append(){},addEventListener(){}})};
   vm.runInNewContext(fs.readFileSync('knowledge_service/web/ingest-mode.js','utf8'),
@@ -93,7 +98,7 @@ test('blank dimensions stay unknown and all mode never leaks typed values',()=>{
 test('query platform scope is compact, optional, and preserves the existing scope payload',()=>{
   const {fields:f,window}=setup();
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{});
-  f['query-platforms'].value='美团, 淘宝，美团';
+  f['query-platforms'].checkedValues=['美团','淘宝'];
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
     applicability:{platforms:{mode:'specific',values:['美团','淘宝']},
       businesses:{mode:'unknown',values:[]},audiences:{mode:'unknown',values:[]}},
@@ -114,14 +119,14 @@ test('query platform scope is compact, optional, and preserves the existing scop
 
 test('unified metadata applicability sends platform, business and audience together',()=>{
   const {fields:f,window}=setup();
-  f['query-platforms'].value='美团';
-  f['query-businesses'].value='外卖';
-  f['query-audiences'].value='商户';
+  f['query-platforms'].checkedValues=['美团'];
+  f['query-businesses'].checkedValues=['外卖'];
+  f['query-audiences'].checkedValues=['商户'];
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
     applicability:{platforms:{mode:'specific',values:['美团']},
       businesses:{mode:'specific',values:['外卖']},audiences:{mode:'specific',values:['商户']}},
   });
-  f['query-platforms'].value='';
+  f['query-platforms'].checkedValues=[];
   assert.deepEqual(JSON.parse(JSON.stringify(window.ApplicabilityUI.readQueryScope())),{
     applicability:{platforms:{mode:'unknown',values:[]},
       businesses:{mode:'specific',values:['外卖']},audiences:{mode:'specific',values:['商户']}},

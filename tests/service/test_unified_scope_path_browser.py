@@ -78,7 +78,9 @@ def test_three_dimensional_scope_reaches_graph_and_excludes_other_business(workb
     _open_scope(page)
     for dimension, values in scope.items():
         assert page.locator('#query-' + dimension).count() == 1
-        page.fill('#query-' + dimension, '，'.join(values))
+        page.locator(f'#query-{dimension} > summary').click()
+        for value in values:
+            page.locator(f'#query-{dimension}').get_by_role('checkbox', name=value, exact=True).check()
     assert page.evaluate('scope().applicability || null') is None
     bodies = []
     page.on('request', lambda request: bodies.append(request.post_data_json)
@@ -99,7 +101,7 @@ def test_three_dimensional_scope_reaches_graph_and_excludes_other_business(workb
     _open_scope(page)
     page.click('#reset-scope')
     assert not page.evaluate('scope().applicability || null')
-    assert all(page.locator('#query-' + dimension).input_value() == '' for dimension in scope)
+    assert all(not page.locator(f'#query-{dimension} input:checked').count() for dimension in scope)
     assert not workbench.errors
 
 

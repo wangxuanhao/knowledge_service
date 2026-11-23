@@ -42,7 +42,7 @@ function setup(){
     requests.push(JSON.parse(options.body));
     return Promise.resolve(new Response(new ReadableStream({start(controller){streams.push(controller);}})));
   };
-  const window={document:doc,fetch,TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){}};
+  const window={DisplayTime:require('../../knowledge_service/web/display-time.js'),document:doc,fetch,TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){}};
   const context={window,document:doc,localStorage,current:'p',wb:{epoch:0},AbortController,TextDecoder,console,
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,platformGroupLabel:group=>'平台：'+group.platform,showTab(){throw Error('citation must not navigate');},status(){}};
@@ -73,7 +73,7 @@ test('temporal reference sections stay separate, inert and frozen across history
   assert.equal(panel.querySelectorAll('.qa-reference-section').length,3);
   assert.equal(panel.querySelectorAll('img').length,0);
   assert.match(panel.textContent,/有效性待核对/);assert.match(panel.textContent,/未参与本次回答/);
-  assert.match(panel.textContent,/仅用于文档说明/);assert.match(panel.textContent,/2024-01-01/);
+  assert.match(panel.textContent,/仅用于文档说明/);assert.match(panel.textContent,/2024年01月01日/);
   assert.match(panel.textContent,/平台乙缺少依据 <script>/);
   assert.match(panel.querySelector('.qa-reference-section').textContent,/平台甲/);
   panel.querySelector('.qa-reference-section').querySelector('.provenance-citation').dispatch('click');
@@ -137,7 +137,7 @@ test('changed QA assets and accessible temporal controls have current cache vers
   assert.match(html,/<script\b[^>]*\bsrc="\/assets\/workbench\.js\?v=[\w.-]+"/);
   assert.ok(html.includes('/assets/workbench.css?v=split-previews-20261110-1'));
   assert.ok(html.includes('/assets/qa-presentation.js?v=ontology-sections-20261027-2'));
-  assert.ok(html.includes('/assets/provenance-drawer.js?v=document-qa-history-20261026-1'));
+  assert.ok(html.includes('/assets/provenance-drawer.js?v=display-time-20261123-1'));
   assert.ok(html.includes('/assets/qa-page.css?v=workflow-ux-20261102-2'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.doesNotMatch(html,/id="qa-as-of"/);assert.match(html,/id="scope-valid-at"[^>]*type="datetime-local"/);
@@ -161,7 +161,7 @@ test('zero effective platform evidence describes the gap and governance dates su
   env.emit('done',{answer:'原文说明'});env.streams.at(-1).close();await settle();
   const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
   assert.match(panel.textContent,/未检索到本次时点确认有效的依据/);
-  assert.match(panel.textContent,/有效期核对：版本 governed-v3/);assert.match(panel.textContent,/失效（不含）：2025-01-01/);
+  assert.match(panel.textContent,/有效期核对：版本 governed-v3/);assert.match(panel.textContent,/失效（不含）：2025年01月01日/);
   assert.match(panel.textContent,/未维护生效时间/);assert.match(panel.textContent,/发布日期推定/);
   const governance=env.history()[1].uncertain_references[0].source_eligibility[0];
   assert.equal(governance.document_version_id,'original-v1');assert.equal(governance.governance_version_id,'governed-v3');assert.equal(governance.secret,undefined);

@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from knowledge_service.repository.migrate import (  # noqa: E402
     MIGRATIONS_DIR, apply_migrations, discover_migrations,
 )
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS  # noqa: E402
 
 
 EXIT_SKIPPED = 3
@@ -272,12 +273,20 @@ def _probe_schema_and_state(dsn: str, project_id: str, version_ids, report):
             dict(record, text='delete', metadata={
                 **record['metadata'], '_deleted': True}), expected_version=2)
         watermark = repository.projections.project_watermark(api_project_id)
+        # Milvus delivery is gated on an explicit first build. Rehearse the
+        # common outbox lease and acknowledgement with the Neo4j cursor.
+        milvus_waiting_for_build = repository.projections.claim_contiguous_batch(
+            api_project_id, 'milvus', PROJECTION_SCHEMA_VERSIONS['milvus'],
+            limit=100, owner='migration-rehearsal') is None
+        delivery_target = 'neo4j'
+        delivery_schema = PROJECTION_SCHEMA_VERSIONS[delivery_target]
         claimed = repository.projections.claim_contiguous_batch(
-            api_project_id, 'milvus', 3, limit=100, owner='migration-rehearsal')
+            api_project_id, delivery_target, delivery_schema,
+            limit=100, owner='migration-rehearsal')
         cursor_ok = bool(claimed and len(claimed.events) == watermark)
         if claimed:
-            repository.projections.ack_contiguous(claimed, 3)
-        ready_cursor = repository.projections.cursor(api_project_id, 'milvus') or {}
+            repository.projections.ack_contiguous(claimed, delivery_schema)
+        ready_cursor = repository.projections.cursor(api_project_id, delivery_target) or {}
         repository.delete_project(api_project_id)
         released = repository.claim_projection_cleanup(
             api_project_id, 'milvus', 'migration-rehearsal')
@@ -298,11 +307,13 @@ def _probe_schema_and_state(dsn: str, project_id: str, version_ids, report):
             first['version'] == 1 and second['version'] == 2
             and tombstone['version'] == 3 and cursor_ok
             and int(ready_cursor.get('applied_seq') or -1) == watermark
-            and release_ok and ack_milvus and ack_neo4j)
+            and milvus_waiting_for_build and release_ok and ack_milvus and ack_neo4j)
         report['checks']['outbox_rebuild_cleanup'] = (
             'passed' if state_ok else 'failed')
         report['projection_probe'] = {
             'repository_put_update_delete': True,
+            'delivery_target': delivery_target,
+            'milvus_waiting_for_first_build': milvus_waiting_for_build,
             'watermark': watermark,
             'claimed_events': 0 if claimed is None else len(claimed.events),
             'cursor_status': ready_cursor.get('status'),

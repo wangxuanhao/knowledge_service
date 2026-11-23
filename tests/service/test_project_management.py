@@ -240,6 +240,60 @@ def test_api_delete_project(client):
     assert g.status_code == 404
 
 
+def test_project_delete_can_defer_projection_cleanup_after_commit(tmp_path, monkeypatch):
+    app = create_app(tmp_path / 'deferred-cleanup', encoder=HashingEncoder(), auth_disabled=True)
+    repo = app.state.service.repository
+    worker = app.state.projection_worker
+    project = repo.create_project('Deferred cleanup')['id']
+    repo.put_record(project, {'id': 'deleted-record', 'kind': 'document', 'text': 'receipt'})
+    sync_calls = []
+    worker_calls = []
+    wake_events = []
+
+    def wake():
+        with repo.independent_read_view() as reader:
+            with pytest.raises(KeyError):
+                reader.get_project(project)
+            rows = reader._db.execute('SELECT target FROM projection_cleanup_outbox '
+                                      'WHERE project_id=? ORDER BY target', (project,)).fetchall()
+            wake_events.append([row['target'] for row in rows])
+
+    def clean_milvus(project_id):
+        worker_calls.append(('milvus', project_id))
+        if worker_calls.count(('milvus', project_id)) == 1:
+            raise RuntimeError('temporary Milvus failure')
+
+    def clean_neo4j(project_id):
+        worker_calls.append(('neo4j', project_id))
+
+    monkeypatch.setattr(worker, 'wake', wake)
+    monkeypatch.setattr(worker, 'cleanup_handlers', {'milvus': clean_milvus, 'neo4j': clean_neo4j})
+    monkeypatch.setattr(app.state.neo4j, 'delete_project', sync_calls.append)
+    # Run the real worker synchronously below so each persisted retry can be asserted.
+    client = TestClient(app)
+    response = client.delete(f'/api/projects/{project}', params={'defer_cleanup': True})
+    assert response.status_code == 200, response.text
+    result = response.json()
+    assert result['deleted']['records'] == 1
+    assert result['cleanup_queued'] is True
+    assert result['cleaned'] == {'milvus': False, 'neo4j': False}
+    assert sync_calls == worker_calls == []
+    assert wake_events == [['milvus', 'neo4j']]
+
+    assert worker.run_once()['cleanup'] == {'claimed': 2, 'cleaned': 1, 'failed': 1}
+    retry = repo._db.execute('SELECT target, attempts FROM projection_cleanup_outbox '
+                            'WHERE project_id=?', (project,)).fetchall()
+    assert [tuple(row) for row in retry] == [('milvus', 1)]
+    assert worker.run_once()['cleanup'] == {'claimed': 1, 'cleaned': 1, 'failed': 0}
+    assert worker_calls == [('milvus', project), ('neo4j', project), ('milvus', project)]
+
+    legacy = repo.create_project('Default synchronous cleanup')['id']
+    result = client.delete(f'/api/projects/{legacy}').json()
+    assert set(result) == {'deleted', 'cleaned'}
+    assert result['cleaned'] == {'milvus': False, 'neo4j': True}
+    assert sync_calls == [legacy]
+
+
 def test_api_delete_project_not_found_returns_404(client):
     r = client.delete('/api/projects/nonexistent')
     assert r.status_code == 404

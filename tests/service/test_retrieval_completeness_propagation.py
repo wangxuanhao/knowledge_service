@@ -1,12 +1,13 @@
 """A partial platform/search result remains partial through QA delivery."""
 from types import SimpleNamespace
 
+from knowledge_service.repository import Repository
 from knowledge_service.services import answers
 from knowledge_service.services.retrieval import RetrievalEngine
 from knowledge_service.services.service import KnowledgeService
 
 
-def test_later_partial_platform_makes_aggregate_and_group_explicit(monkeypatch):
+def test_later_partial_platform_makes_aggregate_and_group_explicit(tmp_path, monkeypatch):
     def search(_self, _project, _query, **options):
         platforms = options['scope']['applicability']['platforms'].get('values', [])
         partial = platforms == ['B'] and options.get('platform_match') == 'specific_only'
@@ -15,9 +16,14 @@ def test_later_partial_platform_makes_aggregate_and_group_explicit(monkeypatch):
                 'backends': {}}
     monkeypatch.setattr(RetrievalEngine, 'search', search)
     monkeypatch.setattr('knowledge_service.services.retrieval_context.enrich_source_context', lambda *_: None)
-    service = KnowledgeService(SimpleNamespace(), SimpleNamespace(identity='test', semantic=False))
-    result = service.search('p', {'query': '退款', 'retrieval_mode': 'keyword', 'ontology_context': False,
-        'applicability': {'platforms': {'mode': 'specific', 'values': ['A', 'B']}}})
+    repository = Repository(tmp_path / 'partial-platform')
+    try:
+        project = repository.create_project('partial-platform')['id']
+        service = KnowledgeService(repository, SimpleNamespace(identity='test', semantic=False))
+        result = service.search(project, {'query': '退款', 'retrieval_mode': 'keyword', 'ontology_context': False,
+            'applicability': {'platforms': {'mode': 'specific', 'values': ['A', 'B']}}})
+    finally:
+        repository.close()
     assert result['complete'] is False
     b = next(group for group in result['platform_groups'] if group['platform'] == 'B')
     assert b['complete'] is False

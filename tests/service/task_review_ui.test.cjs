@@ -10,6 +10,9 @@ function fixture(reviewRows=[],options={}){
     append(...children){this.children.push(...children);},replaceChildren(...children){this.children=children;},setAttribute(){},
     isConnected:true,showModal(){this.open=true;},close(){this.open=false;},remove(){this.isConnected=false;},after(){},prepend(){throw Error('review must not be prepended to jobs');},
     insertAdjacentHTML(){},querySelector(){return element();},querySelectorAll(selector){
+      if(selector==='[data-open-review]')return [...this.innerHTML.matchAll(/<button data-open-review/g)].map((_,index)=>{
+        const key='review-'+index;if(!buttons.has(key))buttons.set(key,element());return buttons.get(key);
+      });
       if(selector!=='[data-open-discovery]')return [];
       return [...this.innerHTML.matchAll(/<button[^>]*data-open-discovery="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map(([,index,text])=>{
         if(!buttons.has(index)){const button=element();button.dataset.openDiscovery=index;button.textContent=text;buttons.set(index,button);}return buttons.get(index);
@@ -26,7 +29,7 @@ function fixture(reviewRows=[],options={}){
   // window 是浏览器里一定存在的东西：各模块在**加载时**就会向 window.RuntimeView 注册
   // 「项目与运行」的分区加载函数，沙箱少了它这些模块会直接抛 ReferenceError。
   let actor={id:'admin-a',role:'admin'},writer=true;const opened=[],intake=[];
-  const context=vm.createContext({window:{IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js'),Auth:{user:()=>actor,isAdmin:()=>writer},
+  const context=vm.createContext({window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),IngestResultSummary:require('../../knowledge_service/web/ingest-result-summary.js'),Auth:{user:()=>actor,isAdmin:()=>writer},
     KnowledgeNavigation:{open:async(target,args)=>{opened.push({target,...args});if(options.navigate)await options.navigate(context);}},OntologyIntake:{open:async args=>intake.push(args)}},current:'a',$:get,readParseSettings:()=>({chunk_size:1800}),showTab(){},
     document:{body:element(),createElement(tag){const e=element();e.tagName=tag;created.push(e);return e;},querySelector:get,querySelectorAll:()=>[]},
     esc:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),
@@ -49,6 +52,8 @@ function fixture(reviewRows=[],options={}){
       if(url==='/api/projects/a/jobs')return {jobs:options.jobs||[job]};
       if(url==='/api/projects/b/jobs')return {jobs:[]};
       throw Error('Unexpected URL: '+url);}});
+  context.window.WorkspaceDrawers=require('../../knowledge_service/web/workspace-drawers.js').createManager(context.document);
+  get('project').onchange=()=>context.window.WorkspaceDrawers.close({restoreFocus:false});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/task-review.js'),'utf8'),context);
   return {context,get,calls,requests,created,opened,intake,setActor:value=>{actor=value;},setWriter:value=>{writer=value;}};
 }
@@ -68,7 +73,7 @@ test('unified conflict review reloads exact set and submits no winner until all 
   const posted=f.requests.find(r=>r.url.endsWith('/resolve')).body;
   assert.equal(posted.expected_version,4);assert.deepEqual(posted.expected_members,set.members);assert.equal(resolved,1);
   assert.deepEqual(JSON.parse(JSON.stringify(posted.decisions)),[{attribute_id:'a',decision:'accept'},{attribute_id:'b',decision:'reject'}]);
-  assert.equal(f.created.find(node=>node.tagName==='dialog').isConnected,false);
+  assert.equal(f.created.find(node=>node.className.includes('attribute-conflict-review')).isConnected,false);
 });
 
 test('viewer conflict reader keeps evidence available without decision controls',async()=>{
@@ -167,9 +172,9 @@ test('refresh uses new project-scoped summary and preserves full logs collapsed'
   assert.match(summary,/实体抽取返回 · 3 个/);
   assert.doesNotMatch(summary,/实体抽取返回 · 2 个|仍在等待当前步骤/);
   assert.match(html,/实体抽取返回 · 2 个/);
-  assert.match(html,/2026-09-10 18:00:00/);
-  assert.match(html,/2026-09-10 18:00:04/);
-  assert.match(html,/\[2026-09-10 18:00:01\] 文档开始/);
+  assert.match(html,/2026年09月10日 18:00:00/);
+  assert.match(html,/2026年09月10日 18:00:04/);
+  assert.match(html,/\[2026年09月10日 18:00:01\] 文档开始/);
   assert.doesNotMatch(html,/2026-09-10T10:00:0[0-4]Z/);
   assert.doesNotMatch(html,/<details[^>]* open/);
   assert.ok(!calls.includes('/api/projects/a/reviews'));
@@ -182,6 +187,17 @@ test('programmatic project switch does not leave previous jobs or load hidden re
   await new Promise(resolve=>setImmediate(resolve));
   assert.ok(!calls.includes('/api/projects/b/reviews'));
   assert.match(get('tasks').innerHTML,/当前项目暂无任务/);
+});
+
+test('retrieval index tasks have a readable title, status and progress before their diagnostics',async()=>{
+  const {get}=fixture([],{job:{id:'index-123456',kind:'semantic_index',status:'completed',stage:null,progress:100,result:{count:4}}});
+  await get('load-jobs').onclick();
+  const summary=get('tasks').innerHTML.split('<details')[0];
+  assert.match(summary,/<h4 class="runtime-task-title">检索索引构建<\/h4>/);
+  assert.match(summary,/runtime-task-status" data-status="completed">已完成/);
+  assert.match(summary,/任务 #index-12.*2026年09月10日 18:00:00/);
+  assert.match(summary,/阶段进度 100%/);
+  assert.doesNotMatch(summary,/等待前序|可核对的结果数量/);
 });
 
 test('durable task cards offer state-appropriate controls without reviving legacy closures',async()=>{
@@ -256,32 +272,45 @@ test('stale task discovery buttons cannot follow a different project, actor or r
   }
 });
 
-test('review menu is independent and does not own ingestion settings',async()=>{
+test('review opens a drawer over the current page and does not own ingestion settings',async()=>{
   const {context,get,calls,created}=fixture();
-  const page=created.find(e=>e.id==='tab-reviews'),nav=created.find(e=>e.dataset.tab==='reviews');
-  assert.ok(get('main').children.includes(page));
-  assert.match(page.children[0].innerHTML,/实体映射.*关系事实.*属性事实/);
-  nav.click();await new Promise(resolve=>setImmediate(resolve));
+  const drawer=created.find(e=>e.id==='knowledge-review-drawer');
+  assert.ok(context.document.body.children.includes(drawer));
+  assert.match(drawer.children[1].children[0].innerHTML,/实体映射.*关系事实.*属性事实/);
+  get('title').textContent='知识台账';
+  await context.window.TaskReview.open();
+  assert.equal(drawer.open,true);
   assert.ok(calls.includes('/api/projects/a/reviews'));
   assert.ok(!calls.includes('/api/jobs'));
-  assert.equal(get('title').textContent,'知识审核');
+  assert.equal(get('title').textContent,'知识台账');
   assert.ok(!calls.includes('/api/projects/a/ontology-change-proposals'));
   assert.deepEqual(context.readParseSettings(),{chunk_size:1800});
 });
 
-test('visible review page requests the new project exactly once on project change',async()=>{
-  const {context,get,calls,created}=fixture();
-  created.find(e=>e.dataset.tab==='reviews').click();
-  await new Promise(resolve=>setImmediate(resolve));
+test('project change closes the review drawer until review is explicitly reopened',async()=>{
+  const {context,get,calls}=fixture();
+  await context.window.TaskReview.open();
   context.current='b';
   get('project').onchange();
-  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(context.window.WorkspaceDrawers.active,null);
+  assert.equal(calls.filter(url=>url==='/api/projects/b/reviews').length,0);
+  await context.window.TaskReview.open();
   assert.equal(calls.filter(url=>url==='/api/projects/b/reviews').length,1);
 });
 
+test('a task can reopen its review drawer after the drawer is closed',async()=>{
+  const {context,get,calls}=fixture([],{job:{status:'completed',result:{pending_reviews:1}}});
+  await get('load-jobs').onclick();
+  const button=get('tasks').querySelectorAll('[data-open-review]')[0];
+  await button.click();
+  context.window.WorkspaceDrawers.close();
+  await button.click();
+  assert.equal(calls.filter(url=>url==='/api/projects/a/reviews').length,2);
+});
+
 test('missing ontology shows guidance instead of Not found',async()=>{
-  const {get,created}=fixture([],{noOntology:true});
-  created.find(e=>e.dataset.tab==='reviews').click();
+  const {context,get}=fixture([],{noOntology:true});
+  await context.window.TaskReview.open();
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/尚未发布本体/);
@@ -290,9 +319,9 @@ test('missing ontology shows guidance instead of Not found',async()=>{
 });
 
 test('old backend is clearly blocked before decisions are offered',async()=>{
-  const {context,get,created}=fixture(),api=context.api;
+  const {context,get}=fixture(),api=context.api;
   context.api=async url=>url==='/api/health'?{capabilities:[]}:api(url);
-  created.find(e=>e.dataset.tab==='reviews').click();
+  await context.window.TaskReview.open();
   await new Promise(resolve=>setImmediate(resolve));
   assert.match(get('relation-reviews').textContent,/旧版后端.*重启/);
 });
@@ -302,8 +331,8 @@ test('SHACL exception review names the failed constraint without requiring ontol
     reason:'本体约束异常',constraint:'MinCountConstraintComponent',path:'https://example.org/title',path_label:'title',
     message:'Less than 1 values',severity:'Violation',document_title:'原文.md',ontology_id:'ont',
     start_char:0,end_char:10,evidence:'规则正文',document_id:'doc',document_version:2};
-  const {get,created}=fixture([candidate]);
-  created.find(e=>e.dataset.tab==='reviews').click();
+  const {context,get}=fixture([candidate]);
+  await context.window.TaskReview.open();
   await new Promise(resolve=>setImmediate(resolve));
   get('review-view-exceptions').click();
   await new Promise(resolve=>setImmediate(resolve));
@@ -323,8 +352,8 @@ test('single-value attribute conflict offers keep-old and accept-new actions',as
     evidence:'甲数量2',document_id:'doc',document_version:3,entity_version:1,
     current_values:[{record_id:'old-count',value:1,datatype:'http://www.w3.org/2001/XMLSchema#integer',version:1}],
     conflict:{code:'attribute_max_count_one',current_values:[{record_id:'old-count',value:1,version:1}]}};
-  const {get,created}=fixture([candidate]);
-  created.find(e=>e.dataset.tab==='reviews').click();
+  const {context,get}=fixture([candidate]);
+  await context.window.TaskReview.open();
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/保留旧值\/拒绝候选/);
@@ -341,8 +370,8 @@ test('pending single-value conflict must be registered before replacement',async
     ontology_id:'ont',start_char:0,end_char:4,evidence:'甲数量2',document_id:'doc',
     document_version:2,entity_version:1,current_values:[{record_id:'old-count',value:1,version:1}],
     conflict:{code:'attribute_max_count_one',current_values:[{record_id:'old-count',value:1,version:1}]}};
-  const {get,created}=fixture([candidate]);
-  created.find(e=>e.dataset.tab==='reviews').click();
+  const {context,get}=fixture([candidate]);
+  await context.window.TaskReview.open();
   await new Promise(resolve=>setImmediate(resolve));
   const html=get('relation-reviews').innerHTML;
   assert.match(html,/普通批准只会登记冲突/);
@@ -357,6 +386,6 @@ test('active tasks are shown before history while preserving the order within ea
   const {get}=fixture([],{jobs});
   await get('load-jobs').onclick();
   const html=get('tasks').innerHTML;
-  const order=[...html.matchAll(/data-key="([a-z-]+)-stages"/g)].map(([,id])=>id);
+  const order=[...html.matchAll(/data-task-id="([a-z-]+)"/g)].map(([,id])=>id);
   assert.deepEqual(order,['first-running','second-running','next-queued','recent-failed','recent-completed','old-cancelled']);
 });

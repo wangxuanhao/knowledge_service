@@ -4,7 +4,51 @@
   get('ingest-back-sources').onclick=()=>window.KnowledgeTabs.open('sources');
   get('ingest-open-jobs').onclick=()=>showRuntimeView('jobs');
   const panel=get('scope'),details=get('cb-details');let trigger=null;
-  const inputs=['query-platforms','query-businesses','query-audiences'];
+  const dimensions=['platforms','businesses','audiences'];
+  let vocabulary={},vocabularyProject='',vocabularyRequest=0,vocabularyStatus='';
+  const picker=name=>get('query-'+name);
+  const selected=name=>Array.from(picker(name)?.querySelectorAll?.('input:checked')||[],input=>input.value);
+  function updatePicker(name){
+    const label=picker(name)?.querySelector?.('summary span');
+    if(!label)return;
+    const values=selected(name);
+    label.textContent=values.join('、')||'不限';
+    label.title=values.join('、');
+  }
+  function renderPickers(applicability){
+    for(const name of dimensions){
+      const options=picker(name)?.querySelector?.('.scope-choice-options');
+      if(!options)continue;
+      const checked=new Set(applicability?.[name]?.values||[]);
+      const values=new Set([...checked,...(vocabulary[name]||[])]);
+      options.replaceChildren();
+      for(const value of values){
+        const label=document.createElement('label'),input=document.createElement('input');
+        input.type='checkbox';input.value=value;input.checked=checked.has(value);
+        label.append(input,value);options.append(label);
+      }
+      if(vocabularyStatus||!values.size){
+        const message=document.createElement('small');message.textContent=vocabularyStatus||'当前项目没有可选值';options.append(message);
+      }
+      updatePicker(name);
+    }
+  }
+  async function loadVocabulary(){
+    if(!current)return;
+    const project=current,request=++vocabularyRequest;
+    const active=()=>request===vocabularyRequest&&project===current&&details.open;
+    const draft=()=>window.ApplicabilityUI?.readQueryScope?.().applicability;
+    const draftBefore=draft();vocabularyStatus='正在读取项目选项…';renderPickers(draftBefore);
+    try{
+      const values=await api(endpoint('/applicability-values'),undefined,'GET');
+      if(!active())return;
+      vocabulary=values||{};vocabularyStatus='';
+    }catch{
+      if(!active())return;
+      vocabularyStatus='选项读取失败，请关闭后重新打开筛选';
+    }
+    renderPickers(draft());
+  }
   function timeControls(){
     const mode=get('scope-time-mode').value;
     get('scope-valid-at-field').hidden=mode!=='at';get('scope-valid-at').disabled=mode!=='at';
@@ -29,9 +73,7 @@
     }
     if(page==='qa'){
       const heading=query('.qa-page-heading');
-      if(heading&&typeof heading.querySelector==='function'){
-        const actions=heading.querySelector('.qa-page-actions');
-        actions?heading.insertBefore(panel,actions):heading.append(panel);return;}
+      if(heading){heading.append(panel);return;}
     }
     tab.prepend(panel);
   }
@@ -39,9 +81,15 @@
     const page=context.page,allowed=context.isContentPage(page);
     panel.classList.toggle('hidden',!allowed);details.open=false;
     const purpose=get('scope-purpose-controls');if(purpose)purpose.hidden=page!=='search';
+    const shared=page==='search'||page==='qa';
+    get('scope-heading').textContent=shared?'检索与问答范围':'资料筛选';
+    get('scope-applicability-help').textContent=shared?'从当前项目的已有值中多选。应用后，检索与问答共用这些条件。':'从当前项目的已有值中选择，可多选。';
     if(allowed&&!window.GraphWorkspaceLayout?.placeScope(panel))placePanel(page);
-    const value=context.read(current),app=value.applicability||{};
-    inputs.forEach((id,i)=>{const dimension=app[['platforms','businesses','audiences'][i]];get(id).value=(dimension?.values||[]).join('，');});
+    const value=context.read(current);
+    if(vocabularyProject!==current){vocabularyProject=current;vocabulary={};}
+    vocabularyStatus=current?'':'请先选择项目';
+    for(const name of dimensions)picker(name).open=false;
+    renderPickers(value.applicability);
     const time=window.TemporalScope.restore(value);
     get('known-at').value=value.known_at||'';get('scope-known-at').value=time.knownAt;get('scope-valid-at').value=time.validAt;
     get('scope-time-mode').value=time.mode;get('scope-include-unknown').checked=time.includeUnknown;timeControls();
@@ -59,7 +107,9 @@
     const time=window.TemporalScope.capture({mode:get('scope-time-mode').value||'all',validAt:get('scope-valid-at').value,
       knownAt:get('scope-known-at').value,includeUnknown:get('scope-include-unknown').checked},()=>new Date(),applied);
     for(const key of ['ontology_scope','ontology_ids','kinds'])if(applied[key]!==undefined)preserved[key]=applied[key];
-    return {...preserved,...time,filters:filters?JSON.parse(filters):null,...(window.ApplicabilityUI?.readQueryScope?.()||{})};
+    const queryScope=window.ApplicabilityUI?.readQueryScope?.()||{};
+    if(Object.values(queryScope.applicability||{}).some(dimension=>dimension.values.length>64))throw Error('每个适用范围最多选择 64 个值');
+    return {...preserved,...time,filters:filters?JSON.parse(filters):null,...queryScope};
   }
   function changed(){
     details.open=false;renderChips();
@@ -71,12 +121,18 @@
     const host=get('applied-scope-chips');if(!host)return;host.replaceChildren();
     const value=context.read(current),parts=[];
     for(const [key,label] of [['platforms','平台'],['businesses','业务'],['audiences','对象']]){const values=value.applicability?.[key]?.values;if(values?.length)parts.push({label:label+'：'+values.join('、'),key});}
-    if(value.valid_at)parts.push({label:'业务时点（固定）：'+value.valid_at+' · '+(value.include_unknown===false?'不含生效时间未知':'含生效时间未知'),key:'valid_at'});
-    if(value.known_at)parts.push({label:'系统修订时点：'+value.known_at,key:'known_at'});
+    if(value.valid_at)parts.push({label:'业务时点（固定）：'+window.DisplayTime.format(value.valid_at)+' · '+(value.include_unknown===false?'不含生效时间未知':'含生效时间未知'),key:'valid_at'});
+    if(value.known_at)parts.push({label:'系统修订时点：'+window.DisplayTime.format(value.known_at),key:'known_at'});
     if(value.filters)parts.push({label:'更多字段 '+window.ScopeFields.countConditions(value.filters)+' 项',key:'filters'});
-    for(const item of parts){const button=document.createElement('button');button.type='button';button.className='applied-scope-chip secondary';button.textContent=item.label+' ×';button.onclick=()=>{if(['platforms','businesses','audiences'].includes(item.key)){delete value.applicability[item.key];}else{value[item.key]=null;if(item.key==='valid_at')value.include_unknown=true;}store.edit(current,context.page,value);store.apply(current,context.page);restore();changed();};host.append(button);}
+    if(context.page==='qa'){
+      const label=document.createElement('span');label.className='qa-scope-project';
+      const projectName=String(get('project').selectedOptions?.[0]?.textContent||'当前项目').trim();
+      label.textContent=current?projectName+(parts.length?'':' · 全部资料'):'请选择项目';
+      host.append(label);
+    }
+    for(const item of parts){const button=document.createElement('button');button.type='button';button.className='applied-scope-chip secondary';button.textContent=item.label+' ×';button.title=item.label;button.onclick=()=>{if(dimensions.includes(item.key)){delete value.applicability[item.key];}else{value[item.key]=null;if(item.key==='valid_at')value.include_unknown=true;}store.edit(current,context.page,value);store.apply(current,context.page);restore();changed();};host.append(button);}
     get('scope-time-applied').textContent='已应用：'+window.TemporalScope.describe(value);
-    get('scope-toggle').textContent='筛选'+(parts.length?' · '+parts.length:'');
+    get('scope-toggle').textContent=(context.page==='qa'?'问答范围':'筛选')+(parts.length?' · '+parts.length:'');
     get('scope-toggle').setAttribute('aria-expanded',String(details.open));
   }
   function positionPanel(){
@@ -89,12 +145,13 @@
     Object.assign(details.style,{position:'fixed',left:left+'px',right:'auto',top:top+'px',
       width:width+'px',maxHeight:Math.max(0,height-top-12)+'px'});
   }
-  get('scope-toggle').onclick=()=>{if(details.open){details.open=false;restore();}else{restore();details.open=true;trigger=get('scope-toggle');positionPanel();get('query-platforms').focus();}renderChips();};
+  get('scope-toggle').onclick=()=>{if(details.open){restore();}else{restore();details.open=true;trigger=get('scope-toggle');positionPanel();picker('platforms')?.querySelector?.('summary')?.focus();void loadVocabulary();}renderChips();};
   window.addEventListener?.('resize',positionPanel);
   get('scope-close').onclick=()=>{restore();trigger?.focus();};
   details.addEventListener('toggle',()=>get('scope-toggle').setAttribute('aria-expanded',String(details.open)));
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&details.open){restore();trigger?.focus();}});
   get('project').addEventListener('change',restore);
   get('scope-time-mode').addEventListener('change',timeControls);
+  for(const name of dimensions)picker(name).addEventListener('change',()=>updatePicker(name));
   context.register({restore,apply,reset});
 })();

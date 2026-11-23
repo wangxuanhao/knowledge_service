@@ -1,6 +1,7 @@
 """Owned staging and explicit parse/publication application workflow."""
 from copy import deepcopy
 from contextlib import nullcontext
+from functools import cache
 import base64
 import hashlib
 import html
@@ -10,6 +11,7 @@ import os
 import posixpath
 from pathlib import Path
 import re
+from stat import S_ISDIR, S_ISREG
 import zipfile
 from uuid import uuid4
 from importlib.metadata import version,PackageNotFoundError
@@ -77,8 +79,7 @@ def options(raw):
     return value
 
 
-def fingerprint(digest,name,config):
-    """Business metadata and chunk settings never enter the parse identity."""
+def _parser_runtime():
     root=Path(__file__).resolve().parents[1]
     code=['integrations/document_parser.py','integrations/document_package.py','integrations/image_ocr.py',
           'integrations/video_asr.py','services/source_ingest.py','services/image_ocr.py','services/video_asr.py',
@@ -103,11 +104,33 @@ def fingerprint(digest,name,config):
     for key,value in model_config.items():
         if key.endswith(('_PATH','_DIR','_ROOT','_CONFIG')):
             path=Path(value)
-            if path.is_file():artifacts[key]=(path.stat().st_size,path.stat().st_mtime_ns)
-            elif path.is_dir():
-                artifacts[key]=[(str(p.relative_to(path)),p.stat().st_size,p.stat().st_mtime_ns) for p in sorted(path.rglob('*')) if p.is_file() and p.suffix.lower() in ('.onnx','.json','.yaml','.yml','.pt','.pth','.bin','.txt','.safetensors')]
-    effective_config={'ocr_mode':config.get('ocr_mode',os.getenv('KG_DOCUMENT_OCR_MODE','auto'))}
+            try:
+                info = path.stat()
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            if S_ISREG(info.st_mode):
+                artifacts[key] = (info.st_size, info.st_mtime_ns)
+            elif S_ISDIR(info.st_mode):
+                model_files = []
+                extensions = {'.onnx', '.json', '.yaml', '.yml', '.pt', '.pth', '.bin', '.txt', '.safetensors'}
+                for child in sorted(path.rglob('*')):
+                    if child.suffix.lower() not in extensions:
+                        continue
+                    try:
+                        entry = child.stat()
+                    except (FileNotFoundError, NotADirectoryError):
+                        continue
+                    if S_ISREG(entry.st_mode):
+                        model_files.append((str(child.relative_to(path)), entry.st_size, entry.st_mtime_ns))
+                artifacts[key] = model_files
     model_config.pop('KG_DOCUMENT_OCR_MODE',None)
+    return versions, model_config, runtime, artifacts
+
+
+def fingerprint(digest, name, config, parser_runtime=None):
+    """Business metadata and chunk settings never enter the parse identity."""
+    versions, model_config, runtime, artifacts = (parser_runtime or _parser_runtime)()
+    effective_config={'ocr_mode':config.get('ocr_mode',os.getenv('KG_DOCUMENT_OCR_MODE','auto'))}
     return hashlib.sha256(encoded([digest,Path(name).suffix.lower(),effective_config,versions,model_config,runtime,artifacts]).encode()).hexdigest()
 
 
@@ -153,7 +176,8 @@ class Preparations:
 
     def list(self,project,owner):
         self.service.data.get_project(project)
-        return {'items':[self.public(s) for s in self.store.list(project,owner)]}
+        parser_runtime = cache(_parser_runtime)
+        return {'items':[self.public(s, parser_runtime=parser_runtime) for s in self.store.list(project,owner)]}
 
     def _get(self,project,identifier,owner):
         self.service.data.get_project(project)
@@ -179,16 +203,12 @@ class Preparations:
             self.store.save(session)
             return self.public(session)
 
-    def public_item(self,item):
-        value=deepcopy(item)
-        value.pop('upload_key',None)
-        value.pop('upload_request',None)
-        value.pop('published_snapshot',None)
-        value.pop('task_id',None)
-        value.pop('source_result',None)
-        value.pop('cancelled_task_id',None)
+    def public_item(self,item,parser_runtime=None):
+        private_fields = {'upload_key', 'upload_request', 'published_snapshot', 'task_id',
+                          'source_result', 'cancelled_task_id'}
+        value = {key: deepcopy(val) for key, val in item.items() if key not in private_fields}
         value.update(progress=None,started_at=None,heartbeat_at=None,error=item.get('error'),stage=item.get('status','staged'),result_ready=False)
-        task=self.store.task(item['task_id']) if item.get('task_id') else None
+        task=self.store.task_status(item['task_id']) if item.get('task_id') else None
         value['parse_task_id']=task['id'] if task else None
         if task and task['fingerprint']==item['parser_fingerprint'] and item['status'] not in ('cancelled','stale','published'):
             value.update(status='reused' if item['status']=='reused' and task['status']=='completed' else task['status'],
@@ -207,10 +227,10 @@ class Preparations:
         value['reusable']=bool(task and task['status']=='completed' and task['fingerprint']==item['parser_fingerprint'])
         value['existing_documents']=self.store.existing_documents(item['project_id'],item['file_sha256']) if item.get('project_id') else []
         if item['status']=='cancelled' and item.get('cancelled_task_id'):
-            cancelled=self.store.task(item['cancelled_task_id'])
+            cancelled=self.store.task_status(item['cancelled_task_id'])
             if cancelled and cancelled['status']=='cancelling':value.update(status='cancelling',stage='cancelling')
         if not task and item.get('project_id'):
-            cached=self.store.find_task(item['project_id'],item['parser_fingerprint'])
+            cached=self.store.find_task_status(item['project_id'],item['parser_fingerprint'])
             value['reusable']=bool(cached and cached['status']=='completed' and not recognition_error(cached.get('result')))
             value['existing_task_status']=cached['status'] if cached else None
         error=recognition_error(task.get('result')) if task else None
@@ -222,14 +242,16 @@ class Preparations:
         # completed task may belong to a parser/model version replaced since then.
         if (value['status'] not in ('published','queued','running','cancelling','cancelled')
                 and (value['reusable'] or value['status'] in ('completed','reused','failed','stale'))
-                and fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'])!=item['parser_fingerprint']):
+                and fingerprint(item['file_sha256'],item['original_name'],item['options']['parse_config'],
+                                parser_runtime)!=item['parser_fingerprint']):
             value.update(status='stale',stage='stale',result_ready=False,reusable=False,
                 error='解析器或模型已变化，请重新解析此文件。')
         return value
 
-    def public(self,session):
-        value={key:deepcopy(val) for key,val in session.items() if key!='operations'}
-        value['items']=[self.public_item(item) for item in session['items']]
+    def public(self,session,*,parser_runtime=None):
+        parser_runtime = parser_runtime or cache(_parser_runtime)
+        value={key:deepcopy(val) for key,val in session.items() if key not in {'operations','items'}}
+        value['items']=[self.public_item(item,parser_runtime) for item in session['items']]
         return value
 
     def upload(self,project,identifier,owner,upload,raw,key):
@@ -377,7 +399,7 @@ class Preparations:
             # Keep bytes while another shared task may depend on them; expiry reclaims them.
             return self.public(session)
 
-    def result(self,project,identifier,owner,item_id):
+    def result(self,project,identifier,owner,item_id,*,include_document_details=False):
         session=self._get(project,identifier,owner)
         item=self.item(session,item_id)
         task=self.store.task(item.get('task_id')) if item.get('task_id') else None
@@ -388,17 +410,37 @@ class Preparations:
         error=recognition_error(task.get('result'))
         if error:raise PreparationConflict('附件识别未完成，不能入库：'+(error.get('message') or error['code']))
         result=deepcopy(task['result'])
-        source=self.sources.get(project,result['source_version_id'])
+        item_options=item['options']
+        title=item_options.get('title') or item['original_name']
+        source_version_id=result['source_version_id']
+        source=self.sources.get(project,source_version_id) if include_document_details else None
         # Rechunk from immutable native blocks and saved media receipts only.
-        # This path cannot invoke process_asset, OCR, ASR or the document parser.
-        if result.get('chunk_settings')!={k:item['options'][k] for k in ('chunk_size','chunk_overlap','chunk_strategy')}:
-            # Source processing fetches cached media receipts; it never repeats model work.
+        chunk_settings={k:item_options[k] for k in ('chunk_size','chunk_overlap','chunk_strategy')}
+        if result.get('chunk_settings')!=chunk_settings:
             from .source_ingest import prepare_source_ingest
-            chunk_options={**item['options'],'title':item['options'].get('title') or item['original_name']}
-            chunks,text,warnings=prepare_source_ingest(self.sources,project,source,chunk_options,cached_only=True)
-            combined=list(result.get('warnings',[]))
-            combined.extend(w for w in warnings if w not in combined)
-            result.update(chunks=chunks,text=text,warnings=combined[:100])
+            chunk_options={**item_options,'title':title}
+
+            def build():
+                frozen=source if source is not None else self.sources.get(project,source_version_id)
+                chunks,text,warnings=prepare_source_ingest(self.sources,project,frozen,chunk_options,cached_only=True)
+                combined=list(result.get('warnings',[]))
+                combined.extend(w for w in warnings if w not in combined)
+                return dict(chunks=chunks,text=text,warnings=combined[:100],chunk_settings=chunk_settings)
+
+            result.update(self.store.rechunk_result(item['id'],source_version_id,item['chunk_version'],build))
+            if (result.get('vectorization') or {}).get('status')=='ready':
+                result['vectorization']=dict(status='pending')
+        if source is not None:
+            from .document_temporal import document_time_preview, source_temporal_exclusions
+            first_block=next((block for block in source['blocks'] if block['normalized_text'].strip()),None)
+            if first_block and first_block['type']=='heading' and first_block['payload'].get('level')==1:
+                result['source_title']=first_block['normalized_text'].strip()
+            excluded_ranges=()
+            if item_options.get('document_time_mode')=='auto':
+                excluded_ranges=source_temporal_exclusions(source,chunks=result['chunks'])
+            result['title']=title
+            result['document_time']=document_time_preview(
+                result['text'],{**item_options,'title':title},excluded_ranges=excluded_ranges)
         result.update(parser_fingerprint=item['parser_fingerprint'],chunk_version=item['chunk_version'])
         result['parse_task_id']=task['id']
         return result

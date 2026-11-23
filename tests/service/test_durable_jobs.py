@@ -1,7 +1,12 @@
 import time
 from threading import Event
 
+from fastapi.testclient import TestClient
+
+from knowledge_service.api import create_app
+from knowledge_service.integrations.embeddings import HashingEncoder
 from knowledge_service.repository import Repository
+from knowledge_service.repository.pg_engine import SqliteishConnection
 from knowledge_service.services.jobs import Jobs
 
 
@@ -13,6 +18,47 @@ def wait_job(repo, task_id, status):
             return task
         time.sleep(.02)
     raise AssertionError(task)
+
+
+def test_global_job_list_reads_only_latest_receipts(tmp_path, monkeypatch):
+    app = create_app(tmp_path / 'recent-jobs', encoder=HashingEncoder(), auth_disabled=True)
+    repo = app.state.service.repository
+    first = repo.create_project('First')['id']
+    second = repo.create_project('Second')['id']
+    projects = (first, second, None)
+    statuses = ('completed', 'queued', 'running', 'retry_wait', 'failed', 'cancelled')
+    jobs = []
+    for index in range(123):
+        job = {'id': f'job-{index}', 'kind': 'ingest', 'project_id': projects[index % 3],
+               'status': statuses[index % 6], 'logs': [f'log {index}']}
+        if index % 2:
+            job['payload'] = {'text': f'input {index}'}
+        repo.save_artifact('job', job)
+        jobs.append(job)
+    repo.save_artifact('snapshot', {'id': 'different-kind', 'project_id': first})
+    repo.save_artifact('job', {**jobs[0], 'status': 'running'})
+
+    received_rows = []
+    execute = SqliteishConnection.execute
+
+    def track_job_select(connection, sql, params=()):
+        cursor = execute(connection, sql, params)
+        if sql.lstrip().lower().startswith('select') and 'from artifacts' in sql.lower():
+            received_rows.append(cursor.rowcount)
+        return cursor
+
+    monkeypatch.setattr(SqliteishConnection, 'execute', track_job_select)
+    # Avoid starting workers so the mixed test statuses remain stable.
+    client = TestClient(app)
+    response = client.get('/api/jobs')
+    assert response.status_code == 200
+    assert response.json() == {'jobs': jobs[-100:][::-1]}
+    assert received_rows == [100]
+
+    scoped = client.get(f'/api/projects/{first}/jobs')
+    assert scoped.status_code == 200
+    expected = [{**jobs[0], 'status': 'running'}, *jobs[3::3]]
+    assert scoped.json() == {'jobs': expected[::-1]}
 
 
 def test_new_worker_recovers_persisted_queued_input(tmp_path):

@@ -46,14 +46,14 @@ function snapshotFixture(){
   get('project').onchange=()=>{context.current=get('project').value;};get('project').value='A';
   get('tab-runtime').className='hidden';get('tab-evaluation').className='hidden';
   const document={body:new Element(),createElement:()=>new Element(),getElementById:get,querySelector:()=>null,dispatchEvent(){}};
-  const context=vm.createContext({window:{RuntimeView:{current:'overview',on(){}}},document,$:get,current:'A',scope:()=>({}),CustomEvent:class{},
+  const context=vm.createContext({window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),RuntimeView:{current:'overview',on(){}}},document,$:get,current:'A',scope:()=>({}),CustomEvent:class{},
     Blob,URL:{createObjectURL:()=> 'blob:project',revokeObjectURL(){}},
     endpoint:suffix=>'/api/projects/'+context.current+suffix,status:(...args)=>messages.push(args),bind:(id,fn)=>{get(id).onclick=fn;},
     esc:value=>String(value),api:async(url,body,method)=>{calls.push({url,body,method});if(method==='GET'){const result=deferred();reads.push(result);return result.promise;}return restoreResponse();}});
   vm.runInContext(workbench.slice(0,workbench.indexOf('let dashboardRequest='))+workbench.slice(workbench.indexOf('async function snapshots('),workbench.indexOf("$('eval-load-example').onclick")),context);
   return {context,get,calls,messages,reads,cards,downloads,load:()=>context.snapshots(),respondRestore(fn){restoreResponse=fn;},
     switch(project,visible=false){get('tab-runtime').className=visible?'':'hidden';get('tab-evaluation').className=visible?'':'hidden';context.window.RuntimeView.current=visible?'snapshots':'overview';get('project').value=project;get('project').onchange();},
-    resolve(index,name){reads[index].resolve({snapshots:[{id:name,name,created_at:'2026-11-01T12:00:00Z'}]});}};
+    resolve(index,name,next_cursor=null){reads[index].resolve({snapshots:[{id:name,name,created_at:'2026-11-01T12:00:00Z'}],next_cursor});}};
 }
 
 test('logical export reports its scope and drops stale project responses',async()=>{
@@ -72,8 +72,19 @@ test('project switch clears snapshot cards immediately and does not read a hidde
   const env=snapshotFixture();const loading=env.load();env.resolve(0,'old-A');await loading;
   env.switch('B');assert.equal(env.get('snapshot-cards').textContent,'');
   assert.equal(env.get('snapshot-cards').innerHTML,'');assert.equal(env.calls.length,1);
-  env.switch('C',true);assert.equal(env.calls.length,2);assert.equal(env.calls[1].url,'/api/projects/C/snapshots');
+  env.switch('C',true);assert.equal(env.calls.length,2);assert.equal(env.calls[1].url,'/api/projects/C/snapshots?limit=32');
   env.resolve(1,'C');await settle();
+});
+
+test('loading older snapshots appends their restore cards and ends pagination',async()=>{
+  const env=snapshotFixture(),loading=env.load();env.resolve(0,'fresh',41);await loading;
+  const more=env.get('load-older-snapshots');
+  assert.equal(more.hidden,false);
+  const next=more.onclick();
+  assert.equal(env.calls[1].url,'/api/projects/A/snapshots?limit=32&before=41');
+  env.resolve(1,'older');await next;
+  assert.deepEqual(env.cards.map(item=>item.button.dataset.snapshotRestore),['fresh','older']);
+  assert.equal(more.hidden,true);
 });
 
 test('snapshot reads discard old A after A to B to A and earlier reads of the same project',async()=>{
@@ -172,7 +183,7 @@ test('a completed restore never updates a different project generation after an 
   assert.equal(env.messages.length,0);assert.equal(env.reads.length,1);
 });
 
-function projectsFixture(){
+function projectsFixture(current='A'){
   const nodes=new Map(),overlays=[],calls=[],messages=[];let activeElement=null;
   class Element{
     constructor(){this.children=[];this.dataset={};this.value='';this.textContent='';this.disabled=false;this.hidden=false;this.className='';this.classList={add(){},remove(){}};}
@@ -188,12 +199,27 @@ function projectsFixture(){
   const get=id=>{if(!nodes.has(id))nodes.set(id,new Element());return nodes.get(id);};
   const document={body:new Element(),createElement:()=>new Element(),addEventListener(){},removeEventListener(){}};
   let fail=false;
-  const context=vm.createContext({window:{Auth:{whenReady:async()=>{}},WorkspaceContext:{projectPayload:name=>({name})}},document,$:get,current:'A',
+  const context=vm.createContext({window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),Auth:{whenReady:async()=>{}},WorkspaceContext:{projectPayload:name=>({name})}},document,$:get,current,
     requestAnimationFrame:fn=>fn(),setTimeout:fn=>fn(),esc:value=>String(value),projects:async()=>{},status:(...args)=>messages.push(args),
-    api:async(url,body,method)=>{calls.push({url,body,method});if(fail)throw Error('服务暂不可用，请重试');return {projects:[{id:'A',name:'原名称'}]};}});
+    api:async(url,body,method)=>{calls.push({url,body,method});if(fail)throw Error('服务暂不可用，请重试');
+      if(method==='DELETE')return {deleted:{records:3},cleaned:{milvus:false,neo4j:false},cleanup_queued:true};
+      return {projects:[{id:'A',name:'原名称'}]};}});
   vm.runInContext(read('projects-view.js'),context);
   return {context,get,overlays,calls,messages,rename,fail(){fail=true;},active:()=>activeElement};
 }
+
+test('project deletion returns after the authoritative write and shows queued cleanup',async()=>{
+  const env=projectsFixture('B');await env.context.window.ProjectsView.refresh();env.rename.onclick();
+  const actions=env.overlays[0].innerHTML.match(/<div class="project-settings-links">([\s\S]*?)<\/div>/)?.[1]||'';
+  assert.deepEqual([...actions.matchAll(/id="([^"]+)"/g)].map(([,id])=>id),
+    ['project-index-config','project-overview','project-backup','project-remove']);
+  env.overlays[0].querySelector('#project-remove').onclick();
+  const confirmation=env.overlays[1];confirmation.querySelector('#projects-delete-input').value='原名称';
+  assert.equal(env.calls.some(({method})=>method==='DELETE'),false);
+  await confirmation.querySelector('#projects-delete-confirm-btn').onclick();
+  assert.equal(env.calls.find(({method})=>method==='DELETE').url,'/api/projects/A?defer_cleanup=true');
+  assert.match(env.messages.at(-1)[0],/项目已删除.*派生投影已排队清理/);
+});
 
 for(const mode of ['create','settings'])test(mode+' validation and network errors remain inside the dialog with fields intact',async()=>{
   const env=projectsFixture();if(mode==='create')env.context.window.ProjectsView.create();else{await env.context.window.ProjectsView.refresh();env.rename.onclick();}

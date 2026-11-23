@@ -104,7 +104,7 @@ def test_save_success_with_refresh_failure_is_not_reported_as_save_failure(edit_
 def test_revision_timeline_distinguishes_unreadable_ontology_from_unknown(edit_page):
     edit_page.evaluate(r'''() => {
       const previous=window.fetch;
-      window.fetch=async(input,options)=>String(input).endsWith('/ontologies')
+      window.fetch=async(input,options)=>String(input).endsWith('/ontologies?metadata_only=true')
         ?new Response('{"error":"unavailable"}',{status:500}):previous(input,options);
       window.historyFor(window.timelineRecord);
     }''')

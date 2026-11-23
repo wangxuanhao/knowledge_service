@@ -17,6 +17,23 @@ test('project cards stay idle at startup and still load on project page entry',a
   assert.equal(env.calls.length,1);assert.match(get('projects-root').innerHTML,/项目管理/);
 });
 
+test('project cards show Beijing time to the second and a fallback for missing dates',async()=>{
+  const env=fixture(),{context,get}=env;
+  get('tab-projects').className='hidden';
+  context.window.Auth={whenReady:()=>Promise.resolve()};
+  context.api=async()=>({projects:[
+    {id:'p',name:'项目一',created_at:'2026-11-02T06:30:24.524765Z'},
+    {id:'q',name:'项目二'},
+  ]});
+  vm.runInContext(web('projects-view.js'),context);
+  get('tab-projects').className='';
+  await context.window.ProjectsView.refresh();
+  const html=get('projects-root').innerHTML;
+  assert.match(html,/创建于 2026年11月02日 14:30:24/);
+  assert.match(html,/创建于 —/);
+  assert.doesNotMatch(html,/T06:30|524765|Invalid Date/);
+});
+
 test('explicit project management refresh waits for authentication without an eager startup read',async()=>{
   const env=fixture(),{context}=env,auth=deferred();
   context.window.Auth={whenReady:()=>auth.promise};
@@ -113,6 +130,34 @@ test('real runtime section changes invalidate a prior jobs visit before reopenin
   assert.match(labels,/完成/);assert.doesNotMatch(labels,/处理中/);
 });
 
+test('runtime batch summaries lead with the processing mode and keep file progress and the detail link',async()=>{
+  const env=batches(),opened=[];
+  env.batch.id='batch-123456';env.batch.settings={extraction_mode:'documents'};
+  env.batch.created_at='2026-11-23T01:00:00Z';env.batch.total_items=3;
+  env.batch.counts={completed:1,running:1,needs_attention:1};
+  env.context.window.LibraryWorkspace.openBatch=async options=>opened.push(options);
+  env.jobs();await env.api.loadRecent();
+  const host=env.get('ingest-batch-tasks'),nodes=env.descendants(host);
+  assert.equal(nodes.find(node=>node.className==='runtime-task-title').textContent,'仅文档检索');
+  assert.equal(nodes.find(node=>node.className==='runtime-task-meta').textContent,'批次 #batch-12 · 2026年11月23日 09:00:00');
+  const progress=nodes.find(node=>node.tagName==='progress');
+  assert.equal(progress.max,3);assert.equal(progress.value,2);
+  assert.ok(nodes.some(node=>node.textContent==='已结束 2 / 3 个文件'));
+  await nodes.find(node=>node.textContent==='查看批次详情').onclick();
+  assert.equal(opened[0].projectId,'p');assert.equal(opened[0].batchId,'batch-123456');
+  assert.equal(env.calls.length,1);
+});
+
+test('runtime batch list distinguishes an empty project from a failed read',async()=>{
+  const env=batches();env.jobs();
+  env.respond(async()=>({items:[]}));await env.api.loadRecent();
+  const labels=()=>env.descendants(env.get('ingest-batch-tasks')).map(node=>node.textContent).join(' ');
+  assert.match(labels(),/当前项目暂无文档批次/);
+  env.respond(async()=>{throw Error('服务暂不可用');});await env.api.loadRecent();
+  assert.match(labels(),/批次列表读取失败.*服务暂不可用/);
+  assert.doesNotMatch(labels(),/当前项目暂无文档批次/);
+});
+
 for(const surface of ['jobs','drawer'])test(surface+' batch summaries do not fan out to details or items',async()=>{
   const env=batches();env[surface]();await env.api.loadRecent();await settle();
   assert.deepEqual(env.calls.map(call=>call.url),['/api/projects/p/ingest-batches?limit=20']);
@@ -130,11 +175,34 @@ test('concurrent visible batch list reads share one request and failed reads can
 });
 
 test('selecting a summary in an open drawer reads details without reloading the list',async()=>{
-  const env=batches();env.drawer();await env.api.loadRecent();
+  const env=batches();env.drawer();
+  env.respond(async url=>url.endsWith('?limit=20')?{items:[env.batch]}:
+    url.includes('/items?')?{items:[{status:'running',original_name:'规则.md',stage:'reusing_chunks',progress:10}]}:env.batch);
+  await env.api.loadRecent();
   const view=env.descendants(env.get('ingest-batches')).find(node=>node.textContent==='查看批次详情');
   await view.onclick();await settle();
   assert.equal(env.calls.filter(call=>call.url.endsWith('?limit=20')).length,1);
   assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,1);
+  const stage=env.descendants(env.get('ingest-batches')).find(node=>node.className==='batch-file-stage');
+  assert.equal(stage.textContent,'当前阶段：复用已解析切片 · 10%');
+});
+
+test('a document link polls its exact file and can return to the full batch',async()=>{
+  const env=batches();
+  env.drawer();
+  env.respond(async url=>url.includes('item_id=file-on-later-page')?
+    {items:[{id:'file-on-later-page',status:'running',original_name:'目标资料.md',stage:'ocr',progress:42}]}:
+    url.includes('/items?')?{items:[{id:'other',status:'queued',original_name:'同批其他文件.md'}]}:env.batch);
+  env.api.monitor('p',{id:'b'},{itemId:'file-on-later-page'});
+  await settle();
+  const nodes=()=>env.descendants(env.get('ingest-batches'));
+  assert.ok(env.calls.some(call=>call.url.includes('item_id=file-on-later-page')));
+  assert.ok(nodes().some(node=>node.textContent==='目标资料.md'));
+  assert.ok(nodes().some(node=>node.textContent==='当前阶段：图像识别 · 42%'));
+  await nodes().find(node=>node.textContent==='查看本批全部文件').onclick();
+  assert.ok(nodes().some(node=>node.textContent==='同批其他文件.md'));
+  env.drawer(false);
+  assert.equal(env.timers.size,0);
 });
 
 test('expanding and reloading a batch keeps its files inside a single batch card',async()=>{

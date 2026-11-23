@@ -114,8 +114,7 @@
     host.dataset.state = s.status;
     host.append(headline);
     if (s.release) {
-      const date = new Date(s.release.created_at);
-      const time = Number.isNaN(date.getTime()) ? s.release.created_at || '未知' : date.toLocaleString('zh-CN', {hour12: false});
+      const time = window.DisplayTime.format(s.release.created_at, '未知');
       host.append(node('p', '发布时间：' + time));
       host.append(node('p', '提交后固定使用此版本；可刷新以获取最新发布版本。'));
       if (s.release.note) host.append(node('p', '发布说明：' + s.release.note));

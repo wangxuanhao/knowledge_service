@@ -58,7 +58,7 @@
     // excerpt_before / excerpt_after stay local; this path never fetches current state.
     const frozen=frozenSourceDocument(excerpt);if(frozen)openSource(frozen);
   };
-  function localTime(value){if(!value)return '未记录';const d=new Date(value);return Number.isNaN(d.valueOf())?value:d.toLocaleString('zh-CN',{hour12:false});}
+  function localTime(value){return window.DisplayTime.format(value,'未记录');}
   const typeHint=type=>{const primary=labelOf(type),local=term(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   window.renderEvidenceInspector=async(row,options,{scope:fixedScope}={})=>{
     attributePanel?.dispose();attributePanel=null;
@@ -112,7 +112,7 @@
       note.textContent=`当前治理视角：${governance.state==='pending'?'结构待定':'待定已解除'}（按当前本体判断，不代表已迁移或通过绑定本体校验）。`;
       version.after(note);
     }
-    api(endpoint('/ontologies'),undefined,'GET').then(result=>{
+    api(endpoint('/ontologies?metadata_only=true'),undefined,'GET').then(result=>{
       if(accepts()){
         version.textContent=RecordVersionContext.summary(row,RecordVersionContext.build(result.versions||[]));
         version.title='普通编辑只增加知识修订；本体归属由每次修订保存的本体发布标识确定。';

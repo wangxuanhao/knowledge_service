@@ -1,9 +1,9 @@
 /* Shared, inert date and evidence summary for previews and saved documents. */
 (function(root,factory){
-  const api=factory();
+  const api=factory(typeof module==='object'&&module.exports?require('./display-time.js'):root.DisplayTime);
   if(typeof module==='object'&&module.exports)module.exports=api;
   else root.DocumentTemporalUI=api;
-})(typeof window==='object'?window:globalThis,()=>{
+})(typeof window==='object'?window:globalThis,displayTime=>{
   const labels={published_at:'原文发布时间',valid_from:'业务生效',valid_until:'业务失效',revised_at:'原文修订时间'};
   const statuses={manual:'手工填写',extracted:'正文识别',unknown:'来源未知',review:'待核验'};
   const effectiveSources={explicit:'手工填写',extracted:'正文识别'};
@@ -26,13 +26,10 @@
   const escape=value=>text(value).replace(/[&<>"']/g,char=>({
     '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;',
   }[char]));
-  const formatter=new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',
-    day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'});
   function dateLabel(value){
     if(value===null||value===undefined||value==='')return '';
     if(typeof value!=='string'&&typeof value!=='number')return text(value);
-    const date=new Date(value);
-    return Number.isFinite(date.getTime())?formatter.format(date):text(value);
+    return displayTime.format(value,text(value));
   }
   function position(candidate){
     const start=candidate?.start_char,end=candidate?.end_char;
@@ -82,7 +79,7 @@
       rows.push('<p>待核验 · '+escape(warningLabel(warning))+'</p>');
     }
     const basis=details.length?'<details class="source-technical"><summary>识别依据</summary>'+details.join('')+'</details>':'';
-    return '<div class="source-meta__mapping"><h4>文档时间 · Asia/Shanghai</h4>'+rows.join('')+basis+'</div>';
+    return '<div class="source-meta__mapping"><h4>文档时间 · 北京时间</h4>'+rows.join('')+basis+'</div>';
   }
   return {render};
 });

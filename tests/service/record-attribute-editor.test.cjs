@@ -81,7 +81,7 @@ function dialogHarness(overrides={}){
     endpoint:p=>'/p'+p,api:async(url,data,method)=>{
       calls.push({url,data,method});
       if(method==='PUT')return fixture.save?fixture.save(data):{...data.record,version:data.expected_version+1,version_id:'new'};
-      if(url.endsWith('/ontologies'))return {versions:[{id:'historical'}]};
+      if(url.endsWith('/ontologies?metadata_only=true'))return {versions:[{id:'historical'}]};
       if(url.includes('/ontology?'))return fixture.ontology;
       if(url.includes('/records/page'))return {...fixture.records,next_cursor:null};
       if(url.endsWith('/records/a'))return fixture.latest;

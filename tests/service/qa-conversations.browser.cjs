@@ -79,6 +79,8 @@ async function fixture(){
       else if(name==='ingest/capabilities')value={concurrency_choices:['auto',1,2],max_file_bytes:10000000,max_batch_bytes:20000000,max_batch_items:20,supported_extensions:['.txt','.md','.pdf','.docx','.zip']};
       else if(name.endsWith('/records/page'))value={records:[],total:0,next_cursor:null};
       else if(name.endsWith('/metadata/facets'))value={fields:[],records:1};
+      else if(name.endsWith('/graph-sessions'))value={id:'empty',entity_count:0,relation_count:0,watermark:1,layout_version:'stable-id-v1'};
+      else if(name.endsWith('/graph-sessions/empty/page'))value={session_id:'empty',kind:body.kind,records:[],entities:[],next_cursor:null,watermark:1,layout_version:'stable-id-v1'};
       else if(name.endsWith('/graph-neighborhood'))value={records:[],truncated:false};
       else if(name.endsWith('/sources'))value={documents:[]};
       else if(name.endsWith('/ontologies'))value={versions:[]};
@@ -86,7 +88,7 @@ async function fixture(){
       else if(name.endsWith('/ingest-batches'))value={batches:[]};
       else if(name.endsWith('/jobs'))value={jobs:[]};
       else if(name.endsWith('/snapshots'))value={snapshots:[]};
-      else if(name.endsWith('/applicability-values'))value={platforms:[],businesses:[],audiences:[]};
+      else if(name.endsWith('/applicability-values'))value={platforms:['美团','淘宝'],businesses:['外卖'],audiences:['商户']};
       else if(name.endsWith('/ontology-drafts'))value={drafts:[]};
       else if(name.endsWith('/ontology-discovery'))value={unpublished_candidate_count:0};
       return json(value);
@@ -110,6 +112,32 @@ async function fixture(){
   }
   return {page,conversations,requests,errors,failures,close:async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));}};
 }
+
+test('QA shows the shared scope and submits choices from project dropdowns',async()=>{
+  const env=await fixture();
+  try{
+    const page=await env.page();
+    assert.match(await page.locator('#applied-scope-chips').innerText(),/全部资料/);
+    await page.click('[data-tab="search"]');
+    await page.click('#scope-toggle');
+    await page.click('#query-platforms > summary');
+    await page.getByRole('checkbox',{name:'美团',exact:true}).check();
+    await page.getByRole('checkbox',{name:'淘宝',exact:true}).check();
+    assert.equal(await page.evaluate("WorkspaceContext.read(current,'qa').applicability ?? null"),null);
+    await page.click('#apply-scope');
+    await page.click('[data-tab="qa"]');
+    assert.equal(await page.locator('#applied-scope-chips').isVisible(),true);
+    assert.match(await page.locator('#applied-scope-chips').innerText(),/平台：美团、淘宝/);
+    await page.fill('#qa-query','退款');
+    await page.click('#qa');
+    await page.waitForSelector('.qa-turn-assistant[data-state="done"]');
+    assert.deepEqual(env.requests[0].applicability.platforms.values,['美团','淘宝']);
+    await page.locator('#applied-scope-chips').getByRole('button',{name:/平台/}).click();
+    await page.click('[data-tab="search"]');
+    assert.equal(await page.evaluate("WorkspaceContext.read(current,'search').applicability?.platforms?.values.length || 0"),0);
+    assert.deepEqual(env.errors,[]);
+  }finally{await env.close();}
+});
 
 test('server conversations create, switch, rename, restore, delete and stay inside the mobile viewport',async()=>{
   const env=await fixture();
@@ -137,8 +165,17 @@ test('server conversations create, switch, rename, restore, delete and stay insi
     await ask('互联网平台','混合检索');
     assert.match(await page.locator('.qa-answer-status').innerText(),/互联网平台.*1 个子类.*7 条类型/);
     assert.equal(env.conversations.size,2);
-    await page.locator('.qa-session-item.is-active summary').click();
-    await page.locator('.qa-session-item.is-active').getByRole('button',{name:'重命名',exact:true}).click();
+    const activeRow=page.locator('.qa-session-item.is-active');
+    const opener=activeRow.getByRole('button',{name:/更多操作/});
+    const rowBefore=await activeRow.boundingBox();
+    await opener.click();
+    const menu=page.locator('.qa-session-actions:popover-open');
+    assert.deepEqual(await activeRow.boundingBox(),rowBefore);
+    assert.ok((await menu.boundingBox()).x>rowBefore.x+rowBefore.width);
+    await page.keyboard.press('Escape');
+    assert.equal(await menu.count(),0);
+    await opener.click();
+    await menu.getByRole('button',{name:'重命名',exact:true}).click();
     await page.fill('#qa-session-name','平台规则');await page.locator('#qa-session-name').press('Enter');
     await page.waitForFunction(()=>document.getElementById('qa-active-session-title').textContent==='平台规则');
     const other=await env.page();
@@ -154,12 +191,19 @@ test('server conversations create, switch, rename, restore, delete and stay insi
     assert.ok(mobileSupplement.bottom<=mobileSupplement.height+1,JSON.stringify(mobileSupplement));assert.equal(mobileSupplement.overflow,0);
     const sectionShots=path.resolve(__dirname,'../../.benchmarks/ontology-sections');fs.mkdirSync(sectionShots,{recursive:true});
     await other.screenshot({path:path.join(sectionShots,'qa-mobile.png')});
+    await other.click('#qa-sessions-toggle');
+    await other.locator('.qa-session-item.is-active').getByRole('button',{name:/更多操作/}).click();
+    const mobileMenu=other.locator('.qa-session-actions:popover-open');
+    const mobileBounds=await mobileMenu.boundingBox();
+    assert.ok(mobileBounds.x>=0&&mobileBounds.x+mobileBounds.width<=390);
+    await other.keyboard.press('Escape');
+    assert.equal(await mobileMenu.count(),0);
     await other.setViewportSize({width:1440,height:950});
-    await other.locator('.qa-session-item.is-active summary').click();
-    await other.locator('.qa-session-item.is-active').getByRole('button',{name:'删除',exact:true}).click();
+    await other.locator('.qa-session-item.is-active').getByRole('button',{name:/更多操作/}).click();
+    await other.locator('.qa-session-actions:popover-open').getByRole('button',{name:'删除',exact:true}).click();
     await other.click('#qa-session-dialog-cancel');assert.equal(env.conversations.size,2);
-    await other.locator('.qa-session-item.is-active summary').click();
-    await other.locator('.qa-session-item.is-active').getByRole('button',{name:'删除',exact:true}).click();
+    await other.locator('.qa-session-item.is-active').getByRole('button',{name:/更多操作/}).click();
+    await other.locator('.qa-session-actions:popover-open').getByRole('button',{name:'删除',exact:true}).click();
     await other.click('#qa-session-dialog-confirm');
     await other.waitForFunction(()=>document.querySelectorAll('.qa-session-item').length===1);
     assert.equal(env.conversations.has(first.id),false);

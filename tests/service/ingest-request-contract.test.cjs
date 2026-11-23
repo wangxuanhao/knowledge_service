@@ -5,7 +5,7 @@ const path=require('node:path');
 const vm=require('node:vm');
 
 const source=fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/workbench.js'),'utf8');
-const submitSource=source.slice(source.indexOf("bind('ingest',async()=>{"),source.indexOf('async function snapshots()'));
+const submitSource=source.slice(source.indexOf("bind('ingest',async()=>{"),source.indexOf('async function snapshots('));
 const optionsSource=source.slice(source.indexOf('function documentUploadOptions(document)'),source.indexOf('const chunkPreviewState='));
 
 function fixture(mode,route){

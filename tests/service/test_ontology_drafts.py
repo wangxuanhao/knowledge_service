@@ -64,6 +64,24 @@ def test_create_with_command_persists_draft_and_initial_operations_atomically(tm
     assert [row['draft_id'] for row in exported['operations']] == [preview['id']]
 
 
+def test_draft_version_checks_do_not_load_turtle_history(tmp_path, monkeypatch):
+    repo, service, project_id, base = setup_service(tmp_path)
+    latest = seed_ontology(repo, project_id, BASE + '\n# latest', {})
+
+    def unexpected_history(*args):
+        pytest.fail('draft version checks loaded historical Turtle bodies')
+
+    monkeypatch.setattr(repo, 'list_ontologies', unexpected_history)
+    assert service._latest_id(project_id) == latest['id']
+    assert service._version_number(project_id, base['id']) == 1
+    assert service._revert_base(project_id, {
+        'source_kind': 'revert', 'base_ontology_id': base['id'],
+    }) == base['id']
+    assert service._revert_base(project_id, {
+        'source_kind': 'revert', 'base_ontology_id': 'missing',
+    }) is None
+
+
 def test_create_with_command_invalid_diff_rolls_back_draft_and_operations(tmp_path):
     repo, service, project_id, base = setup_service(tmp_path)
 

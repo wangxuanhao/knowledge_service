@@ -119,6 +119,38 @@ def test_vocabulary_index_rebuilds_once_per_graph_revision(monkeypatch):
     assert calls == 4
 
 
+def test_governed_term_resolution_reuses_spellings_within_each_revision(monkeypatch):
+    term = URIRef('urn:test:Merchant')
+    alias = URIRef('https://test/catalog#urn%3Atest%3AMerchant')
+    relation = URIRef('https://test/catalog#Merchant')
+    ontology = Ontology('')
+    ontology.graph.add((term, RDF.type, OWL.Class))
+    ontology.graph.add((alias, RDF.type, OWL.Class))
+    ontology.graph.add((relation, RDF.type, OWL.ObjectProperty))
+
+    spellings = []
+    original = ontology_module.local_name
+
+    def counted(iri):
+        spellings.append(iri)
+        return original(iri)
+
+    monkeypatch.setattr(ontology_module, 'local_name', counted)
+    for _ in range(3):
+        assert ontology.resolve('Merchant', ontology.classes) == term
+        assert ontology.resolve('Merchant', ontology.relations) == relation
+        with pytest.raises(ValueError):
+            ontology.resolve(str(term), ontology.classes)
+        with pytest.raises(ValueError):
+            ontology.resolve('Merchant')
+    ontology.graph.remove((alias, RDF.type, OWL.Class))
+    assert ontology.resolve(str(term), ontology.classes) == term
+    assert spellings == []
+
+    # Callers may supply an independent set that includes non-governed nodes.
+    assert ontology.resolve(str(term), {alias}) == alias
+
+
 def test_blank_node_classes_remain_anonymous_graph_semantics():
     ontology = Ontology('''
         @prefix ex: <http://example.test/> .

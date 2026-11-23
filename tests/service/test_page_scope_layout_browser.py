@@ -8,6 +8,7 @@ from test_workspace_redesign_ui import redesign_page  # noqa: F401
 @pytest.mark.parametrize('width', [1440, 768, 390, 320])
 def test_inline_scope_entries_and_qa_popover(redesign_page, width):
     page, errors = redesign_page
+    page.route('**/applicability-values', lambda route: route.fulfill(json=dict(platforms=['筛选测试平台'])))
     page.set_viewport_size({'width': width, 'height': 950})
     assert page.locator('#scope-to-qa').count() == 0
     for tab, host in [('sources', '.source-actions-row'),
@@ -20,10 +21,11 @@ def test_inline_scope_entries_and_qa_popover(redesign_page, width):
         assert popup['x'] >= -1 and popup['x'] + popup['width'] <= width + 1, popup
         assert popup['y'] >= 0 and popup['y'] + popup['height'] <= 951, popup
         assert page.locator('#query-platforms').is_visible()
-        page.locator('#query-platforms').fill('筛选测试平台')
+        page.locator('#query-platforms > summary').click()
+        page.get_by_role('checkbox', name='筛选测试平台', exact=True).check()
         page.locator('#apply-scope').click()
         assert page.evaluate(f"WorkspaceContext.read('p','{tab}').applicability.platforms.values") == ['筛选测试平台']
-        assert page.locator('#scope-toggle').inner_text() == '筛选 · 1'
+        assert page.locator('#scope-toggle').inner_text() == ('问答范围 · 1' if tab == 'qa' else '筛选 · 1')
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     output = Path('.benchmarks/page-scope-layout')
     output.mkdir(parents=True, exist_ok=True)

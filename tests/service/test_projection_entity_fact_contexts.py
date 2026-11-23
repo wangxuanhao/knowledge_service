@@ -4,6 +4,32 @@ from knowledge_service.services.retrieval_hits import qualified_hits
 from test_identity_source_contexts import system,entity
 
 
+def test_source_context_refresh_stops_after_short_page_and_keeps_both_endpoints(tmp_path, monkeypatch):
+    repo, _, project = system(tmp_path)
+    repo.put_batch(project, [entity('a'), entity('b'),
+        dict(id='edge', kind='relation', type='knows', text='关联', subject_id='a', object_id='b')])
+    reads, events = [], []
+    execute = repo._db.execute
+
+    def track(statement, args=()):
+        if 'FROM record_versions' in statement and 'ORDER BY' in statement:
+            reads.append(statement)
+        return execute(statement, args)
+
+    def enqueue(project_id, operation, version_id, payload):
+        events.append((operation, payload.get('record_id', payload.get('id'))))
+        return len(events)
+
+    monkeypatch.setattr(repo._db, 'execute', track)
+    monkeypatch.setattr(repo.projections, 'enqueue', enqueue)
+    with repo._transaction():
+        assert repo.projections.enqueue_source_context_changes(project, ['edge']) == list(range(1, 7))
+
+    assert events == [(operation, identifier) for identifier in ('a', 'b', 'edge')
+                      for operation in ('tombstone', 'upsert')]
+    assert len(reads) == 1
+
+
 def test_entity_native_context_includes_qualified_incident_fact_and_withdrawal(tmp_path,monkeypatch):
     repo,service,p=system(tmp_path)
     monkeypatch.setattr(repo,'source_identity_projection_readiness',lambda p:{'ready':True})

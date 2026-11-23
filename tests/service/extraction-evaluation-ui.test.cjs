@@ -18,7 +18,7 @@ function evaluation(body,{respond=async()=>({})}={}){
     $:id=>elements[id],
     scope:()=>({applicability:{platforms:{mode:'specific',values:['京东']}},
       ontology_scope:'ids',ontology_ids:['other'],include_unknown:true}),
-    current:'project', wb:{epoch:1}, window:{},
+    current:'project', wb:{epoch:1}, window:{DisplayTime:require('../../knowledge_service/web/display-time.js')},
     renderEvalResult:()=>'<p>评测结果</p>', esc:value=>value,
     api:async (url,payload)=>{requests.push({url,payload:JSON.parse(JSON.stringify(payload))});return respond();},
   };

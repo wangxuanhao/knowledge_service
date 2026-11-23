@@ -107,6 +107,85 @@
     }
     return marks[0]||null;
   }
+  async function renderParsed({host:body,projectId,versionId,view,location=null,onLocate,onRefresh}){
+    const {signal}=view;
+    const accepts=view.active;
+    const doc=await get(sourceUrl(projectId,versionId),signal);
+    if(!accepts())return;
+    body.replaceChildren();
+    for(const chunk of doc.chunks||[]){
+      const part=make('details','','source-parsed-block');
+      part.dataset.chunkVersionId=chunk.version_id;
+      part.append(make('summary','模型片段 · '+chunk.id+' · 固定版本 '+chunk.version_id));
+      const kind=chunk.metadata?.source_kind;
+      part.append(make('p',kind==='mixed'?'正文与附件识别文字统一切片；来源位置分别保留。':kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
+      part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean).join('、')));
+      body.append(part);
+    }
+    for(const block of doc.blocks||[]){const section=make('section','','source-parsed-block');section.dataset.blockId=block.block_id||block.id;
+      section.append(make('h3',(labels[block.type||block.kind]||block.type||block.kind)+' · 行 '+block.source_start_line+'–'+block.source_end_line),make('pre',block.normalized_text));
+      if(block.payload?.rows)section.append(make('pre',JSON.stringify(block.payload.rows,null,2)));body.append(section);}
+    for(const asset of doc.assets||[]){
+      const section=make('section','','source-parsed-block');section.append(make('h3',asset.original_path||'图片'),make('p','附件状态：'+(labels[asset.status]||asset.status||'未处理')));
+      if(asset.provenance?.media_type==='video'){
+        if(asset.kind==='external'){section.append(make('p','外部视频，未固化。请提供本地视频附件。'));body.append(section);continue;}
+        const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr'),signal);
+        if(!accepts())return;
+        const run=(result.runs||[]).find(item=>item.id===location?.asr_run_id)||result.run||{status:'pending'};
+        section.append(make('p','ASR 状态：'+(labels[run.status]||run.status)),make('p',(run.engine||'SenseVoice / FSMN-VAD')+' '+(run.engine_version||'')));
+        for(const segment of run.segments||result.segments||[]){
+          const seek=make('button',(segment.start_ms/1000).toFixed(2)+'–'+(segment.end_ms/1000).toFixed(2)+' 秒 · '+segment.normalized_text,'secondary source-asr-segment');seek.type='button';
+          seek.onclick=()=>{onLocate({asset_id:asset.id,start_ms:segment.start_ms,end_ms:segment.end_ms,asr_run_id:run.id,asr_segment_id:segment.id,tab:'reading'},doc);};section.append(seek);
+        }
+        if(run.public_error)section.append(make('p',run.public_error));
+        if(run.status==='failed'||run.status==='pending'){
+          const retry=make('button','重试语音转写','secondary');retry.type='button';
+          retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr/retry'),{});if(accepts())await onRefresh();}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};section.append(retry);
+        }
+        body.append(section);continue;
+      }
+      if(asset.status==='missing'){
+        section.append(make('p','缺失图片，请补传完整知识包。若已确认该引用不参与知识提取，可以明确忽略。'));
+        const ignore=make('button','该引用不参与知识提取，忽略并继续','secondary');
+        ignore.onclick=async()=>{const reason=prompt('请输入忽略缺失引用的原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});if(accepts())await onRefresh();}catch(e){if(accepts())status(e.message,true);}};
+        section.append(ignore);body.append(section);continue;
+      }
+      if(asset.kind==='external'){section.append(make('p','外部图片，未固化'));body.append(section);continue;}
+      const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr'),signal);
+      if(!accepts())return;
+      const pinnedRunId=location?.ocr_run_id||location?.boxes?.[0]?.ocr_run_id;
+      let run=(result.runs||[]).find(r=>r.id===pinnedRunId)||result.run||result;
+      if(asset.status==='ignored')run={...run,status:'ignored',error_code:null,public_error:null};
+      const progress=ocrProgress(run),boxes=run.blocks||result.blocks||[];
+      section.append(make('p','OCR 状态：'+(progress.label||labels[run.status]||run.status||'未处理')),make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')));
+      section.append(make('p','单次 OCR 重试只更新识别结果；更新检索切片或图谱需在资料详情重新处理。','source-reader-note'));
+      if(progress.warning)section.append(make('p',progress.warning,'source-ocr-warning'));
+      if(progress.total)section.append(make('p',`已处理 ${progress.completed} / 总计 ${progress.total}`,'source-ocr-progress'));
+      if(progress.incomplete&&!['processing','pending'].includes(run.status))section.append(make('p','识别覆盖不完整；已保留成功区域的文字，请定位失败区域并重试。','source-ocr-warning'));
+      const locateRegion=(region,text)=>{onLocate({asset_id:asset.id,ocr_run_id:run.id,boxes:region?[{...region,text}]:[],tab:'reading'},doc);};
+      for(const [index,box] of boxes.entries()){
+        const text=box.text||box.normalized_text||'';if(!text)continue;
+        const locate=make('button',text,'secondary source-ocr-segment');locate.type='button';locate.setAttribute('aria-label','定位原图文字 '+(index+1));
+        locate.onclick=()=>locateRegion(box,text);section.append(locate);
+      }
+      if(!boxes.length)section.append(make('pre',run.normalized_text||result.normalized_text||''));
+      for(const tile of progress.failed){
+        const region=tile.region;
+        const locate=make('button','定位未完成区域 '+(tile.index+1)+(tile.message?' · '+tile.message:''),'secondary source-ocr-segment source-ocr-warning');locate.type='button';
+        locate.onclick=()=>locateRegion(region,'未完成的 OCR 区域');section.append(locate);
+      }
+      section.append(overlay(asset,boxes,projectId,versionId));
+      if(run.status!=='processing'&&(progress.incomplete||['failed','low_confidence','needs_attention','pending'].includes(run.status)||run.error_code)){
+        section.append(make('p',progress.error||'OCR 需要人工处理。'));
+        const retry=make('button',progress.incomplete?'重试未完成 OCR 区域':'重试 OCR','secondary');retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/retry'),{});if(accepts()){status('识别结果已更新；如需更新检索或图谱，请在资料详情重新处理');await onRefresh();}}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};
+        const ignore=make('button','该图片无知识文字，忽略并继续','secondary');ignore.onclick=async()=>{const reason=prompt('请输入忽略原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});if(accepts())await onRefresh();}catch(e){if(accepts())status(e.message,true);}};section.append(retry,ignore);
+      }
+      body.append(section);
+    }
+    if(!body.children.length)body.append(make('p','暂无解析结果。','subtle'));
+    view.hydrateImages();
+    return doc;
+  }
   async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null,matchKind=null}){
     controller?.abort();clearContent();controller=new AbortController();const {signal}=controller,token=++serial;
     if(!dialog.open)returnFocus=document.activeElement;restoreFocus=true;body.textContent='正在加载固定版本原文…';note.textContent='';
@@ -122,7 +201,7 @@
       if(token!==serial||!dialog.open)return;
       if(location?.media_locations?.length&&!location.asset_id)location={...location,...location.media_locations[0]};
       const documentSignal=signal;
-      let parsed=doc.blocks||null,rendered=null,raw=null;
+      let rendered=null,raw=null;
       async function show(tab){
         if(token!==serial||!dialog.open)return;
         selectedTab=tab;clearContent();const display=++viewSerial;
@@ -150,77 +229,11 @@
               view.mount(rendered);
             }
           }else{
-            doc=await get(sourceUrl(projectId,versionId),signal);parsed=doc.blocks||[];
-            if(!accepts())return;body.replaceChildren();
-            for(const chunk of doc.chunks||[]){
-              const part=make('details','','source-parsed-block');
-              part.dataset.chunkVersionId=chunk.version_id;
-              part.append(make('summary','模型片段 · '+chunk.id+' · 固定版本 '+chunk.version_id));
-              const kind=chunk.metadata?.source_kind;
-              part.append(make('p',kind==='mixed'?'正文与附件识别文字统一切片；来源位置分别保留。':kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
-              part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean).join('、')));
-              body.append(part);
-            }
-            for(const block of parsed){const section=make('section','','source-parsed-block');section.dataset.blockId=block.block_id||block.id;
-              section.append(make('h3',(labels[block.type||block.kind]||block.type||block.kind)+' · 行 '+block.source_start_line+'–'+block.source_end_line),make('pre',block.normalized_text));
-              if(block.payload?.rows)section.append(make('pre',JSON.stringify(block.payload.rows,null,2)));body.append(section);}
-            for(const asset of doc.assets||[]){
-              const section=make('section','','source-parsed-block');section.append(make('h3',asset.original_path||'图片'),make('p','附件状态：'+(labels[asset.status]||asset.status||'未处理')));
-              if(asset.provenance?.media_type==='video'){
-                if(asset.kind==='external'){section.append(make('p','外部视频，未固化。请提供本地视频附件。'));body.append(section);continue;}
-                const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr'),signal);
-                if(!accepts())return;
-                const run=(result.runs||[]).find(item=>item.id===location?.asr_run_id)||result.run||{status:'pending'};
-                section.append(make('p','ASR 状态：'+(labels[run.status]||run.status)),make('p',(run.engine||'SenseVoice / FSMN-VAD')+' '+(run.engine_version||'')));
-                for(const segment of run.segments||result.segments||[]){
-                  const seek=make('button',(segment.start_ms/1000).toFixed(2)+'–'+(segment.end_ms/1000).toFixed(2)+' 秒 · '+segment.normalized_text,'secondary source-asr-segment');seek.type='button';
-                  seek.onclick=()=>{location={asset_id:asset.id,start_ms:segment.start_ms,end_ms:segment.end_ms,asr_run_id:run.id,asr_segment_id:segment.id,tab:'reading'};show('reading');};section.append(seek);
-                }
-                if(run.public_error)section.append(make('p',run.public_error));
-                if(run.status==='failed'||run.status==='pending'){
-                  const retry=make('button','重试语音转写','secondary');retry.type='button';
-                  retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/asr/retry'),{});await show('parsed');}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};section.append(retry);
-                }
-                body.append(section);continue;
-              }
-              if(asset.status==='missing'){
-                section.append(make('p','缺失图片，请补传完整知识包。若已确认该引用不参与知识提取，可以明确忽略。'));
-                const ignore=make('button','该引用不参与知识提取，忽略并继续','secondary');
-                ignore.onclick=async()=>{const reason=prompt('请输入忽略缺失引用的原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});await show('parsed');}catch(e){status(e.message,true);}};
-                section.append(ignore);body.append(section);continue;
-              }
-              if(asset.kind==='external'){section.append(make('p','外部图片，未固化'));body.append(section);continue;}
-              const result=await get(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr'),signal);
-              if(!accepts())return;
-              const pinnedRunId=location?.ocr_run_id||location?.boxes?.[0]?.ocr_run_id;
-              let run=(result.runs||[]).find(r=>r.id===pinnedRunId)||result.run||result;
-              if(asset.status==='ignored')run={...run,status:'ignored',error_code:null,public_error:null};
-              const progress=ocrProgress(run),boxes=run.blocks||result.blocks||[];
-              section.append(make('p','OCR 状态：'+(progress.label||labels[run.status]||run.status||'未处理')),make('p',(run.engine||'图片 OCR')+' '+(run.engine_version||'')+' · 平均置信度 '+(run.average_confidence??'未知')));
-              section.append(make('p','单次 OCR 重试只更新识别结果；更新检索切片或图谱需在资料详情重新处理。','source-reader-note'));
-              if(progress.warning)section.append(make('p',progress.warning,'source-ocr-warning'));
-              if(progress.total)section.append(make('p',`已处理 ${progress.completed} / 总计 ${progress.total}`,'source-ocr-progress'));
-              if(progress.incomplete&&!['processing','pending'].includes(run.status))section.append(make('p','识别覆盖不完整；已保留成功区域的文字，请定位失败区域并重试。','source-ocr-warning'));
-              const locateRegion=(region,text)=>{location={asset_id:asset.id,ocr_run_id:run.id,boxes:region?[{...region,text}]:[],tab:'reading'};show('reading');};
-              for(const [index,box] of boxes.entries()){
-                const text=box.text||box.normalized_text||'';if(!text)continue;
-                const locate=make('button',text,'secondary source-ocr-segment');locate.type='button';locate.setAttribute('aria-label','定位原图文字 '+(index+1));
-                locate.onclick=()=>locateRegion(box,text);section.append(locate);
-              }
-              if(!boxes.length)section.append(make('pre',run.normalized_text||result.normalized_text||''));
-              for(const tile of progress.failed){
-                const region=tile.region;
-                const locate=make('button','定位未完成区域 '+(tile.index+1)+(tile.message?' · '+tile.message:''),'secondary source-ocr-segment source-ocr-warning');locate.type='button';
-                locate.onclick=()=>locateRegion(region,'未完成的 OCR 区域');section.append(locate);
-              }
-              section.append(overlay(asset,boxes,projectId,versionId));
-              if(run.status!=='processing'&&(progress.incomplete||['failed','low_confidence','needs_attention','pending'].includes(run.status)||run.error_code)){
-                section.append(make('p',progress.error||'OCR 需要人工处理。'));
-                const retry=make('button',progress.incomplete?'重试未完成 OCR 区域':'重试 OCR','secondary');retry.type='button';retry.onclick=async()=>{retry.disabled=true;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/retry'),{});if(accepts()){status('识别结果已更新；如需更新检索或图谱，请在资料详情重新处理');await show('parsed');}}catch(e){if(accepts()){retry.disabled=false;status(e.message,true);}}};
-                const ignore=make('button','该图片无知识文字，忽略并继续','secondary');ignore.onclick=async()=>{const reason=prompt('请输入忽略原因（将保存操作者与时间）');if(!reason?.trim())return;try{await api(sourceUrl(projectId,versionId,'assets/'+encodeURIComponent(asset.id)+'/ocr/ignore'),{reason});await show('parsed');}catch(e){status(e.message,true);}};section.append(retry,ignore);
-              }
-              body.append(section);
-            }
+            const source=await renderParsed({host:body,projectId,versionId,view,location,
+              onLocate(target){if(accepts()){location=target;return show('reading');}},
+              onRefresh:()=>show('parsed')});
+            if(!source||!accepts())return;
+            doc=source;
           }
           if(!accepts())return;
           if(['source_mapping_unavailable','mapping_unavailable'].includes(location?.code)||location?.status==='mapping_unavailable')note.textContent+=' · 历史数据没有原文映射';
@@ -276,7 +289,7 @@
               // Hydration below loads the original before focusing its exact region.
             }
           }
-          view.hydrateImages();
+          if(tab!=='parsed')view.hydrateImages();
           if(tab==='reading'&&location?.asset_id&&!Number.isFinite(location.start_ms)&&!window.SourceContent.isPdfSource(doc))view.focusRegion(location.asset_id,location.boxes||location.ocr_blocks||[]);
           if(tab==='reading'&&location?.asset_id&&Number.isFinite(location.start_ms))view.seekVideo(location.asset_id,location.start_ms);
         }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
@@ -288,5 +301,5 @@
       await show(location?.tab==='parsed'?'parsed':'reading');
     }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
   }
-  window.SourceReader={open,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange,ocrProgress,pdfPage};
+  window.SourceReader={open,renderParsed,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange,ocrProgress,pdfPage};
 })();

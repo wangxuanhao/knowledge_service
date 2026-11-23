@@ -53,6 +53,12 @@ def test_project_cards_report_real_ontology_publications(client):
     assert cards[empty]['ontology_publications'] == 0
     assert cards[published]['ontology_publications'] == 1
     assert cards[empty]['counts']['entities'] == 0
+    url = f'/api/projects/{published}/ontologies'
+    full = client.get(url).json()['versions']
+    summary = client.get(url,params={'metadata_only':True})
+    assert summary.status_code == 200
+    assert summary.json()['versions'] == [
+        {key: row[key] for key in ('id','version','version_reused')} for row in full]
 
 
 def test_ontology_scope_accepts_each_legal_combination(client):

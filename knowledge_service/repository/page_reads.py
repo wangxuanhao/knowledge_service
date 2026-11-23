@@ -291,6 +291,7 @@ class PageReads:
             for doc in docs:
                 doc['match']=explain_match(doc,query,text=doc.get('text') or '',channels=['keyword'])
         self._source_derivatives(project,scope or {},docs)
+        self._source_processing_tasks(project,scope,docs)
         return {'documents':docs,'total':page['total'],'next_cursor':page['next_cursor'],'counts':counts}
 
     @_snapshot_read
@@ -304,7 +305,8 @@ class PageReads:
         self.repo.get_project(project)
         sql,params=ScopedReads(self.repo)._qualified(project,scope,kinds=['document'])
         fields=('title','source_file','source_format','source_size_bytes','document_parser',
-                'page_count','source_document_version_id','status','applicability')
+                'page_count','source_document_version_id','status','applicability',
+                'batch_id','batch_item_id','active_stage','durable_task_id','extraction_mode')
         metadata=','.join("'"+key+"',r.body#>'{metadata,"+key+"}'" for key in fields)
         rows=self.repo._db.execute('''WITH documents AS MATERIALIZED (
             SELECT r.project_id,r.id,r.version,r.version_id,r.recorded_at,r.superseded_at,
@@ -314,7 +316,26 @@ class PageReads:
             jsonb_build_object('id',r.id,'kind','document','valid_from',r.body->'valid_from',
             'valid_until',r.body->'valid_until','metadata',jsonb_strip_nulls(jsonb_build_object('''+
             metadata+''')))::text AS payload FROM documents r''',[*params,ids]).fetchall()
-        return [self.repo._record(row) for row in rows]
+        docs=[self.repo._record(row) for row in rows]
+        self._source_processing_tasks(project,scope,docs)
+        return docs
+
+    def _source_processing_tasks(self, project, scope, docs):
+        # Reprocessing may be queued before a new document version is written.
+        # Keep live work separate from the versioned document and its status.
+        if not docs or (scope or {}).get('known_at'):
+            return
+        rows=self.repo._db.execute('''SELECT DISTINCT ON (document_id)
+                document_id,batch_id,id AS batch_item_id,status,stage
+            FROM ingest_batch_items
+            WHERE project_id=? AND document_id=ANY(?::text[])
+              AND status IN ('pending','running','retry_wait','interrupted')
+            ORDER BY document_id,document_generation DESC,created_at DESC,id DESC''',
+            (project,[doc['id'] for doc in docs])).fetchall()
+        tasks={row['document_id']:dict(row) for row in rows}
+        for doc in docs:
+            if doc['id'] in tasks:
+                doc['processing_task']=tasks[doc['id']]
 
     def _source_metadata_page(self, reads, project, scope, cursor, limit, *, query=''):
         # Reuse the keyset validation without reading the authoritative bodies.
@@ -324,7 +345,8 @@ class PageReads:
             page['records']=[]
             return page
         fields=('title','source_file','source_format','source_size_bytes','document_parser',
-                'page_count','source_document_version_id','status','applicability')
+                'page_count','source_document_version_id','status','applicability',
+                'batch_id','batch_item_id','active_stage','durable_task_id','extraction_mode')
         metadata=','.join("'"+key+"',r.body#>'{metadata,"+key+"}'" for key in fields)
         # MATERIALIZED fences expression inlining: parse/decompress each large
         # document once, rather than once per projected metadata field.

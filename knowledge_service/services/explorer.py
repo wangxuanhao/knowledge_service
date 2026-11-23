@@ -212,35 +212,27 @@ class Explorer:
     def evaluate(self,p,scope,entities,relations):
         from ..repository.scoped_reads import ScopedReads
 
-        # Read exact entity names and predicate identities directly, bypassing
-        # graph presentation and Turtle parsing. One snapshot keeps facts and
-        # vocabulary in agreement if a publication finishes during evaluation.
+        # Use one snapshot for fact qualification and predicate aliases.
         scope = {key: value for key, value in scope.items() if key not in {'entities', 'relations'}}
-        names, edges = {}, []
         with self.repo.independent_read_view() as repository:
             reads = ScopedReads(repository)
-            cursor = None
-            while True:
-                page = reads.page(p, scope, kinds=['entity', 'relation'], after=cursor, include_total=False)
-                for row in page['records']:
-                    if row['kind'] == 'entity':
-                        names[row['id']] = row['text']
-                    else:
-                        edges.append((row['subject_id'], row['type'], row['object_id']))
-                cursor = page['next_cursor']
-                if cursor is None:
-                    break
+            names = {row['id']: row['text'] for row in reads.evaluation_facts(p, scope, kind='entity')}
             terms = [] if scope.get('ontology_scope') == 'unknown' else repository.ontology_relation_terms(
                 p, ontology_ids=scope.get('ontology_ids'), known_at=scope.get('known_at'))
+            declared_aliases = _predicate_aliases((), terms, ())
+
+            def stored_predicate(predicate):
+                # Historical writes could persist a short name even with a published IRI.
+                candidates = declared_aliases.get(predicate)
+                return next(iter(candidates)) if candidates and len(candidates) == 1 else predicate
+
+            actual_relations = {
+                (names[row['subject_id']], stored_predicate(row['type']), names[row['object_id']])
+                for row in reads.evaluation_facts(p, scope, kind='relation')
+                if row['subject_id'] in names and row['object_id'] in names
+            }
 
         actual_entities = set(names.values())
-        declared_aliases = _predicate_aliases((), terms, ())
-        def stored_predicate(predicate):
-            # Historical writes could persist a short name even with a published IRI.
-            candidates = declared_aliases.get(predicate)
-            return next(iter(candidates)) if candidates and len(candidates) == 1 else predicate
-        actual_relations = {(names[s], stored_predicate(predicate), names[o])
-                            for s, predicate, o in edges if s in names and o in names}
         aliases = _predicate_aliases({predicate for _, predicate, _ in actual_relations}, terms, relations)
         gold_relations, ambiguous = set(), set()
         for subject, predicate, obj in relations:

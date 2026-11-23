@@ -82,7 +82,7 @@
 .ingest-result__group[open]{background:#fff}
 .ingest-result__group>summary{list-style:none}
 .ingest-result__group>summary::-webkit-details-marker{display:none}
-.ingest-result__label{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap;margin:0;
+.ingest-result__label{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin:0;
   padding:8px 11px;cursor:pointer;user-select:none;border-radius:6px}
 .ingest-result__label:hover{background:#f4f8f5}
 .ingest-result__label b{font-size:12px;font-weight:630;color:#2c4c40}

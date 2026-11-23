@@ -97,6 +97,7 @@ def test_batch_card_paginates_and_uses_selected_retry_mode(tmp_path):
         page.goto('http://browser.test/')
         page.evaluate('window.status=()=>{}; window.Auth={isAdmin:()=>true}')
         page.add_style_tag(path=str(WEB / 'ingest-batches.css'))
+        page.add_script_tag(path=str(WEB / 'display-time.js'))
         page.add_script_tag(path=str(WEB / 'ingest-batches.js'))
         page.evaluate("IngestBatches.monitor('p',{id:'b'})")
         page.get_by_text('模型超时', exact=False).wait_for()

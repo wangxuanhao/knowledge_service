@@ -31,9 +31,131 @@ def ready(client,root,item):
     assert value['status'] in ('completed','reused'),value
     return value
 
-def test_stage_preview_parse_publish_never_reparses(prep,monkeypatch):
+
+def test_preparation_status_skips_full_parse_and_per_session_reads(prep, monkeypatch):
+    client, root = prep
+    item = ready(client, root, upload(client, root))
+    client.app.state.preparation_runner.close()
+    listing = root.rsplit('/', 1)[0]
+    assert client.post(listing, json={}).status_code == 201
+    store = client.app.state.preparations.store
+
+    def unexpected_task(*args):
+        raise AssertionError('status polling loaded the full parse result')
+
+    with monkeypatch.context() as patch:
+        patch.setattr(store, 'task', unexpected_task)
+        detail = client.get(root).json()['items'][0]
+        assert detail['status'] in ('completed', 'reused')
+        assert detail['result_ready'] is True
+        assert detail['parse_task_id'] == item['parse_task_id']
+
+        def unexpected_session(*args):
+            raise AssertionError('preparation listing loaded a session individually')
+
+        patch.setattr(store, 'get', unexpected_session)
+        response = client.get(listing)
+        assert response.status_code == 200
+        sessions = response.json()['items']
+        assert len(sessions) == 2
+        assert next(session['items'][0] for session in sessions if session['items']) == detail
+
+    result = client.get(f"{root}/items/{item['id']}/result").json()
+    assert result['chunks'] and 'Hello' in result['text']
+
+
+def test_preparation_result_shows_current_title_and_time_before_publication(prep):
+    client, root = prep
+    body = (
+        '# 售后规则\n\n发布时间：2026年2月1日\n生效时间：2026年3月1日\n'
+        '失效时间：2026年4月1日\n\n> 失效时间：2026年5月1日\n\n退款条件。'
+    )
+    item = upload(client, root, 'rules.md', body.encode())
+
+    def configure(item, fields):
+        response = client.patch(f"{root}/items/{item['id']}", json={
+            'options': fields, 'expected_version': item['metadata_version']})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def result():
+        response = client.get(f"{root}/items/{item['id']}/result")
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    item = ready(client, root, configure(item, {'document_time_mode': 'auto'}))
+    parsed = result()
+    assert parsed['title'] == 'rules.md'
+    assert parsed['source_title'] == '售后规则'
+    dates = parsed['document_time']
+    assert dates['published_at'].startswith('2026-01-31T16:00:00')
+    assert dates['valid_from'].startswith('2026-02-28T16:00:00')
+    assert dates['valid_until'].startswith('2026-03-31T16:00:00')
+    end = dates['document_temporal']['fields']['valid_until']
+    assert end['status'] == 'extracted'
+    assert [candidate['raw'] for candidate in end['candidates']] == ['2026年4月1日']
+
+    updated = configure(item, {'title': '人工核对后的售后规则', 'valid_from': '2026-03-05T00:00:00+08:00'})
+    revised = result()
+    assert revised['parse_task_id'] == parsed['parse_task_id']
+    assert revised['text'] == parsed['text']
+    assert revised['title'] == '人工核对后的售后规则'
+    assert revised['source_title'] == parsed['source_title']
+    assert revised['document_time']['valid_from'].startswith('2026-03-04T16:00:00')
+    assert revised['document_time']['valid_until'] == dates['valid_until']
+    assert revised['document_time']['document_temporal']['fields']['valid_from']['status'] == 'manual'
+
+    published = client.post(root+'/publish', json={
+        'item_ids': [item['id']], 'versions': {item['id']: updated['metadata_version']},
+        'result_versions': {item['id']: updated['chunk_version']},
+        'settings': {'extraction_mode': 'documents'}, 'idempotency_key': 'publish-time-preview'})
+    assert published.status_code == 202, published.text
+    batch_root = root.split('/preparations')[0] + '/ingest-batches/' + published.json()['batch_id']
+    for _ in range(150):
+        batch = client.get(batch_root).json()
+        if batch['status'].startswith('completed'):
+            break
+        time.sleep(.03)
+    assert batch['status'] == 'completed', batch
+    operations = client.app.state.preparations
+    stored = operations.batches.store.list_items(
+        item['project_id'], published.json()['batch_id'])['items'][0]['result']['document']
+    assert stored['metadata']['title'] == revised['title']
+    assert stored['valid_from'] == revised['document_time']['valid_from']
+    assert stored['valid_until'] == revised['document_time']['valid_until']
+
+
+def test_preparation_listing_checks_parser_runtime_once_per_request(prep, monkeypatch):
+    from pathlib import Path
+
+    client, root = prep
+    ready(client, root, upload(client, root))
+    client.app.state.preparation_runner.close()
+    listing = root.rsplit('/', 1)[0]
+    other = listing + '/' + client.post(listing, json={}).json()['id']
+    assert upload(client, other, key='other-upload')['reusable'] is True
+
+    read_bytes = Path.read_bytes
+    checked = []
+
+    def count_signature_read(path):
+        if path.name == 'document_parser.py':
+            checked.append(path)
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, 'read_bytes', count_signature_read)
+    for call in range(1, 3):
+        response = client.get(listing)
+        assert response.status_code == 200
+        assert len(response.json()['items']) == 2
+        assert len(checked) == call
+
+@pytest.mark.parametrize('mode',['documents','discovery'])
+def test_stage_preview_parse_publish_never_reparses(prep,monkeypatch,mode):
     client,root=prep
     from knowledge_service.integrations.document_parser import DocumentParser
+    from knowledge_service.repository.ingest_batch_store import IngestBatchStore
+    from knowledge_service.services import chunking,source_ingest
     original=DocumentParser.parse
     calls=[]
     def parse(self,*args,**kwargs):
@@ -49,7 +171,31 @@ def test_stage_preview_parse_publish_never_reparses(prep,monkeypatch):
     assert len(calls)==1
     result=client.get(root+'/items/'+item['id']+'/result').json()
     assert result['chunks'] and 'Hello' in result['text']
-    body={'item_ids':[item['id']],'versions':{item['id']:item['metadata_version']},'result_versions':{item['id']:item['chunk_version']},'idempotency_key':'publish'}
+    extracted=[]
+    if mode=='discovery':
+        from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+
+        def discover(self,text,**options):
+            extracted.append(text)
+            return []
+
+        monkeypatch.setattr(SemanticaExtractor,'discover',discover)
+    initial_split=chunking.split_document
+    initial_prepare=source_ingest.prepare_source_ingest
+    stages=[]
+    update_progress=IngestBatchStore.update_progress
+
+    def track_progress(self,*args,**fields):
+        if 'stage' in fields:stages.append(fields['stage'])
+        return update_progress(self,*args,**fields)
+
+    def unexpected_split(*args,**kwargs):
+        raise AssertionError('publication must reuse the reviewed chunks')
+
+    monkeypatch.setattr(IngestBatchStore,'update_progress',track_progress)
+    monkeypatch.setattr(chunking,'split_document',unexpected_split)
+    monkeypatch.setattr(source_ingest,'prepare_source_ingest',unexpected_split)
+    body={'item_ids':[item['id']],'versions':{item['id']:item['metadata_version']},'result_versions':{item['id']:item['chunk_version']},'settings':{'extraction_mode':mode},'idempotency_key':'publish'}
     published=client.post(root+'/publish',json=body)
     assert published.status_code==202,published.text
     replay=client.post(root+'/publish',json={**body,'idempotency_key':'other'})
@@ -62,11 +208,19 @@ def test_stage_preview_parse_publish_never_reparses(prep,monkeypatch):
         time.sleep(.03)
     assert batch['status']=='completed',batch
     assert len(calls)==1
+    assert 'reusing_chunks' in stages and not {'parsing','chunking'}.intersection(stages)
     operations=client.app.state.preparations
     published_item=operations.batches.store.list_items(item['project_id'],published.json()['batch_id'])['items'][0]
+    assert [r['text'] for r in published_item['result']['records'] if r['kind']=='chunk']==[
+        chunk['text'] for chunk in result['chunks']]
+    if mode=='discovery':
+        assert 'extracting' in stages
+        assert extracted==[chunk['text'] for chunk in result['chunks']]
     source=operations.sources.get(item['project_id'],published_item['source_version_id'])
     assert source['document_id']==published_item['document_id']
     assert source['id']!=result['source_version_id']
+    monkeypatch.setattr(chunking,'split_document',initial_split)
+    monkeypatch.setattr(source_ingest,'prepare_source_ingest',initial_prepare)
     reprocessed=client.post(root.split('/preparations')[0]+'/documents/'+published_item['document_id']+'/reprocess',json={'extraction_mode':'documents','idempotency_key':'rebuild-preparation'})
     assert reprocessed.status_code==202,reprocessed.text
     assert len(calls)==1
@@ -178,7 +332,9 @@ def test_upload_reports_project_cached_parse_and_global_operation_conflict(prep)
     assert response.status_code==409
 
 
-def test_running_metadata_changes_shared_cancel_and_fenced_recovery(prep):
+def test_running_metadata_changes_shared_cancel_and_fenced_recovery(prep, monkeypatch):
+    from knowledge_service.repository import preparation_store
+
     client,root=prep
     runner=client.app.state.preparation_runner
     runner.close()
@@ -199,6 +355,8 @@ def test_running_metadata_changes_shared_cancel_and_fenced_recovery(prep):
     assert operations.store.task(task['id'])['status']=='running'
     with operations.store.repo._transaction():
         operations.store.db.execute("UPDATE preparation_tasks SET lease_until=now()-interval '1 second' WHERE id=?",(task['id'],))
+    recovery_time = operations.store._last_recovery + operations.store.RECOVERY_INTERVAL_SECONDS + 1
+    monkeypatch.setattr(preparation_store, 'monotonic', lambda: recovery_time)
     recovered=operations.store.claim()
     assert recovered['id']==task['id'] and recovered['lease_token']!=task['lease_token']
     assert not operations.store.update(task,'completed','completed',result={'text':'old'})
@@ -249,6 +407,15 @@ def test_publication_settings_override_only_extraction_fields(prep,monkeypatch):
 def test_rechunk_does_not_call_media_processors(prep,monkeypatch):
     client,root=prep
     item=ready(client,root,upload(client,root,data=b'# Heading\n\n'+b'body '*60))
+    from knowledge_service.services import source_ingest
+    original=source_ingest.prepare_source_ingest
+    calls=[]
+
+    def count_rechunk(*args,**kwargs):
+        calls.append(kwargs.get('cached_only'))
+        return original(*args,**kwargs)
+
+    monkeypatch.setattr(source_ingest,'prepare_source_ingest',count_rechunk)
     sources=client.app.state.source_documents
     monkeypatch.setattr(sources.image_ocr,'process_asset',lambda *a,**k:pytest.fail('OCR repeated'))
     monkeypatch.setattr(sources.video_asr,'process_asset',lambda *a,**k:pytest.fail('ASR repeated'))
@@ -259,6 +426,13 @@ def test_rechunk_does_not_call_media_processors(prep,monkeypatch):
     assert len(result.json()['chunks'])>1
     assert response.json()['parser_fingerprint']==item['parser_fingerprint']
     assert response.json()['chunk_version']!=item['chunk_version']
+    revised=response.json()
+    assert client.get(root+'/items/'+item['id']+'/result').json()==result.json()
+    published=client.post(root+'/publish',json={'item_ids':[item['id']],
+        'versions':{item['id']:revised['metadata_version']},
+        'result_versions':{item['id']:revised['chunk_version']},'idempotency_key':'publish-rechunk'})
+    assert published.status_code==202,published.text
+    assert calls==[True]
 
 def test_expiry_reclaims_abandoned_sources_but_keeps_published(prep):
     client,root=prep

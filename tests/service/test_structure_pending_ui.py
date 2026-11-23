@@ -91,7 +91,7 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
   window.__pendingOpened=0;
   window.OntologyIntake={open:async options=>{
     window.__pendingOpened++;
-    window.__pendingTarget={projectId:options.projectId,trigger:options.trigger.dataset.ledgerKpi};
+    window.__pendingTarget={projectId:options.projectId};
   }};
   window.showTab=name=>{const b=document.querySelector(`[data-tab="${name}"]`);if(b)b.click();};
   document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{
@@ -193,9 +193,9 @@ def _open(browser, tmp_path, before=None):
                if line.startswith(('const esc =', 'const typeHint='))]
     assert len(helpers) == 2
     page.add_script_tag(content='\n'.join(helpers))
-    for stylesheet in ('style.css', 'workspace.css', 'records-view.css'):
+    for stylesheet in ('style.css', 'workspace.css', 'library-workspace.css', 'records-view.css'):
         page.add_style_tag(path=str(WEB / stylesheet))
-    for script in ('workspace-context.js', 'record-version-context.js',
+    for script in ('workspace-context.js', 'workspace-drawers.js', 'record-version-context.js',
                    'record-attribute-editor.js', 'record-create.js', 'records-view.js'):
         page.add_script_tag(path=str(WEB / script))
     page.evaluate("() => window.WorkspaceContext.enter('records')")
@@ -212,34 +212,27 @@ def _open(browser, tmp_path, before=None):
     assert all(set(batch) == {'record_ids'} and 0 < len(batch['record_ids']) <= 100
                for batch in assertion_batches)
     # Counts are read explicitly, independently of the row-level server badges.
-    tile = page.locator('[data-ledger-kpi="pending"]')
-    assert tile.locator('b').inner_text().strip() == '未读取'
     assert page.evaluate('window.__pendingRequests') == []
-    tile.click()
-    page.wait_for_function("""() => (
-      document.querySelector('[data-ledger-kpi="pending"] b').textContent!=='未读取' ||
-      window.__status?.message.includes('治理信息读取失败'))""")
+    page.click('#ledger-open-model')
+    assert page.evaluate('window.__pendingRequests') == []
+    page.click('#ledger-check-pending')
+    page.wait_for_function("""() => {
+      const text = document.getElementById('ledger-pending-feedback').textContent;
+      return text && text !== '正在读取…';
+    }""")
     assert page.evaluate('window.__unexpectedRequests') == []
     assert errors == []
     return page
 
 
-def test_pending_tile_comes_from_server_and_opens_the_inbox(browser, tmp_path):
-    """数字来自 /structure-pending；点它去审核台收件箱（不是台账里再造一份列表）。"""
+def test_pending_check_comes_from_server_and_opens_the_inbox(browser, tmp_path):
     page = _open(browser, tmp_path)
-    tile = page.locator('[data-ledger-kpi="pending"]')
-    assert tile.count() == 1
-    assert tile.locator('b').inner_text().strip() == '2'
-    assert tile.locator('small').inner_text().strip() == '个概念待定'
-    hint = tile.get_attribute('title')
-    assert all(text in hint for text in ('抽出来的概念还没进本体', '核对可处理候选',
-                                         '手动补充结构定义', 'urn:knowledge:ontology:甲:包裹',
-                                         'urn:knowledge:ontology:甲:寄件人'))
+    assert '有 2 个概念待建模' in page.inner_text('#ledger-pending-feedback')
     assert page.evaluate('window.__pendingOpened') == 0
-    tile.click()
+    page.click('#ledger-open-pending')
     page.wait_for_function('window.__pendingOpened === 1')
-    assert page.evaluate('window.__tabClicked') == 'ontology-model', '点数字要先切到本体建模层'
-    assert page.evaluate('window.__pendingTarget') == {'projectId': 'p1', 'trigger': 'pending'}
+    assert page.evaluate('window.__tabClicked') == 'ontology-model'
+    assert page.evaluate('window.__pendingTarget.projectId') == 'p1'
     assert not page.evaluate('Boolean(window.__status?.isError)')
     page.close()
 
@@ -247,21 +240,17 @@ def test_pending_tile_comes_from_server_and_opens_the_inbox(browser, tmp_path):
 def test_unreadable_inbox_says_unreadable_not_zero(browser, tmp_path):
     """读不到就写"读不到"：0 与"读不到"必须是两件事 —— 数字骗人比没有数字更糟。"""
     page = _open(browser, tmp_path, before='() => { window.mockPendingFail = true; }')
-    tile = page.locator('[data-ledger-kpi="pending"]')
-    assert tile.locator('b').inner_text().strip() == '读不到'
-    assert tile.locator('b').inner_text().strip() != '0'
-    assert '还没读到' in tile.get_attribute('title')
-    assert tile.is_disabled()
+    assert '治理信息读取失败' in page.inner_text('#ledger-pending-feedback')
+    assert page.locator('#ledger-open-pending').count() == 0
+    assert page.locator('#ledger-check-pending').is_enabled()
     page.close()
 
 
 def test_zero_pending_is_a_real_zero_from_the_server(browser, tmp_path):
     """真的 0（本体里概念齐了）要显示 0，并且不能被当成"读不到"。"""
     page = _open(browser, tmp_path, before='() => { window.mockPendingEmpty = true; }')
-    tile = page.locator('[data-ledger-kpi="pending"]')
-    assert tile.locator('b').inner_text().strip() == '0'
-    assert '都在本体里' in tile.get_attribute('title')
-    assert tile.is_disabled(), '没有待建模概念时点进去没有意义'
+    assert '当前没有待建模概念' in page.inner_text('#ledger-pending-feedback')
+    assert page.locator('#ledger-open-pending').count() == 0
     page.close()
 
 
@@ -288,7 +277,7 @@ def test_ledger_static_contract_keeps_the_boundary_copy(browser, tmp_path):
     }], '待定统计只能从服务器按需只读获取，不能由前端推算或写入'
     page.close()
     view = (WEB / 'records-view.js').read_text(encoding='utf-8')
-    assert '个概念待定' in view
+    assert '个概念待建模' in view
     assert '结构待定已解除' in view
     # 前端不许自己解析本体/判断术语是否存在：只消费服务端给的 structure_pending。
     assert 'row.structure_pending' in view

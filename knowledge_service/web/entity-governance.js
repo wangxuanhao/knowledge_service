@@ -66,7 +66,7 @@
       for (const [label, row] of [['保留',data.keep],['并入',data.drop]]) {
         const item = el('div');
         item.append(el('b',null,`${label}：${row.text}`), el('small',null,`类型 ${row.type} · 修订 ${row.version} · 本体 ${row.ontology_id || '未指定'}`),
-          el('small',null,`业务时间 ${row.valid_from || '不限'} — ${row.valid_until || '不限'}`),
+          el('small',null,`业务时间 ${window.DisplayTime.format(row.valid_from,"不限")} — ${window.DisplayTime.format(row.valid_until,"不限")}`),
           el('small',null,`适用范围 ${valueText(row.metadata?.applicability || {})}`));
         compare.append(item);
       }
@@ -83,7 +83,7 @@
           radio.type = 'radio'; radio.name = `winner-${index}`; radio.value = value.id;
           radio.addEventListener('change', () => { selection.choose(index,value.id); sync(); });
           label.append(radio, el('span',null,`${valueText(value.value)} · ${value.datatype || '未指定类型'}`),
-            el('small',null,`${value.id} · 修订 ${value.version ?? '未提供'} · ${value.valid_from || '不限'} — ${value.valid_until || '不限'}`)); field.append(label);
+            el('small',null,`${value.id} · 修订 ${value.version ?? '未提供'} · ${window.DisplayTime.format(value.valid_from,"不限")} — ${window.DisplayTime.format(value.valid_until,"不限")}`)); field.append(label);
         }); dialog.append(field);
       });
       if (!(data.attribute_conflicts || []).length) dialog.append(el('p',null,'本次未检测到 maxCount 1 属性冲突。'));
@@ -146,7 +146,7 @@
             const contexts=el('div','duplicate-source-contexts');card.append(contexts);
             const appendContexts=items=>{for(const source of items){
               const item=el('details'),summary=el('summary',null,`${source.document_title||source.document_id||'人工声明'} · ${source.document_version_id||'无文档版本'}`);
-              item.append(summary,el('p',null,`来源有效期 ${source.valid_from||'未知起点'} — ${source.valid_until||'未知终点'}`),
+              item.append(summary,el('p',null,`来源有效期 ${window.DisplayTime.format(source.valid_from,"未知起点")} — ${window.DisplayTime.format(source.valid_until,"未知终点")}`),
                 el('p',null,'适用范围 '+valueText(source.applicability||{})),el('pre',null,source.quote||'未提供原文引文'));
               if(source.quote_truncated)item.append(el('small',null,'引文仅显示前2000字，完整内容请定位冻结原文。'));
               if(source.document_version_id){const open=el('button','secondary','查看冻结原文');open.type='button';open.addEventListener('click',()=>{
@@ -243,7 +243,7 @@
       }
       const history=(data.reviews||[]).filter(item=>item.status!=='pending');
       if(history.length){const details=el('details'),summary=el('summary',null,`复核历史 · ${history.length}`);details.append(summary);
-        for(const item of history)details.append(el('p',null,`${decisions[item.status]||item.status} · ${item.reason||'原因未提供'} · ${item.actor||''} · ${item.decided_at||''}`));host.append(details);}
+        for(const item of history)details.append(el('p',null,`${decisions[item.status]||item.status} · ${item.reason||'原因未提供'} · ${item.actor||''} · ${window.DisplayTime.format(item.decided_at,'')}`));host.append(details);}
     } catch(error){if(serial===request&&project()===p)host.replaceChildren(el('p',null,'消歧复核读取失败：'+error.message));}
   }
   const apiObject={createWinnerSelection,reviewDecisionPayload,duplicateConfirmationPayload,conflictDecisionPayload,prepareMerge,decide,refresh,

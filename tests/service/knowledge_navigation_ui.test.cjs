@@ -27,10 +27,9 @@ function fixture({projectId='project-b',visible=null,runtimeCurrent='overview'}=
     dispatchEvent(event){
       calls.push(['change',event.type,this.value]);
       context.current=this.value;
-      // Mirror the real listeners: records refreshes; ontology-model only clears;
+      // Mirror the real listeners: records refreshes; review closes;
       // the currently visible runtime subpanel refreshes itself.
       if(state.top==='records')refreshes.records++;
-      if(state.top==='reviews')refreshes.reviews++;
       if(state.top==='runtime')refreshes[state.runtime]++;
     },
   };
@@ -102,11 +101,11 @@ test('an already visible records or ontology page refreshes only from project ch
   }
 });
 
-test('an already visible review page reuses its project-change refresh',async()=>{
+test('an explicit review link reopens the drawer after switching projects',async()=>{
   const {context,calls,refreshes}=fixture({visible:'reviews'});
   await context.window.KnowledgeNavigation.open('reviews',{projectId:'project-b'});
   assert.equal(refreshes.reviews,1);
-  assert.equal(calls.filter(call=>call[0]==='reviews').length,0);
+  assert.equal(calls.filter(call=>call[0]==='reviews').length,1);
 });
 
 test('jobs loads exactly once whether or not it is already the active runtime section',async()=>{

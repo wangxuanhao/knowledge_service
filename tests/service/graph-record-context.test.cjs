@@ -19,13 +19,13 @@ function inspector({defer=false}={}){
   host.querySelectorAll=selector=>selector.includes('data-action="edit"')?
     ['edit','add-relation','add-attribute'].map(action=>host.querySelector('[data-action="'+action+'"]')).concat(host.querySelector('.evidence-danger').children):[];
   let live={known_at:null,filters:{field:'metadata.city',op:'eq',value:'当前'}},revision=1,finish;
-  const context={window:{TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),Auth:{isAdmin:()=>true},
+  const context={window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),Auth:{isAdmin:()=>true},
       WorkspaceContext:{ticket:()=>({revision}),accepts:ticket=>ticket.revision===revision}},
     document:{createElement:tag=>node(tag),body:node(),addEventListener:(name,fn)=>events.set(name,fn)},
     $:get,current:'p',scope:()=>live,endpoint:suffix=>'/api/projects/p'+suffix,
     esc:String,term:String,labelOf:String,status(){},editRecord(){},historyFor(){},
     RecordVersionContext:{revision:()=>1,build:()=>({}),summary:()=>''},
-    api:async(url,body)=>{calls.push({url,body});if(url.endsWith('/ontologies'))return {versions:[]};
+    api:async(url,body)=>{calls.push({url,body});if(url.endsWith('/ontologies?metadata_only=true'))return {versions:[]};
       if(defer)return new Promise(resolve=>finish=resolve);return {documents:[],message:'冻结来源'};},console};
   vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
   const row={id:'entity',kind:'entity',type:'Thing',text:'历史实体',version:1,version_id:'entity-v1'};

@@ -39,7 +39,7 @@ function fixture({ actions = false, syncActions } = {}) {
     on(name, handler) { events[name] = handler; return () => {}; },
   };
   const context = {
-    window: { OntologyModel: model }, current: 'p', console,
+    window: { DisplayTime:require('../../knowledge_service/web/display-time.js'), OntologyModel: model }, current: 'p', console,
     document: { createElement: element, getElementById: id => id === 'tab-ontology-model' ? root : null, body: root },
     endpoint: suffix => '/' + context.current + suffix,
     setTimeout() { return 1; }, clearTimeout() {},

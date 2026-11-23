@@ -366,32 +366,63 @@ class ProjectionStore:
                 sequences.extend(self.enqueue_record_change(project_id, record, record))
             after = rows[-1]['id']
 
-    def enqueue_source_context_changes(self,project_id,record_ids):
+    def enqueue_source_context_changes(self, project_id, record_ids):
         """Freeze supported bodies only after the formal assertion actions finish."""
-        if not self._db.in_transaction:raise RuntimeError('source projection changes require repository transaction')
-        ids=sorted(set(record_ids))
-        if not ids:return []
-        sequences=[]
-        for start in range(0,len(ids),500):
-            selected=ids[start:start+500];after=''
+        if not self._db.in_transaction:
+            raise RuntimeError('source projection changes require repository transaction')
+        ids = sorted(set(record_ids))
+        if not ids:
+            return []
+
+        # Each branch produces distinct IDs, so its first page suffices for
+        # finding the first page of the union. Fetch one extra ID for lookahead.
+        page_size = 500
+        lookahead = page_size + 1
+        statement = f'''WITH changed AS MATERIALIZED (
+                SELECT id, read_kind, read_subject_id, read_object_id
+                FROM record_versions
+                WHERE project_id=? AND superseded_at IS NULL AND id=ANY(?::text[])
+            ), direct AS (
+                SELECT id FROM changed WHERE id>? ORDER BY id LIMIT {lookahead}
+            ), attributes AS (
+                SELECT id FROM record_versions
+                WHERE project_id=? AND superseded_at IS NULL AND read_kind='attribute'
+                  AND read_subject_id=ANY(?::text[]) AND id>?
+                ORDER BY id LIMIT {lookahead}
+            ), endpoints AS (
+                SELECT DISTINCT entity.id FROM changed
+                CROSS JOIN LATERAL (VALUES (changed.read_subject_id), (changed.read_object_id)) endpoint(id)
+                JOIN record_versions entity ON entity.project_id=? AND entity.id=endpoint.id
+                    AND entity.superseded_at IS NULL AND entity.read_kind='entity'
+                WHERE changed.read_kind IN ('relation', 'attribute') AND entity.id>?
+                ORDER BY entity.id LIMIT {lookahead}
+            ), page AS (
+                SELECT id FROM (
+                    SELECT id FROM direct UNION SELECT id FROM attributes UNION SELECT id FROM endpoints
+                ) affected ORDER BY id LIMIT {lookahead}
+            )
+            SELECT record.* FROM page
+            JOIN record_versions record ON record.project_id=? AND record.id=page.id
+                AND record.superseded_at IS NULL
+            ORDER BY record.id'''
+        sequences = []
+        for start in range(0, len(ids), page_size):
+            selected = ids[start:start + page_size]
+            after = ''
             while True:
-                rows=self._db.execute('''SELECT * FROM record_versions WHERE project_id=?
-                    AND superseded_at IS NULL AND id>? AND
-                    (id=ANY(?::text[]) OR (read_kind='attribute' AND read_subject_id=ANY(?::text[]))
-                    OR (read_kind='entity' AND EXISTS(SELECT 1 FROM record_versions changed
-                        WHERE changed.project_id=record_versions.project_id AND changed.id=ANY(?::text[])
-                        AND changed.superseded_at IS NULL AND changed.read_kind IN ('relation','attribute')
-                        AND (changed.read_subject_id=record_versions.id OR changed.read_object_id=record_versions.id))))
-                    ORDER BY id LIMIT 500''',(project_id,after,selected,selected,selected)).fetchall()
-                if not rows:break
-                for raw in rows:
-                    record=self.repository._record(raw)
-                    if record['kind'] not in {'entity','relation','attribute'}:continue
-                    sequences.append(self.enqueue(project_id,'tombstone',record['version_id'],
-                        {'record_id':record['id'],'version_id':record['version_id']}))
+                rows = self._db.execute(statement, (project_id, selected, after,
+                    project_id, selected, after, project_id, after, project_id)).fetchall()
+                for raw in rows[:page_size]:
+                    record = self.repository._record(raw)
+                    if record['kind'] not in {'entity', 'relation', 'attribute'}:
+                        continue
+                    sequences.append(self.enqueue(project_id, 'tombstone', record['version_id'],
+                        {'record_id': record['id'], 'version_id': record['version_id']}))
                     if raw['read_visible']:
-                        sequences.append(self.enqueue(project_id,'upsert',record['version_id'],record))
-                after=rows[-1]['id']
+                        sequences.append(self.enqueue(project_id, 'upsert', record['version_id'], record))
+                if len(rows) <= page_size:
+                    break
+                after = rows[page_size - 1]['id']
         return sequences
 
     def project_watermark(self, project_id):
@@ -836,10 +867,13 @@ class ProjectionStore:
         project_id, target, build_id = claimed.project_id, claimed.target, claimed.build_id
         with self.repository._transaction():
             self._locked_claim(claimed)
+            # This path is only for fresh captures. The locked cursor owns the
+            # sole resumable build for this project and target. Discard partial
+            # input for that build and any superseded captures together.
             self._db.execute(
                 '''DELETE FROM projection_rebuild_snapshots
-                   WHERE project_id=? AND target=? AND build_id=?''',
-                (project_id, target, build_id))
+                   WHERE project_id=? AND target=?''',
+                (project_id, target))
             lease_is_current()
         # A partial receipt remains in phase capturing and is discarded on
         # resume. Publish snapshot_seq only after every ordinal is durable.

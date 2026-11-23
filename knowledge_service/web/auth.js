@@ -168,7 +168,7 @@
             '    <span class="session-name" title="' + escapeHtml(user.username) + '">' + escapeHtml(name) + '</span>' +
             '    <span class="session-role ' + badge.cls + '">' + badge.text + '</span>' +
             '  </span>' +
-            '  <span class="session-caret" aria-hidden="true">▾</span>' +
+            '  <span class="session-caret" aria-hidden="true"></span>' +
             '</button>' +
             // 下拉菜单：只读提示 + 两个动作。默认收起，点击状态栏才展开。
             '<div class="session-menu" id="session-menu">' +

@@ -1,5 +1,5 @@
 /* UI modes resolve to the existing API time axes only when a draft is applied. */
-(function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.TemporalScope=api;})(typeof window==='object'?window:globalThis,function(){
+(function(root,factory){const api=factory(typeof module==='object'&&module.exports?require('./display-time.js'):root.DisplayTime);if(typeof module==='object'&&module.exports)module.exports=api;else root.TemporalScope=api;})(typeof window==='object'?window:globalThis,function(displayTime){
   const localPattern=/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/;
   function localTime(value){
     if(!value)return '';
@@ -38,8 +38,8 @@
     return {mode:value.valid_at?'at':'all',validAt:localTime(value.valid_at),knownAt:localTime(value.known_at),includeUnknown:!value.valid_at||value.include_unknown!==false};
   }
   function describe(value={}){
-    const business=value.valid_at?'业务时点（固定）：'+value.valid_at+' · '+(value.include_unknown===false?'不含生效时间未知':'含生效时间未知'):'全部业务时间（含生效时间未知）';
-    return business+' · '+(value.known_at?'系统修订时点：'+value.known_at:'当前系统版本');
+    const business=value.valid_at?'业务时点（固定）：'+displayTime.format(value.valid_at)+' · '+(value.include_unknown===false?'不含生效时间未知':'含生效时间未知'):'全部业务时间（含生效时间未知）';
+    return business+' · '+(value.known_at?'系统修订时点：'+displayTime.format(value.known_at):'当前系统版本');
   }
   function provenance(value={}){
     const metadata=value.metadata||{};
@@ -60,6 +60,6 @@
     const fraction=(value.match(/\.(\d+)/)?.[1]||'').padEnd(6,'0').slice(0,6);
     return date.toISOString().replace(/\.\d{3}Z$/,'.'+fraction+'Z');
   }
-  const interval=(value={},format=String)=>(value.valid_from?format(value.valid_from):'未知')+' → '+(value.valid_until?format(value.valid_until):'未设结束时间');
+  const interval=(value={},format=displayTime.format)=>(value.valid_from?format(value.valid_from):'未知')+' → '+(value.valid_until?format(value.valid_until):'未设结束时间');
   return {capture,restore,describe,provenance,interval};
 });

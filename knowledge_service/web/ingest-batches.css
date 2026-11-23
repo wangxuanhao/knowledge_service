@@ -29,6 +29,7 @@
 .batch-identity{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0}
 .batch-identity h3{margin:0;font-size:15px;line-height:1.6;overflow-wrap:anywhere}
 .batch-created{margin:0;font-size:12px;color:var(--ui-muted);line-height:1.6}
+.batch-created:empty{display:none}
 .batch-status{flex-shrink:0;padding:4px 9px;border-radius:6px;background:var(--ui-surface-2);color:var(--ui-ink-2);font-size:12px}
 .batch-status[data-status=running]{background:var(--ui-accent-dim);color:var(--ui-accent)}
 .batch-status[data-status=completed]{background:var(--ui-ok-dim);color:var(--ui-ok)}
@@ -38,13 +39,17 @@
 .batch-progress progress::-webkit-progress-bar{background:var(--ui-line);border-radius:6px}
 .batch-progress progress::-webkit-progress-value{background:var(--ui-accent);border-radius:6px}
 .batch-overview .batch-toggle{justify-self:start;margin:0;font-size:12px;padding:6px 10px}
-.batch-toggle:before{content:'';display:inline-block;vertical-align:middle;margin-right:8px;border-top:4px solid transparent;border-bottom:4px solid transparent;border-left:5px solid currentColor}
-.batch-toggle[aria-expanded=true]:before{transform:rotate(90deg)}
+.batch-toggle{display:inline-flex;align-items:center;gap:6px}
+.batch-toggle[aria-expanded=false]::before{transform:rotate(-90deg)}
 .batch-detail{padding:16px 20px 20px;border-top:1px solid var(--ui-line);background:var(--ui-surface-2,#f6faf8)}
 .batch-detail[hidden]{display:none!important}
 .batch-controls-heading,.batch-files-toolbar h4{margin:0;font-size:13px;line-height:1.6;color:var(--ui-ink)}
 .batch-controls-heading+.subtle{margin:5px 0 12px;font-size:12px}
-.batch-files-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:18px 0 0;padding-top:16px;border-top:1px solid var(--ui-line)}
+.batch-files-toolbar,.batch-file-toolbar-actions{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+.batch-file-toolbar-actions button{margin:0;font-size:12px}
+.batch-file-toolbar-actions [hidden]{display:none}
+.batch-operations{margin-top:16px;padding-top:14px;border-top:1px solid var(--ui-line)}
+.batch-operations .batch-actions{margin-bottom:0}
 .batch-files-toolbar select{width:auto;max-width:100%;min-width:140px;margin:0;font-size:12px}
 .batch-detail .batch-items{border-top:0;border-left:2px solid var(--ui-line);padding-left:14px;margin-top:12px}
 .batch-file-stage{color:var(--ui-ink-2);font-size:12px}

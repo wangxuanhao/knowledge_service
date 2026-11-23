@@ -79,7 +79,7 @@ test('simultaneous ingestion version refreshes share one read and a project chan
 test('the hidden ingest panel does not read versions on mount or window focus',async()=>{
   const page=element(),mode=element(),after={after(){}},calls=[],listeners={};page.className='hidden';mode.value='ontology';
   const project=element();project.value='p';
-  const context={window:{addEventListener(name,handler){listeners[name]=handler;}},document:{createElement:element,
+  const context={window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),addEventListener(name,handler){listeners[name]=handler;}},document:{createElement:element,
     getElementById:id=>id==='project'?project:id==='tab-ingest'?page:null,querySelector:()=>null,addEventListener(){}},
     api:async url=>{calls.push(url);return {versions:[],open_draft_count:0};}};
   vm.runInNewContext(web('ingest-ontology.js'),context);context.window.IngestOntology.mount(mode,after);
@@ -89,7 +89,7 @@ test('the hidden ingest panel does not read versions on mount or window focus',a
 
 for(const resolveBeforeReopen of [false,true])test('a hidden upload publication invalidates its earlier version read'+(resolveBeforeReopen?' before reopening':''),async()=>{
   const page=element(),mode=element(),project=element(),listeners={},versions=[];mode.value='ontology';project.value='p';
-  const context={window:{addEventListener(){}},document:{createElement:element,
+  const context={window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),addEventListener(){}},document:{createElement:element,
     getElementById:id=>id==='project'?project:id==='tab-ingest'?page:null,querySelector:()=>null,
     addEventListener(name,handler){listeners[name]=handler;}},api:url=>{
       if(url.endsWith('/ontologies')){const gate=deferred();versions.push(gate);return gate.promise;}

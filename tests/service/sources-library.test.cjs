@@ -1,6 +1,41 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {setup,documentRow,settle}=require('./fixtures/sources-ui.cjs');
+
+test('a processing document can reopen the progress for its own batch file from the library',async()=>{
+  const doc=documentRow('one','processing'),opened=[];
+  Object.assign(doc.metadata,{batch_id:'batch-one',batch_item_id:'item-one',active_stage:'ocr'});
+  const env=setup({documents:[doc],writer:false});
+  env.context.LibraryWorkspace.openBatch=options=>opened.push(options);
+  await settle();
+  const progress=env.list.querySelector('.source-item-progress');
+  assert.ok(progress,'the directory exposes a durable progress action');
+  await progress.click();await progress.click();
+  assert.deepEqual(opened.map(({projectId,batchId,itemId})=>[projectId,batchId,itemId]),[
+    ['project-one','batch-one','item-one'],['project-one','batch-one','item-one']
+  ]);
+  assert.equal(env.drawers[0].dialog.open,false);
+});
+
+test('queued reprocessing opens the current batch even when the saved document still has the old batch',async()=>{
+  const doc=documentRow('one'),opened=[];
+  doc.metadata.batch_id='previous';
+  doc.processing_task={batch_id:'current',batch_item_id:'queued',status:'pending'};
+  const env=setup({documents:[doc]});env.context.LibraryWorkspace.openBatch=options=>opened.push(options);
+  await settle();await env.list.querySelector('.source-item-progress').click();
+  assert.match(env.rows()[0].textContent,/处理任务排队中/);
+  assert.equal(opened[0].batchId,'current');assert.equal(opened[0].itemId,'queued');
+});
+
+test('older documents reopen their exact durable job from the library',async()=>{
+  const doc=documentRow('one','processing'),opened=[];
+  Object.assign(doc.metadata,{durable_task_id:'older-job',extraction_mode:'documents'});
+  const env=setup({documents:[doc]});env.context.IngestResults={watch:(...args)=>opened.push(args)};
+  await settle();await env.list.querySelector('.source-item-progress').click();
+  const [[job,title,options]]=opened;
+  assert.equal(job,'older-job');assert.equal(title,'资料 one');assert.equal(options.focus,true);
+  assert.equal(options.mode,'documents');assert.equal(options.projectId,'project-one');
+});
 test('a versioned document defaults to rich fixed content with an explicit saved-text toggle and download',async()=>{
   const env=setup({rendered:async()=>({ok:true,text:async()=>'<h2 data-block-id="heading">排版正文</h2><p>图片前</p><table><tbody><tr><td>金额</td></tr></tbody></table><p>图片后</p>'})});
   await settle();await env.rows()[0].click();
@@ -9,10 +44,10 @@ test('a versioned document defaults to rich fixed content with an explicit saved
   assert.match(env.fetches[0].url,/project-one\/source-documents\/version-one\/rendered$/);
   assert.equal(env.fetches.length,1,'library rendering needs no extra version metadata or chunk read');
   const controls=env.get('source-meta').querySelector('.source-reading-controls');
-  const plain=controls.querySelectorAll('button').find(button=>button.textContent==='已保存正文');await plain.click();
+  const plain=controls.querySelectorAll('button').find(button=>button.textContent==='纯文本');await plain.click();
   assert.equal(env.body.textContent,'原文 one');assert.equal(env.body.classList.contains('source-rich-content'),false);
-  const rich=controls.querySelectorAll('button').find(button=>button.textContent==='图文阅读');await rich.click();assert.ok(env.body.querySelector('h2'));
-  assert.match(env.get('source-meta').querySelector('.source-downloads').querySelector('a').href,/version-one\/source$/);
+  const rich=controls.querySelectorAll('button').find(button=>button.textContent==='图文');await rich.click();assert.ok(env.body.querySelector('h2'));
+  assert.match(env.get('source-meta').querySelector('.source-reading-actions').querySelector('a').href,/version-one\/source$/);
 });
 
 test('the library shows the configured platform on the document row and in its details',async()=>{
@@ -51,7 +86,7 @@ test('legacy saved text is explained even when original filename metadata is pre
   const doc=documentRow('legacy');delete doc.metadata.source_document_version_id;
   const env=setup({documents:[doc]});await settle();await env.rows()[0].click();
   assert.equal(env.body.textContent,'原文 legacy');assert.match(env.get('source-meta').textContent,/旧资料仅保留已保存正文，未关联固定来源版本/);
-  assert.match(env.get('source-meta').querySelector('.source-meta__head').textContent,/legacy.txt/);
+  assert.match(env.get('source-meta').querySelector('.source-meta__file').textContent,/legacy.txt/);
   assert.equal(env.fetches.length,0);
 });
 
@@ -85,7 +120,7 @@ test('missing file metadata is explained without presenting a record ID as a fil
   const head=env.document.querySelector('.source-meta__head');
   assert.doesNotMatch(head.textContent,/未知类型|未知大小|未知解析器/);
   assert.doesNotMatch(head.textContent,new RegExp(id));
-  assert.match(head.textContent,/业务规则/);
+  assert.equal(env.title.textContent,'业务规则');
   assert.match(env.get('source-meta').textContent,/未记录原始文件信息/);
 });
 
@@ -224,7 +259,7 @@ test('record history distinguishes status updates from text changes without repe
 test('only explicit row selection opens details; closing, refreshing and filtering never reopen them',async()=>{
   const env=setup();await settle();let row=env.rows()[1];await row.click();
   const drawer=env.drawers[0];assert.equal(drawer.dialog.open,true);assert.equal(env.title.textContent,'资料 two');assert.equal(env.body.textContent,'原文 two');
-  assert.deepEqual(env.document.querySelector('.source-detail-tabs').querySelectorAll('button').slice(0,4).map(button=>button.textContent),['原文','提取知识','处理记录','修订记录']);
+  assert.deepEqual(env.document.querySelector('.source-detail-tabs').querySelectorAll('button').map(button=>button.textContent),['原文','抽取结果','处理记录','修订记录']);
   drawer.close();assert.equal(env.document.activeElement,row);
   await env.refresh.click();assert.equal(drawer.dialog.open,false);assert.equal(env.title.textContent,'');
   row=env.rows()[0];await row.click();await env.filter('processing').click();
@@ -235,7 +270,7 @@ test('only explicit row selection opens details; closing, refreshing and filteri
 
 test('detail responses respect the latest document, tab and request even when reads finish out of order',async()=>{
   const env=setup();await settle();await env.rows()[0].click();
-  const assertions=env.tab('提取知识').click(),old=env.requests.at(-1),runs=env.tab('处理记录').click(),latest=env.requests.at(-1);
+  const assertions=env.tab('抽取结果').click(),old=env.requests.at(-1),runs=env.tab('处理记录').click(),latest=env.requests.at(-1);
   latest.resolve({runs:[{id:'latest-run'}]});await runs;old.resolve({assertions:[{kind:'old-assertion',payload:{text:'obsolete'}}]});await assertions;
   assert.equal(env.body.querySelector('.source-processing-run').dataset.runId,'latest-run');assert.doesNotMatch(env.body.textContent,/obsolete/);
   const history=env.tab('修订记录').click(),pending=env.requests.at(-1);await env.tab('原文').click();pending.resolve({versions:[{id:'obsolete-history'}]});await history;
@@ -265,7 +300,7 @@ test('switching to original text suppresses a stale tab failure while current fa
 
 test('project and scope changes close the drawer and discard pending detail responses',async()=>{
   for(const change of ['project','scope']){
-    const env=setup();await settle();await env.rows()[0].click();const pending=env.tab('提取知识').click(),request=env.requests.at(-1);
+    const env=setup();await settle();await env.rows()[0].click();const pending=env.tab('抽取结果').click(),request=env.requests.at(-1);
     if(change==='scope')await env.changeScope();else {env.context.current='project-two';await env.project.dispatch('change');await settle();}
     assert.equal(env.drawers[0].dialog.open,false,change);const expected=env.body.textContent;request.reject(Error('stale-'+change));await pending;
     assert.equal(env.body.textContent,expected,change);assert.doesNotMatch(env.body.textContent,/stale-/);
@@ -287,11 +322,16 @@ test('viewer can read all tabs without upload or modeling write entry points',as
 test('structure intake receives the exact source and closes its old drawer first',async()=>{
   const env=setup(),opened=[];env.context.OntologyIntake={open:async args=>opened.push({args,drawerOpen:env.drawers[0].dialog.open})};
   await settle();await env.rows()[0].click();
-  const action=env.tab('完善本体结构');assert.ok(action);
+  const getAction=async()=>{
+    const loading=env.tab('抽取结果').click();
+    env.requests.at(-1).resolve({assertions:[{kind:'entity',status:'pending',payload:{name:'候选'}}]});await loading;
+    return env.body.querySelectorAll('button').find(button=>button.textContent==='完善本体结构');
+  };
+  const action=await getAction();assert.ok(action);
   await action.click();assert.equal(opened.length,1);assert.equal(opened[0].drawerOpen,false);
   assert.equal(opened[0].args.projectId,'project-one');assert.equal(opened[0].args.documentId,'one');
   assert.equal(env.navigation.at(-1),'ontology-model');
-  await env.rows()[0].click();const old=env.tab('完善本体结构');
+  await env.rows()[0].click();const old=await getAction();
   env.context.current='project-two';await env.project.dispatch('change');await settle();
   await old.click();assert.equal(opened.length,1,'an old source button cannot open intake in another project');
 });
@@ -304,12 +344,17 @@ test('an admin role arriving after script startup can use the CSS-controlled upl
   await env.upload.click();assert.equal(env.navigation.at(-1),'upload');
 });
 
-test('reader and formal record links close the source drawer before opening their existing overlays',async()=>{
-  const env=setup();await settle();await env.rows()[0].click();assert.equal(env.drawers[0]?.dialog.open,true);const reader=env.get('source-meta').querySelectorAll('button').find(button=>button.textContent==='在原文中打开');await reader.click();
-  assert.equal(env.external[0].drawerOpen,false);assert.equal(env.external[0].args.projectId,'project-one');assert.equal(env.external[0].args.versionId,'version-one');
-  await env.rows()[0].click();const pending=env.tab('提取知识').click();env.requests.at(-1).resolve({assertions:[{kind:'entity',status:'accepted',payload:{name:'员工'},canonical_record_id:'record-one'}]});await pending;
+test('inline parsing keeps the source drawer open and formal record links still close it',async()=>{
+  const env=setup(),parsing=[];
+  env.context.SourceReader.renderParsed=async args=>{parsing.push(args);args.host.textContent='解析片段';};
+  await settle();await env.rows()[0].click();
+  const parse=env.get('source-meta').querySelector('.source-reading-controls').querySelectorAll('button').find(button=>button.textContent==='解析');
+  assert.ok(parse,'parsing belongs beside the other reading modes');await parse.click();
+  assert.equal(env.drawers[0].dialog.open,true);assert.equal(env.body.textContent,'解析片段');assert.equal(env.external.length,0);
+  assert.equal(parsing[0].projectId,'project-one');assert.equal(parsing[0].versionId,'version-one');
+  const pending=env.tab('抽取结果').click();env.requests.at(-1).resolve({assertions:[{kind:'entity',status:'accepted',payload:{name:'员工'},canonical_record_id:'record-one'}]});await pending;
   const open=env.body.querySelectorAll('button').find(button=>button.textContent==='查看正式知识');await open.click();
-  assert.equal(env.external[1].drawerOpen,false);assert.equal(env.external[1].args.id,'record-one');assert.equal(env.external[1].args.projectId,'project-one');assert.equal(env.navigation.at(-1),'records');
+  assert.equal(env.external[0].drawerOpen,false);assert.equal(env.external[0].args.id,'record-one');assert.equal(env.external[0].args.projectId,'project-one');assert.equal(env.navigation.at(-1),'records');
 });
 
 test('an explicit source deep link opens its row even when the current status filter hides it',async()=>{

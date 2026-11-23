@@ -49,6 +49,26 @@ class EntityTextRevision:
                 or repository._transaction_state.depth != self._depth):
             raise ValueError('正式写入权威会话已失效')
 
+    def ontology_rows(self, bound_id):
+        """Load the bound and latest Turtle in the same authority transaction."""
+        self._check_owner()
+        row = self.repository._db.execute(
+            '''SELECT bound.turtle AS bound_turtle, latest.id AS latest_id,
+                      CASE WHEN latest.id <> bound.id THEN latest.turtle END AS latest_turtle
+               FROM ontologies bound
+               CROSS JOIN LATERAL (
+                   SELECT id, turtle FROM ontologies WHERE project_id=bound.project_id
+                   ORDER BY created_at DESC, id DESC LIMIT 1
+               ) latest
+               WHERE bound.project_id=? AND bound.id=?''',
+            (self.project_id, bound_id)).fetchone()
+        if row is None:
+            raise KeyError(bound_id)
+        bound = {'id': bound_id, 'turtle': row['bound_turtle']}
+        latest = bound if row['latest_id'] == bound_id else {
+            'id': row['latest_id'], 'turtle': row['latest_turtle']}
+        return bound, latest
+
     def requires_full_validation(self, ontology_id):
         """Conservatively certify the unchanged endpoint and constraint baseline."""
         self._check_owner()

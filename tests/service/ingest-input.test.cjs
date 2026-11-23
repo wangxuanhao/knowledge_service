@@ -12,7 +12,7 @@ function form(){
     focus(){},addEventListener(name,handler){this.events[name]=handler;},classList:{toggle(){},add(){},remove(){}},closest(){return {classList:{toggle(){}}};},
     replaceChildren(){},append(){}};
   const modes=[{value:'file',checked:false,addEventListener(){}},{value:'text',checked:true,addEventListener(){}}];
-  const window={};
+  const window={DisplayTime:require('../../knowledge_service/web/display-time.js')};
   const document={getElementById:id=>fields[id],querySelector:()=>null,querySelectorAll:()=>modes,createElement:()=>({className:'',textContent:'',dataset:{},append(){},addEventListener(){}})};
   vm.runInNewContext(fs.readFileSync('knowledge_service/web/ingest-mode.js','utf8'),{window,document,JSON,Date,Error});
   return {fields,modes,window,queue:window.DocumentUploadQueue,read:window.readDocumentInput,

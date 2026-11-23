@@ -82,6 +82,72 @@ def test_local_wheel_reaches_graph_inside_plot(redesign_page):
     assert errors == []
 
 
+def test_local_wheel_bursts_share_one_render_and_preserve_camera(redesign_page):
+    page, errors = redesign_page
+    _load(page, 'local')
+    bursts = page.evaluate('''async () => {
+      const chart=wb.chart, host=chart.getDom(), surface=host.querySelector('canvas'), box=host.getBoundingClientRect();
+      const read=()=>{
+        const series=chart.getModel().getSeriesByIndex(0), t=series.coordinateSystem.transform;
+        return {scale:series.get('zoom'),x:t[4],y:t[5]};
+      };
+      let updates=0;
+      chart.on('graphroam',()=>updates++);
+      const results=[];
+      for(const events of [
+        [[-240,120,80,0],[-8,230,110,1],[60,300,150,0]],
+        [[-4000,45,50,0],[-2,80,50,2],[20,180,100,0],[4000,200,250,0],[4000,400,120,0]],
+        [[-240,200,100,0],[240,335,170,0]],
+      ]){
+        const before=read(),expected={...before};
+        let captured=0;
+        updates=0;
+        for(const [delta,x,y,mode] of events){
+          const unit=mode===1?16:mode===2?box.height:1;
+          const factor=Math.exp(-Math.max(-2000,Math.min(2000,delta*unit))*.0015);
+          const scale=Math.min(4,Math.max(.2,expected.scale*factor)),ratio=scale/expected.scale;
+          expected.x=x+(expected.x-x)*ratio;
+          expected.y=y+(expected.y-y)*ratio;
+          expected.scale=scale;
+          const event=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:delta,deltaMode:mode,
+            clientX:box.left+x,clientY:box.top+y});
+          surface.dispatchEvent(event);
+          captured+=Number(event.defaultPrevented);
+        }
+        const immediate=updates;
+        await new Promise(requestAnimationFrame);
+        results.push({before,expected,after:read(),immediate,updates,captured,events:events.length});
+      }
+      return results;
+    }''')
+    for burst in bursts:
+        assert burst['after'] == pytest.approx(burst['expected'], abs=.001)
+        assert burst['captured'] == burst['events']
+        assert burst['immediate'] == 0, burst
+        assert burst['updates'] == 1, burst
+    assert bursts[-1]['after']['scale'] == pytest.approx(bursts[-1]['before']['scale'])
+    assert bursts[-1]['after']['x'] != pytest.approx(bursts[-1]['before']['x'])
+    assert errors == []
+
+
+def test_revealing_unchanged_local_graph_skips_resize_and_label_rebuild(redesign_page):
+    page, errors = redesign_page
+    _load(page, 'local')
+    calls = page.evaluate('''async () => {
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      const chart=wb.chart,calls={resize:0,setOption:0};
+      for(const method of Object.keys(calls)){
+        const original=chart[method];
+        chart[method]=function(...args){calls[method]++;return original.apply(this,args);};
+      }
+      GraphWorkbench.reveal();
+      await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+      return calls;
+    }''')
+    assert calls == {'resize': 0, 'setOption': 0}
+    assert errors == []
+
+
 def test_full_graph_node_drag_moves_only_that_node(redesign_page):
     page, errors = redesign_page
     _load(page, 'full')

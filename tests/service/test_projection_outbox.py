@@ -182,7 +182,7 @@ def test_capturing_state_without_snapshot_sequence_is_recaptured():
 
 def test_projection_migration_defines_locked_sequence_outbox_and_cursors():
     migration = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
-                 'repository' / 'migrations' /
+                 'repository' / 'migrations' / 'legacy' /
                  '0016_projection_outbox.sql').read_text(encoding='utf-8')
 
     assert 'project_projection_sequences' in migration

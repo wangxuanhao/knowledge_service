@@ -82,7 +82,7 @@ def review_browser_check(width, output=None):
             throw Error('Unexpected offline route: '+url);
           };
         }''')
-        for name in ['ontology-draft-data.js', 'ontology-model-catalog.js', 'ontology-draft-history.js', 'ontology-model-workspace.js',
+        for name in ['display-time.js', 'ontology-draft-data.js', 'ontology-model-catalog.js', 'ontology-draft-history.js', 'ontology-model-workspace.js',
                      'ontology-model.js', 'ontology-review-workspace.js', 'ontology-model-panel.js']:
             page.add_script_tag(content=(WEB / name).read_text(encoding='utf-8'))
         page.evaluate('''() => {

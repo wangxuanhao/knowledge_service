@@ -282,7 +282,7 @@ def test_cleanup_ack_rejects_late_token_even_for_same_owner():
 
 def test_cleanup_migration_has_no_projects_foreign_key_and_supports_leases():
     migration = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
-                 'repository' / 'migrations' /
+                 'repository' / 'migrations' / 'legacy' /
                  '0017_projection_cleanup_outbox.sql').read_text(encoding='utf-8')
     assert 'projection_cleanup_outbox' in migration
     assert 'REFERENCES projects' not in migration

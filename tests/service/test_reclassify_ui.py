@@ -201,9 +201,9 @@ def _open(browser, tmp_path, before=None, ready=None):
                if line.startswith(('const esc =', 'const typeHint='))]
     assert len(helpers) == 2
     page.add_script_tag(content='\n'.join(helpers))
-    for stylesheet in ('style.css', 'workspace.css', 'records-view.css'):
+    for stylesheet in ('style.css', 'workspace.css', 'library-workspace.css', 'records-view.css'):
         page.add_style_tag(path=str(WEB / stylesheet))
-    for script in ('workspace-context.js', 'record-version-context.js',
+    for script in ('workspace-context.js', 'workspace-drawers.js', 'record-version-context.js',
                    'record-attribute-editor.js', 'record-create.js', 'records-view.js'):
         page.add_script_tag(path=str(WEB / script))
     page.evaluate("() => window.WorkspaceContext.enter('records')")
@@ -224,11 +224,11 @@ def _open(browser, tmp_path, before=None, ready=None):
     assert page.evaluate('window.__planRead') is False
     assert page.evaluate('window.__applied') is None
     assert page.evaluate('window.__previewed') is None
+    page.click('#ledger-open-model')
     page.get_by_role('button', name='检查本体归属', exact=True).click()
     page.wait_for_function("""() => window.__planRead && (
       document.getElementById('ledger-stale-notice').textContent.includes('另有') ||
-      window.__status?.message.includes('当前没有待迁移') ||
-      window.__status?.message.includes('治理信息读取失败'))""", timeout=5000)
+      document.getElementById('ledger-ownership-feedback').textContent !== '正在读取…')""", timeout=5000)
     if ready:
         page.wait_for_function(ready, timeout=5000)
     assert page.evaluate('window.__planReads') == 1
@@ -294,7 +294,8 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     用户点名台账要维护「实体、关系、属性」。
     """
     page = _open(browser, tmp_path)
-    tabs = page.locator('.ledger-tab')
+    page.keyboard.press('Escape')
+    tabs = page.locator('.ledger-tab-label')
     labels = [tabs.nth(index).inner_text().strip() for index in range(tabs.count())]
     assert labels == ['实体', '关系', '属性', '原文片段'], f'台账视角不对：{labels}'
     page.click('[data-ledger-view="attribute"]')
@@ -303,7 +304,7 @@ def test_ledger_has_an_attribute_view_with_subject_and_value(browser, tmp_path):
     headers = [h.strip() for h in page.locator('#records thead th').all_inner_texts()]
     assert headers == ['属性', '所属实体', '本体归属', '知识修订', '关联断言', '操作']
     row = page.locator('#records tbody tr').first
-    excerpt = re.sub(r'\s+', '', row.locator('.record-excerpt').inner_text())
+    excerpt = re.sub(r'\s+', '', row.locator('td').first.locator('.record-excerpt').inner_text())
     assert excerpt == '重量=12', f'属性行读不出「属性名 = 值」：{excerpt}'
     assert '一号包裹' in row.inner_text(), '属性行没有显示它挂在哪个实体上'
     assert page.evaluate('window.__assertionBatchBodies.at(-1).record_ids') == ['a1']

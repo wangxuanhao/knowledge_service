@@ -56,12 +56,13 @@ async function renderDiscoveryHint(){
 }
 for(const tab of ['graph','search','mindmap'])document.querySelector(`[data-tab="${tab}"]`)?.addEventListener('click',()=>renderDiscoveryHint().catch(()=>{}));
 let snapshotGeneration=0,snapshotRequest=0,snapshotRenderedRequest=0;
+let snapshotRows=[];
 function snapshotViewVisible(){
   const visible=id=>{const panel=document.getElementById(id);return !!panel&&!panel.hidden&&!panel.classList.contains('hidden');};
   return window.RuntimeView?.current==='snapshots'&&visible('tab-runtime')&&visible('tab-evaluation');
 }
 const oldChange=$('project').onchange;
-$('project').onchange=()=>{snapshotGeneration++;snapshotRequest++;$('snapshot-cards').textContent='';wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});if(snapshotViewVisible())snapshots().catch(e=>status(e.message,true));};
+$('project').onchange=()=>{snapshotGeneration++;snapshotRequest++;snapshotRows=[];$('snapshot-cards').textContent='';$('load-older-snapshots').hidden=true;wb.clearVersionContext();oldChange();wb.records.clear();for(const id of ['dashboard','source-list','source-body','resolve-result','tasks','operations','evaluation-result'])$(id).textContent='';const preferred=$('project').selectedOptions?.[0]?.dataset?.ontologyMode,mode=document.getElementById('extraction-mode');if(preferred&&mode){mode.value=preferred;mode.onchange?.();}wb.tree?.clear();renderDiscoveryHint().catch(()=>{});if(snapshotViewVisible())snapshots().catch(e=>status(e.message,true));};
 let dashboardRequest=0;
 async function dashboard(){const request=++dashboardRequest,p=current;controlsProject();const r=await api(endpoint('/dashboard'),{});if(request!==dashboardRequest||p!==current)return;
 
@@ -168,7 +169,7 @@ bind('restore-version',async()=>{
   if(acceptsEditor())$('revision-version').value=result.version;
   status('历史内容已恢复为新版本 '+result.version+note);
 });
-async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(x.recorded_at)}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api('/api/projects/'+encodeURIComponent(p)+'/operations/'+b.dataset.undo+'/undo',{});const note=await committedKnowledgeChange(p,r,'undo');if(p!==current)return;status('已恢复 '+r.restored+' 条记录。'+note);await operations();}catch(e){if(p===current)status(e.message,true);}});}
+async function operations(){const p=current,r=await api(endpoint('/operations'),undefined,'GET');if(p!==current)return;$('operations').innerHTML=r.operations.map(x=>`<div class="candidate"><b>${esc(x.metadata.operation)}</b> · ${esc(window.DisplayTime.format(x.recorded_at))}<small>${esc(x.metadata.operation_id)}</small><button data-undo="${esc(x.metadata.operation_id)}">撤销该操作</button></div>`).join('')||'<p>暂无治理操作。</p>';$('operations').querySelectorAll('[data-undo]').forEach(b=>b.onclick=async()=>{try{const r=await api('/api/projects/'+encodeURIComponent(p)+'/operations/'+b.dataset.undo+'/undo',{});const note=await committedKnowledgeChange(p,r,'undo');if(p!==current)return;status('已恢复 '+r.restored+' 条记录。'+note);await operations();}catch(e){if(p===current)status(e.message,true);}});}
 bind('load-operations',operations);
 bind('load-sources',async()=>{const r=await scopedRead('/sources');$('source-list').innerHTML=r.documents.map((d,i)=>`<button data-source="${i}" class="source-item">${esc(d.metadata.title||d.metadata.source_file||d.id)}<small>${d.text.length} 字 · ${d.derived_count} 条派生知识</small></button>`).join('');$('source-list').querySelectorAll('[data-source]').forEach(b=>b.onclick=()=>{const d=r.documents[Number(b.dataset.source)];$('source-body').textContent=d.text||'旧项目未保存完整原文；可查片段与原始导入记录。';$('source-title').textContent=d.metadata.title||d.id;});if(r.documents.length)$('source-list').querySelector('button').click();});
 bind('draw-mindmap',async()=>{const ontologyScope=wb.ontologyScope?wb.ontologyScope():{};const r=await scopedRead('/mindmap',{...ontologyScope,root_id:$('mindmap-root').value,depth:Number($('mindmap-depth').value)});if(!wb.tree)wb.tree=echarts.init($('mindmap-canvas'));const convert=n=>({name:n.text+(n.predicate?' · '+labelOf(n.predicate):''),id:n.id,children:n.children.map(convert)});wb.tree.setOption({tooltip:{formatter:p=>esc(p.name)},series:[{type:'tree',data:[convert(r.tree)],top:'8%',left:'20%',bottom:'8%',right:'20%',symbolSize:9,roam:true,label:{position:'right',verticalAlign:'middle',align:'left'},leaves:{label:{position:'right',align:'left'}},expandAndCollapse:true,initialTreeDepth:3}]},true);wb.tree.resize();renderDiscoveryHint().catch(()=>{});});
@@ -215,7 +216,7 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
     const icon=getTaskIcon(j.kind);
     const progress=j.progress||0;
     const progressClass=getProgressClass(progress);
-    const logs=(j.logs||[]).join('\n');
+    const logs=(j.logs||[]).map(window.DisplayTime.formatLogLine).join('\n');
     const taskId='task-'+j.id.replace(/[^a-zA-Z0-9]/g,'-');
 
     return `
@@ -624,25 +625,31 @@ bind('ingest',async()=>{
   }
   status(`已提交 ${accepted} 个文档，提交失败 ${failed} 个。本页会保留每个文件的提交结果。`,failed>0);
 });
-async function snapshots(){
+async function snapshots(before=null){
   const project=controlsProject(),generation=snapshotGeneration,request=++snapshotRequest;
   const sameProject=()=>project===current&&generation===snapshotGeneration;
   const accepts=()=>sameProject()&&request===snapshotRequest;
-  const container=$('snapshot-cards');
+  const container=$('snapshot-cards'),more=$('load-older-snapshots');
   container.inert=true;
+  more.disabled=true;
   container.setAttribute?.('aria-busy','true');
   let result;
-  try{result=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots',undefined,'GET');}
+  const page='?limit=32'+(before===null?'':'&before='+encodeURIComponent(before));
+  try{result=await api('/api/projects/'+encodeURIComponent(project)+'/snapshots'+page,undefined,'GET');}
   catch(error){if(accepts())throw error;return;}
-  finally{if(accepts()){container.inert=false;container.removeAttribute?.('aria-busy');}}
+  finally{if(accepts()){container.inert=false;more.disabled=false;container.removeAttribute?.('aria-busy');}}
   if(!accepts())return;
   snapshotRenderedRequest=request;
-  const r=result;
-  if(!r.snapshots.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}
-  const items=r.snapshots.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0')+' '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0');const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';
+  snapshotRows=before===null?result.snapshots:[...snapshotRows,...result.snapshots];
+  more.hidden=result.next_cursor==null;
+  if(!snapshotRows.length){container.innerHTML='<div class="eval-snapshot-empty"><p>📋</p><p>还没有快照，先保存一个快照</p></div>';return;}
+  const items=snapshotRows.map(s=>{const isAuto=s.kind==='auto'||s.name.startsWith('Before restoring ')||s.name.startsWith('恢复前自动备份 · ');let displayName=s.name;if(isAuto)displayName=s.name.replace(/^Before restoring /,'').replace(/^恢复前自动备份 · /,'');return{s,isAuto,displayName};});const nameCounts={};items.forEach(i=>{nameCounts[i.displayName]=(nameCounts[i.displayName]||0)+1;});items.sort((a,b)=>{if(a.isAuto!==b.isAuto)return a.isAuto?1:-1;return new Date(b.s.created_at)-new Date(a.s.created_at);});container.innerHTML='<div class="eval-snapshot-cards">'+items.map(({s,isAuto,displayName})=>{const dt=new Date(s.created_at);const dateStr=window.DisplayTime.format(s.created_at);const diffMs=Date.now()-dt.getTime();let rel='';if(diffMs>=0&&diffMs<60000)rel='刚刚';else if(diffMs<3600000)rel=Math.floor(diffMs/60000)+' 分钟前';else if(diffMs<86400000)rel=Math.floor(diffMs/3600000)+' 小时前';else if(diffMs<2592000000)rel=Math.floor(diffMs/86400000)+' 天前';const badge=isAuto?'<span class="eval-snapshot-badge auto">自动备份</span>':'<span class="eval-snapshot-badge manual">手动快照</span>';const recordCount=s.record_count!=null?'<span class="eval-snapshot-records">· '+s.record_count+' 条记录</span>':'';const idSuffix=nameCounts[displayName]>1?'<span class="eval-snapshot-id">#'+esc(s.id.slice(0,6))+'</span>':'';return '<div class="eval-snapshot-card" data-id="'+esc(s.id)+'"><div class="eval-snapshot-header"><span class="eval-snapshot-name">'+esc(displayName)+'</span>'+badge+'</div><div class="eval-snapshot-meta">'+esc(dateStr)+(rel?' · '+esc(rel):'')+idSuffix+recordCount+'</div><div class="eval-snapshot-actions"><button data-snapshot-restore="'+esc(s.id)+'" class="secondary">恢复</button></div></div>';}).join('')+'</div>';
   const requireContext=()=>{
     if(sameProject()&&snapshotRenderedRequest===request&&!container.inert)return true;
     status('项目或备份列表已变化，请在当前项目重新选择快照。',true);return false;
+  };
+  more.onclick=more.hidden?null:()=>{
+    if(requireContext())return snapshots(result.next_cursor).catch(error=>status(error.message,true));
   };
   container.querySelectorAll('[data-snapshot-restore]').forEach(button=>{
     button.onclick=()=>{
@@ -699,8 +706,8 @@ function evaluationRunContext(gold){
   }
   if(gold.ontology_scope==='ids')scope.push('本体版本：'+(gold.ontology_ids||[]).join('、'));
   if(gold.ontology_scope==='unknown')scope.push('本体版本：未知');
-  if(gold.valid_at)scope.push('业务时间：'+gold.valid_at+(gold.include_unknown===false?' · 排除未知起始时间':''));
-  if(gold.known_at)scope.push('系统时间：'+gold.known_at);
+  if(gold.valid_at)scope.push('业务时间：'+window.DisplayTime.format(gold.valid_at)+(gold.include_unknown===false?' · 排除未知起始时间':''));
+  if(gold.known_at)scope.push('系统时间：'+window.DisplayTime.format(gold.known_at));
   if(gold.filters)scope.push('已应用 Metadata 条件');
   return ['标准答案：实体 '+gold.entities.length+' 项、关系 '+gold.relations.length+' 项',
     ...(scope.length?scope:['当前项目全部知识'])].join(' · ');
@@ -809,8 +816,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const labels={effective:'本次时点有效',expired:'已失效',not_yet_effective:'尚未生效',unknown:'有效性待核对',conflict:'有效性冲突待核对'};
     const basisLabels={explicit:'明确维护',valid_from:'规范生效时间',valid_until:'规范失效时间',source_validity:'来源有效期',missing_valid_from:'未维护生效时间',published_at:'发布日期推定',unknown:'待核对'};
     return (labels[row.validity_status]||'有效性待核对')
-      +' · 生效：'+(row.valid_from||'未维护')+' · 失效（不含）：'+(row.valid_until||'未维护')
-      +(row.metadata?.published_at?' · 发布：'+row.metadata.published_at:'')
+      +' · 生效：'+window.DisplayTime.format(row.valid_from,"未维护")+' · 失效（不含）：'+window.DisplayTime.format(row.valid_until,"未维护")
+      +(row.metadata?.published_at?' · 发布：'+window.DisplayTime.format(row.metadata.published_at):'')
       +(row.validity_basis?' · 判定依据：'+(basisLabels[row.validity_basis]||row.validity_basis):'')
       +(row.metadata?.effective_time_source?' · 时间来源：'+(basisLabels[row.metadata.effective_time_source]||row.metadata.effective_time_source):'');
   };
@@ -830,8 +837,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   function addSourceEligibility(article,row){
     for(const source of row.source_eligibility||[]){
       const line=document.createElement('p');line.className='qa-source-governance subtle';
-      line.textContent='有效期核对：版本 '+(source.governance_version_id||'未提供')+' · 生效：'+(source.valid_from||'未维护')
-        +' · 失效（不含）：'+(source.valid_until||'未维护')+' · 原文版本：'+(source.document_version_id||'未提供');
+      line.textContent='有效期核对：版本 '+(source.governance_version_id||'未提供')+' · 生效：'+window.DisplayTime.format(source.valid_from,"未维护")
+        +' · 失效（不含）：'+window.DisplayTime.format(source.valid_until,"未维护")+' · 原文版本：'+(source.document_version_id||'未提供');
       article.append(line);
     }
   }
@@ -943,7 +950,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     panel.append(note);
     if(payload.as_of||payload.known_at){
       const time=document.createElement('p');time.className='qa-time-context subtle';
-      time.textContent='规则判断时点：'+(payload.as_of||'—')+' · 系统知识时点：'+(payload.known_at||'—');panel.append(time);
+      time.textContent='规则判断时点：'+window.DisplayTime.format(payload.as_of)+' · 系统知识时点：'+window.DisplayTime.format(payload.known_at);panel.append(time);
     }
     if(warnings.length){
       const coverage=document.createElement('div');coverage.className='qa-coverage-warnings';coverage.setAttribute('role','status');
@@ -1303,7 +1310,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     send.disabled=false;
     if(notify&&had)summary.textContent='范围已变化，已清空当前会话。';
   };
-  document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page!=='qa')return;serial++;controller?.abort();controller=null;busy=false;preparing=false;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
+  document.addEventListener('workspace:scope-changed',event=>{if(!['search','qa'].includes(event.detail.page))return;serial++;controller?.abort();controller=null;busy=false;preparing=false;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
   $c('qa-composer').addEventListener('submit',event=>{event.preventDefault();submit();});
   $c('qa-clear')?.addEventListener('click',()=>window.clearKnowledgeChat({clearPersist:true,notify:true}));
   // Milvus failure is explicit; keyword remains a user-selected independent mode.

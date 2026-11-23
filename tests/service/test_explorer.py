@@ -210,6 +210,42 @@ def test_explorer_scope_sources_snapshot_and_evaluation(tmp_path):
         assert score['entities']['f1']==1 and score['relations']['f1']==1
 
 
+def test_snapshot_list_pages_summaries_and_reads_legacy_snapshots(tmp_path):
+    app = create_app(tmp_path / 'snapshots', HashingEncoder())
+    with TestClient(app) as client:
+        project = client.post('/api/projects', json={'name': 'snapshots', 'use_default_ontology': False}).json()['id']
+        other = client.post('/api/projects', json={'name': 'other', 'use_default_ontology': False}).json()['id']
+        path = f'/api/projects/{project}/snapshots'
+        repository = app.state.service.repository
+
+        def save(identifier, project_id=project, **fields):
+            return repository.save_artifact('snapshot', dict(id=identifier, name=identifier, project_id=project_id,
+                records=[{'private_body': identifier}], ontologies=['stored ontology'], **fields))
+
+        legacy = save('old', legacy_label='retained')
+        save('second')
+        save('third', kind='auto')
+        save('foreign', other)
+        first = client.get(path, params={'limit': 2}).json()
+        assert [item['id'] for item in first['snapshots']] == ['third', 'second']
+        assert isinstance(first['next_cursor'], int)
+        summary_name = repository._db.execute(
+            "SELECT snapshot_summary::jsonb->>'name' FROM artifacts WHERE id=?", ('third',)).fetchone()[0]
+        assert summary_name == 'third'
+
+        repository._db.execute('UPDATE artifacts SET snapshot_summary=NULL WHERE id=?', ('old',))
+        save('fresh')
+        tail = client.get(path, params={'limit': 2, 'before': first['next_cursor']}).json()
+        assert tail == {'snapshots': [{'id': 'old', 'project_id': project, 'name': 'old',
+                                       'legacy_label': 'retained'}], 'next_cursor': None}
+        assert repository.get_artifact('snapshot', 'old') == legacy
+
+        complete = client.get(path).json()
+        assert set(complete) == {'snapshots'}
+        assert [item['id'] for item in complete['snapshots']] == ['fresh', 'third', 'second', 'old']
+        assert all(not {'records', 'ontologies'}.intersection(item) for item in complete['snapshots'])
+
+
 def test_document_job_and_stream(tmp_path, monkeypatch):
     import time
     with TestClient(create_app(tmp_path/'x.sqlite',HashingEncoder())) as client:

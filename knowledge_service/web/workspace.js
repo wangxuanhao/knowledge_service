@@ -21,6 +21,11 @@
   function syncGraphExpandDisabled(){get('graph-expand').disabled=graphExpandState.busy||graphExpandState.pendingDetail;}
   function setActionBusy(id,busy){
     if(id==='graph-expand'){graphExpandState.busy=busy;syncGraphExpandDisabled();}
+    else if(id==='search'){
+      const button=get(id);
+      button.setAttribute?.('data-knowledge-busy',String(busy));
+      button.disabled=busy&&(window.RetrievalWorkspace?.mode??'knowledge')==='knowledge';
+    }
     else get(id).disabled=busy;
   }
   const act = (id, fn) => {get(id).onclick=async()=>{setActionBusy(id,true);try{await fn();}catch(e){status(e.message,true);}finally{setActionBusy(id,false);}};};
@@ -81,14 +86,17 @@
   }
   function renderChips(){
     get('cb-active-chips').innerHTML=cb.conditions.map(c=>{
-      const label=c.op==='interval'?`${fieldLabel(c.field)} ${c.from||'?'} → ${c.to||'?'}`:`${fieldLabel(c.field)} ${opLabel(c.op)} ${c.value||''}`;
+      const time=window.DisplayTime.format;
+      const value=TIME_FIELDS.has(c.field)?time(c.value,c.value||''):c.value||'';
+      const label=c.op==='interval'?`${fieldLabel(c.field)} ${time(c.from,'?')} → ${time(c.to,'?')}`:`${fieldLabel(c.field)} ${opLabel(c.op)} ${value}`;
       return `<span class="cb-chip"><span>${esc(label)}</span><button data-id="${c.id}" title="删除">×</button></span>`;
     }).join('');
   }
   function updateChip(){
     const parts=[];
-    for(const [id,label] of [['query-platforms','平台'],['query-businesses','业务'],['query-audiences','适用对象']]){
-      const value=get(id)?.value.trim();if(value)parts.push(label+'：'+value);
+    const applicability=window.ApplicabilityUI?.readQueryScope?.().applicability;
+    for(const [dimension,label] of [['platforms','平台'],['businesses','业务'],['audiences','适用对象']]){
+      const values=applicability?.[dimension]?.values;if(values?.length)parts.push(label+'：'+values.join('、'));
     }
     for(const id of ['type-scope','predicate-scope']){const select=get(id);if(select.value)parts.push(select.selectedOptions[0]?.textContent||select.value);}
     try{
@@ -199,7 +207,7 @@
     return el;
   }
   function timelineLabel(event,index){
-    const time=new Date(event.known_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+    const time=window.DisplayTime.format(event.known_at);
     return `节点 ${index+1} · ${time} · 变更 ${event.changed} 条`;
   }
   function renderTimelinePoints(){
@@ -437,6 +445,7 @@
     if(row.kind==='attribute')return window.openKnowledgeRecord({id:row.subject_id,kind:'entity',projectId:project,scope:effective,view,hops});
     if(!['entity','relation'].includes(row.kind))throw Error('当前记录没有可显示的正式图谱对象');
     window.suppressNextAutoGraph?.();
+    if(get('tab-search').dataset?.retrievalMode==='community')window.RetrievalWorkspace?.select('knowledge');
     if(get('tab-search').classList.contains('hidden')){
       // A linked record may have kept its ID but changed endpoints while the graph was hidden.
       // Don't reveal a stale inspector between opening the page and drawing the new record.
@@ -539,8 +548,16 @@
     if(row.kind==='relation')for(const id of [row.subject_id,row.object_id]){
       const data=window.FullGraphView?.renderer?.dataset,endpoint=wb.nodes.get(id)||data?.records[data.nodeIndex.get(id)];if(endpoint)detailOptions.push(endpoint);
     }
-    window.renderEvidenceInspector(row,detailOptions,{scope:inspectionScope||effectiveGraphScope()});
+    const inspectedScope=inspectionScope||effectiveGraphScope();
+    window.renderEvidenceInspector(row,detailOptions,{scope:inspectedScope});
     GraphWorkbench.selection(row);
+    if(isEntity&&window.NeighborhoodSearch){
+      const actions=get('graph-detail').querySelector('.evidence-actions');
+      if(actions){
+        const neighborhood=make('button','以此实体检索邻域','secondary');neighborhood.type='button';
+        neighborhood.onclick=()=>window.NeighborhoodSearch.openForEntity(row,{scope:inspectedScope});actions.append(neighborhood);
+      }
+    }
   }
   async function readInspectorRecord(row,effective,signal,qualify){
     if(qualify==='entity'&&row.kind==='entity'&&Array.isArray(row.attributes)&&Array.isArray(row.class_parents)&&Object.hasOwn(row,'class_ontology_id'))return row;
@@ -570,8 +587,10 @@
   // 用户反馈："检索 没看到有父类的信息" + "知识图谱也没父类相关的信息" ——
   // 层级在**类**之间，实体节点本身没有父类，所以这里显示的是"它所属的类"的父类链
   // （数据来自 /subgraph 的 class_parents / class_ancestors，唯一出处是服务端 ontology_family）。
+  let localHoverPreview=null;
   function graphTooltip(point,tooltipTicket,callback){
     if(point.dataType==='edge'){
+      localHoverPreview?.clear();
       const raw=point.data.rawType;
       return esc(raw&&raw!==point.data.name?point.data.name+'（'+raw+'）':point.data.name);
     }
@@ -589,11 +608,13 @@
     }
     const links=(ui.graph?.edges||[]).filter(edge=>edge.subject_id===node.id||edge.object_id===node.id).length;
     const html='<div class="fg-hover-meta"><span class="fg-hover-kind">实体</span><span>'+links+' 条关系</span></div>'+rows.join('<br>')+'<div class="fg-hover-id">'+esc(node.id||point.data.id)+'</div>';
-    if(node.id&&typeof callback==='function'){
+    if(node.id&&typeof callback==='function'&&window.EntityAttributePanel?.createHoverPreview){
       const project=current,applied=effectiveGraphScope(),stamp=JSON.stringify(applied),version=JSON.stringify(wb.versionContext||null),chart=wb.chart;
-      window.EntityAttributePanel?.hoverHtml(node,{projectId:project,scope:applied}).then(summary=>{
-        if(current===project&&chart===wb.chart&&stamp===JSON.stringify(effectiveGraphScope())&&version===JSON.stringify(wb.versionContext||null))callback(tooltipTicket,html+summary);
-      }).catch(()=>{});
+      localHoverPreview??=EntityAttributePanel.createHoverPreview();
+      localHoverPreview.show(JSON.stringify([project,node.id,node.version_id??node.version,stamp,version]),
+        ()=>window.EntityAttributePanel?.hoverHtml(node,{projectId:project,scope:applied}),summary=>queueMicrotask(()=>{
+          if(summary&&current===project&&chart===wb.chart&&stamp===JSON.stringify(effectiveGraphScope())&&version===JSON.stringify(wb.versionContext||null))callback(tooltipTicket,html+summary);
+        }));
     }
     return html;
   }
@@ -604,6 +625,7 @@
     }
   }
   function renderGraph(result, selectedType='', base=result, options={}){
+    localHoverPreview?.clear();
     window.syncGraphCreateAccess?.();
     updateGraphTypeChoices(base);
     const displayType=type=>result.type_labels?.[type]||labelOf(type);
@@ -627,8 +649,18 @@
     const categoryKey=n=>window.GraphAppearance?GraphAppearance.categoryKey(n):(GraphTypeFilter.isAttributeNode(n)?'attribute:':'entity:'+String(n.type||''));
     const chart=initChart(), types=[...new Set(result.nodes.map(categoryKey))], matched=new Set(result.matched_ids||[]);
     const categoryLabel=key=>key==='attribute:'?'属性值':typeLabel(key.slice(7));
-    chart.resize();
+    const resizeChart=()=>{
+      const {clientWidth:width,clientHeight:height}=chart.getDom();
+      if(width&&height&&(width!==chart.getWidth()||height!==chart.getHeight()))chart.resize({width:'auto',height:'auto'});
+    };
+    resizeChart();
     bindPanAffordances();   // 双击空白＝适应画布（幂等）
+    if(!chart.__attributeHoverBound){
+      chart.__attributeHoverBound=true;
+      chart.on('mouseout',()=>localHoverPreview?.clear());
+      chart.on('graphroam',()=>localHoverPreview?.clear());
+      chart.getZr().on('mousedown',()=>localHoverPreview?.clear());
+    }
     chart.off('click');chart.on('click',p=>{
       if(!GraphWorkbench.canClick())return;
       const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
@@ -657,7 +689,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
     GraphWorkbench.mount(chart,result,current,inspect,effectiveGraphScope(),options);
     bindLocalExploration(result,selectedType);
-    chart.resize();layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 蓝色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
+    layoutDone({nodes:result.nodes.length,edges:result.edges.length});get('graph-summary').textContent=`${selectedType?'只看 '+labelOf(selectedType)+' · ':''}${visibleEntities.length} 实体 / ${visibleRelations.length} 关系${attributeCount?' · '+attributeCount+' 个属性值':''}${selectedType?' · 隐藏其他类型及跨类型连线':''}${matched.size?' · 蓝色边框为检索命中':''}${result.timing_ms?' · 服务 '+result.timing_ms.total+' ms':''}${graphBudgetSummary(base)}`;
     if(localScopeOverride){
       const fixed=effectiveGraphScope(),time=window.TemporalScope?.describe(fixed)||'';
       get('graph-summary').textContent+=' · 固定记录范围'+(time?'：'+time:'')+(fixed.ontology_scope==='ids'?' · 指定本体 '+fixed.ontology_ids.join('、'):'');
@@ -669,7 +701,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     // The type and timeline rows reduce the remaining flex height after ECharts has
     // already measured it. Resize on the next layout frame so its canvas cannot
     // retain the old height and paint over those rows.
-    requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)chart.resize();});
+    requestAnimationFrame(()=>{if(ui.graph===result||ui.graph===base)resizeChart();});
     loadTimelineEvents().catch(error=>status(error.message,true));
   }
   function fitGraph(chart){GraphWorkbench.fit(chart);}
@@ -872,6 +904,33 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   }
   window.refreshLocalGraphExplorer=()=>{if(ui.graph)bindLocalExploration(ui.graph,localSelectedType);else window.GraphExplorer?.clear({mode:'local'});};
   window.suspendLocalGraphExplorer=()=>{graphRequests.invalidate();graphReadAbort?.abort();localBranches?.invalidatePending();};
+  let neighborhoodStage=null,neighborhoodGraph=null;
+  window.showNeighborhoodSearchGraph=(stage,path,{projectId,scope:ownerScope})=>{
+    if(!current||current!==projectId||JSON.stringify(ownerScope)!==JSON.stringify(graphOwnerScope()))return {rendered:false,highlighted:false};
+    if(stage!==neighborhoodStage||ui.graph!==neighborhoodGraph||window.FullGraphView?.mode==='full'){
+      const rows=new Map();
+      for(const row of [...stage.trail.records,...stage.result.records]){
+        const key=JSON.stringify([row.kind,row.id]);
+        if(!rows.has(key))rows.set(key,row);
+      }
+      const records=[...rows.values()],nodes=records.filter(row=>row.kind==='entity'),ids=new Set(nodes.map(row=>row.id));
+      const edges=records.filter(row=>row.kind==='relation'&&ids.has(row.subject_id)&&ids.has(row.object_id));
+      const graph={...stage.result,nodes,edges};
+      window.GraphOverview?.explicit();
+      window.suspendLocalGraphExplorer();
+      changedGraph=null;knowledgeRefreshGeneration++;
+      localBranches?.clear();localBranches=null;localBranchScope='';localSelectedType='';
+      const owner=graphScope();
+      localScopeOverride=stage.scope;localScopeOwner=JSON.stringify(ownerScope);
+      localScopeCanvas={entity_type:owner.entity_type,predicate:owner.predicate};
+      if(window.FullGraphView?.mode==='full')window.FullGraphView.switchMode('local');
+      renderGraph(graph,'',graph);
+      if(stage.result.partial)get('graph-summary').textContent+=' · 邻域检索仅显示部分结果';
+      neighborhoodStage=stage;neighborhoodGraph=graph;
+    }
+    const highlighted=GraphWorkbench.showExactPath(path);
+    return {rendered:true,highlighted};
+  };
   window.drawGraph=async(node=null,hops=1,options={})=>{
     if(hops===''||!Number.isInteger(Number(hops))||Number(hops)<0||Number(hops)>10)throw Error('扩展跳数请输入 0–10 的整数');
     const id=node||get('graph-node').value||null;
@@ -1058,6 +1117,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     changedGraph=null;knowledgeRefreshGeneration++;dirtyGraphModes.clear();
     graphReadAbort?.abort();
     localBranches?.clear();localBranches=null;localBranchScope='';localSelectedType='';
+    neighborhoodStage=null;neighborhoodGraph=null;
     GraphWorkbench.clear();
     graphRequests.invalidate();invalidatePendingDetail();
     ui.pinned.clear();ui.picker.request++;ui.mindmapPicker.request++;ui.mindmapRootId='';mindmap.invalidate();mindmapView?.clear();
@@ -1082,7 +1142,10 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     try{await window.drawGraph(node||null,get('graph-hops').value);}catch(error){status(error.message,true);}
   }
   for(const id of ['type-scope','predicate-scope'])get(id).addEventListener('change',refreshGraphCanvasTypes);
-  act('search',runSearch);act('draw-graph',()=>drawGraph(null,get('graph-hops').value));
+  act('search',runSearch);
+  const submitKnowledgeSearch=get('search').onclick;
+  get('search').onclick=()=>window.RetrievalWorkspace?.routeQuery()||submitKnowledgeSearch();
+  act('draw-graph',()=>drawGraph(null,get('graph-hops').value));
   if(get('graph-hops').value==='')get('graph-hops').value='1';
   let lastGraphHops=get('graph-hops').value;
   const graphHopsEdited=()=>{
@@ -1107,14 +1170,28 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   });
   window.expandGraphBranch=(id,hops=1)=>window.drawGraph(id,hops,{expand:true});
   window.ScopeEditor={restore(value){cb.conditions=[];cb.custom=Boolean(value.filters);renderCB();updateChip();}};
+  let searchScopeDirty=false;
   async function refreshOwnedScope(){
     const page=window.WorkspaceContext?.page;
-    if(page==='search'){const project=current,generation=ontologyLoadGeneration;invalidateGraphContext({pending:true});ui.request++;window.clearGraphWorkspace();await Promise.all([options(),discoverMetadata()]);graphContextRestored(project,generation);if(get('query').value.trim()&&get('scope-purpose')?.value!=='graph')await runSearch();}
+    if(page==='search'){
+      const project=current,generation=ontologyLoadGeneration,ticket=WorkspaceContext.ticket(project,page);
+      invalidateGraphContext({pending:true});ui.request++;window.clearGraphWorkspace();
+      await Promise.all([options(),discoverMetadata()]);
+      if(!WorkspaceContext.accepts(ticket,current,page))return;
+      graphContextRestored(project,generation);
+      if(WorkspaceContext.page===page&&get('query').value.trim()&&get('scope-purpose')?.value!=='graph'&&
+        (window.RetrievalWorkspace?.mode??'knowledge')==='knowledge')await runSearch();
+    }
     else if(page==='records'||page==='sources')await discoverMetadata();
   }
-  document.addEventListener('workspace:scope-changed',()=>{refreshOwnedScope().catch(error=>status(error.message,true));});
+  const updateOwnedScope=()=>{refreshOwnedScope().catch(error=>status(error.message,true));};
+  document.addEventListener('workspace:scope-changed',event=>{
+    if(event.detail.page==='qa'){searchScopeDirty=true;invalidateGraphContext({pending:true});return;}
+    updateOwnedScope();
+  });
   document.addEventListener('workspace:page-changed',event=>{
     if(event.detail?.page!=='search'){graphRequests.invalidate();graphReadAbort?.abort();invalidatePendingDetail();}
+    else if(searchScopeDirty){searchScopeDirty=false;updateOwnedScope();}
   });
   act('apply-scope',async()=>{window.WorkspaceContext.apply();});
   const previousAddFilter=get('add-filter')?.onclick;
@@ -1154,14 +1231,15 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   act('graph-zoom-in',()=>zoomGraph(1.18));
   act('graph-zoom-out',()=>zoomGraph(.85));
   get('detail-drawer-close').onclick=()=>{invalidatePendingDetail();get('graph-detail').replaceChildren();};
-  get('query').onkeydown=e=>{if(e.key==='Enter')get('search').click();};
+  get('query').onkeydown=e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();get('search').click();}};
   // Ignore out-of-order project responses, and load graph immediately on selection.
   const priorChange=get('project').onchange;
   get('project').onchange=()=>{
+    searchScopeDirty=false;
     const generation=++ontologyLoadGeneration;
     invalidateGraphContext({pending:true});
     priorChange();ui.request++;ui.options=[];ui.mindmapPicker.options=[];ui.mindmapPicker.request++;ui.mindmapRootId='';select.value='';get('mindmap-filter').value='';choices();ui.ontology=null;resetTimeline();window.clearGraphWorkspace();
-    for(const id of ['filters','cb-raw-json','query-platforms','query-businesses','query-audiences'])get(id).value='';
+    for(const id of ['filters','cb-raw-json'])get(id).value='';
     if(get('cb-show-system'))get('cb-show-system').checked=false;
     get('graph-entity-filter').value='';cb.facets=[];cb.conditions=[];cb.custom=false;renderCB();get('metadata-field-choice').innerHTML='<option value="">读取项目字段…</option>';get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent='';
     get('project').title=get('project').selectedOptions[0]?.textContent||'';

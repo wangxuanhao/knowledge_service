@@ -73,7 +73,7 @@
           <h3>${esc(p.name)}</h3>
           ${isCurrent ? '<span class="project-current-badge">当前项目</span>' : ''}
         </div>
-        <p class="project-created">创建于 ${esc(p.created_at || '—')} · ${Number.isInteger(p.ontology_publications)?(p.ontology_publications?'本体已发布 · '+p.ontology_publications+' 个发布快照':'尚未发布本体'):'前往本体建模层查看发布状态'}</p>
+        <p class="project-created">创建于 ${esc(window.DisplayTime.format(p.created_at))} · ${Number.isInteger(p.ontology_publications)?(p.ontology_publications?'本体已发布 · '+p.ontology_publications+' 个发布快照':'尚未发布本体'):'前往本体建模层查看发布状态'}</p>
         <p class="project-id" title="项目 ID：接口路径、日志、向量库分区都用它定位">
           <span>项目 ID</span>
           <code>${esc(p.id)}</code>
@@ -112,7 +112,15 @@
     if(!project) return;
     const {overlay, close, feedback} = openModal({
       title: '项目设置',
-      body: `<label>项目名称<input id="projects-rename-input" maxlength="200"></label><p class="subtle">处理方式在每次上传时选择。</p><div class="project-settings-links"><button id="project-index-config" class="secondary">项目向量化</button><button id="project-overview" class="secondary">项目概览</button><button id="project-backup" class="secondary">知识备份</button></div><hr><button id="project-remove" class="danger">删除项目…</button>`,
+      body: `
+        <label>项目名称<input id="projects-rename-input" maxlength="200"></label>
+        <p class="subtle">处理方式在每次上传时选择。</p>
+        <div class="project-settings-links">
+          <button id="project-index-config" class="secondary">项目向量化</button>
+          <button id="project-overview" class="secondary">项目概览</button>
+          <button id="project-backup" class="secondary">知识备份</button>
+          <button id="project-remove" class="danger">删除项目…</button>
+        </div>`,
       footer: `<button id="projects-rename-confirm">保存</button><button class="secondary" id="projects-rename-cancel">取消</button>`
     });
     const field = overlay.querySelector('#projects-rename-input');
@@ -165,7 +173,7 @@
       confirmBtn.disabled = true;
       status('处理中…');
       try{
-        const r = await api('/api/projects/' + encodeURIComponent(id), undefined, 'DELETE');
+        const r = await api('/api/projects/' + encodeURIComponent(id) + '?defer_cleanup=true', undefined, 'DELETE');
         await projects();
         if(current === id){
           window.WorkspaceContext?.store.removeProject(id);
@@ -176,7 +184,9 @@
         }
         const deleted = r.deleted || {};
         const cleaned=r.cleaned||r.cleared||{};const pending=['milvus','neo4j'].filter(target=>cleaned[target]!==true);
-        status(`项目已删除：${project.name}（记录 ${deleted.records ?? 0} · 本体 ${deleted.ontologies ?? 0} · 产物 ${deleted.artifacts ?? 0}）${pending.length?'；派生投影清理待核验：'+pending.join('、'):'；派生投影清理已确认'}`);
+        const cleanupStatus = r.cleanup_queued ? '派生投影已排队清理'
+          : pending.length ? '派生投影清理待核验：' + pending.join('、') : '派生投影清理已确认';
+        status(`项目已删除：${project.name}（记录 ${deleted.records ?? 0} · 本体 ${deleted.ontologies ?? 0} · 产物 ${deleted.artifacts ?? 0}）；${cleanupStatus}`);
         close();
         await renderProjects();
       }catch(e){

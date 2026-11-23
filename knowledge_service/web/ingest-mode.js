@@ -21,7 +21,8 @@
     if(!Number.isFinite(parsed.getTime())){field(id)?.focus();throw Error('请输入有效的'+label+'。');}
     return parsed.toISOString();
   };
-  const localTime=value=>value?String(value).replace('T',' '):'';
+  const displayTime=value=>window.DisplayTime.format(value,'未知');
+  const displayInputTime=value=>displayTime(new Date(value).getTime());
   const applicabilityOf=value=>value?.applicability||value?.metadata?.applicability||{};
   const dimensionValues=value=>value?.mode==='specific'?value.values:[];
   const dimensionText=(label,value)=>{
@@ -40,10 +41,10 @@
     const inferred=!value?.valid_from&&!value?.effective_at&&value?.document_time_mode==='manual'&&published;
     const effective=value?.valid_from||value?.effective_at||inferred;
     const source=value?.effective_time_source||value?.metadata?.effective_time_source;
-    if(published)parts.push('发布时间：'+localTime(published));
-    if(effective)parts.push('生效：'+localTime(effective)+(inferred||source==='published_at'?'（发布时间推定）':''));
+    if(published)parts.push('发布时间：'+displayTime(published));
+    if(effective)parts.push('生效：'+displayTime(effective)+(inferred||source==='published_at'?'（发布时间推定）':''));
     else if(value&&('valid_from' in value||value.document_time_mode))parts.push('生效：未知');
-    if(value?.valid_until)parts.push('失效：'+localTime(value.valid_until));
+    if(value?.valid_until)parts.push('失效：'+displayTime(value.valid_until));
     else if(value&&('valid_until' in value||value.document_time_mode))parts.push('未设结束时间');
     return parts.join(' · ');
   };
@@ -69,23 +70,22 @@
     const until=field('doc-valid-until')?.value?.trim();
     if(timeMode()==='auto'){
       help.textContent='手工填写的时间为本批覆盖值；留空字段从每份文档逐份识别。'+
-        (explicit?'显式生效时间：'+localTime(explicit)+'。':'生效时间未识别时保持未知。')+
-        (until?'失效时间覆盖为 '+localTime(until)+'。':'未识别到失效日期时显示未设结束时间。')+
+        (explicit?'显式生效时间：'+displayInputTime(explicit)+'。':'生效时间未识别时保持未知。')+
+        (until?'失效时间覆盖为 '+displayInputTime(until)+'。':'未识别到失效日期时显示未设结束时间。')+
         '预览可核验日期与识别依据；时间区间按左闭右开 [生效, 失效) 解释。';
       return;
     }
     const effective=explicit||published;
     const source=explicit?'显式生效时间':published?'沿用发布时间推定':'尚未提供发布时间或生效时间';
-    help.textContent='手工填写的时间由本批文件共用；'+(effective?'实际生效：'+localTime(effective)+'（'+source+'）':source)+'；'+
-      (until?'失效：'+localTime(until)+'。':'未设结束时间。')+
+    help.textContent='手工填写的时间由本批文件共用；'+(effective?'实际生效：'+displayInputTime(effective)+'（'+source+'）':source)+'；'+
+      (until?'失效：'+displayInputTime(until)+'。':'未设结束时间。')+
       '时间区间按左闭右开 [生效, 失效) 解释。';
   };
   window.ApplicabilityUI={
     splitList,describe,dimensionValues,
     readQueryScope(){
-      const platforms=splitList(field('query-platforms')?.value);
-      const businesses=splitList(field('query-businesses')?.value);
-      const audiences=splitList(field('query-audiences')?.value);
+      const selected=name=>Array.from(field('query-'+name)?.querySelectorAll?.('input:checked')||[],input=>input.value);
+      const platforms=selected('platforms'),businesses=selected('businesses'),audiences=selected('audiences');
       const dimension=values=>({mode:values.length?'specific':'unknown',values});
       return platforms.length||businesses.length||audiences.length?{applicability:{
         platforms:dimension(platforms),businesses:dimension(businesses),audiences:dimension(audiences)}}:{};

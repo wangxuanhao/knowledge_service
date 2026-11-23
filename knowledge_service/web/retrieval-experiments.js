@@ -59,7 +59,7 @@
     const serial=requestSerial;
     const result=await api(url(p),undefined,'GET');
     if(p!==project()||serial!==requestSerial)return;
-    runsHost.innerHTML=result.runs?.length?result.runs.map(run=>`<button type="button" class="rex-run" data-run="${escape(run.id)}"><b>${escape(run.name)}</b><span>${escape(STATES[run.status]||run.status)} · ${run.completed_items??0}/${run.total_items??'—'}</span><small>${escape(new Date(run.created_at).toLocaleString('zh-CN'))}</small></button>`).join(''):'尚无实验。创建后会保留固定输入、逐题证据和实际策略。';
+    runsHost.innerHTML=result.runs?.length?result.runs.map(run=>`<button type="button" class="rex-run" data-run="${escape(run.id)}"><b>${escape(run.name)}</b><span>${escape(STATES[run.status]||run.status)} · ${run.completed_items??0}/${run.total_items??'—'}</span><small>${escape(window.DisplayTime.format(run.created_at))}</small></button>`).join(''):'尚无实验。创建后会保留固定输入、逐题证据和实际策略。';
     for(const button of runsHost.querySelectorAll('[data-run]'))button.onclick=()=>loadRun(button.dataset.run).catch(error=>note(error.message,true));
   }
   async function action(name){

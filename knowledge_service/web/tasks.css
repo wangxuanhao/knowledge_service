@@ -420,3 +420,152 @@ body main #tab-jobs .task-status-badge{font-size:12px;padding:3px 9px;white-spac
 body main #tab-jobs .task-controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
 body main #tab-jobs :is(.task-logs-toggle,.task-result-toggle){min-height:32px;font-size:12px;padding:4px 0;white-space:normal;text-align:left}
 body main #tab-jobs :is(.task-logs-content,.task-result-content,.task-error){overflow-wrap:anywhere}
+
+.runtime-task-groups {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+    align-items: start;
+    gap: 20px;
+    margin-top: 16px;
+}
+.runtime-task-group {
+    min-width: 0;
+}
+.runtime-task-group > h3 {
+    margin: 0 0 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--ui-line);
+    color: var(--ui-ink-2);
+    font-size: 13px;
+    font-weight: 650;
+}
+.runtime-task-list,
+.runtime-task {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+.runtime-task,
+.runtime-task-message {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--ui-line);
+    border-radius: 8px;
+}
+.runtime-task {
+    background: var(--ui-surface);
+}
+.runtime-task-message {
+    background: var(--ui-surface-2);
+    color: var(--ui-ink-2);
+}
+.runtime-task-message.error,
+.runtime-task-context.error {
+    color: var(--ui-danger);
+}
+.runtime-task-header,
+.runtime-task-progress,
+.runtime-task-actions {
+    display: flex;
+    gap: 8px 12px;
+    align-items: center;
+}
+body main .runtime-task-header {
+    justify-content: space-between;
+    align-items: flex-start;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.runtime-task-identity {
+    min-width: 0;
+}
+.runtime-task-title {
+    margin: 0;
+    color: var(--ui-ink);
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.runtime-task-meta,
+.runtime-task-context,
+.runtime-task-progress,
+.runtime-task details {
+    font-size: 12px;
+    line-height: 1.6;
+}
+.runtime-task-meta,
+.runtime-task-context {
+    margin: 0;
+    color: var(--ui-muted);
+    overflow-wrap: anywhere;
+}
+.runtime-task-meta,
+.runtime-task-progress {
+    font-variant-numeric: tabular-nums;
+}
+.runtime-task-status {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--ui-surface-2);
+    color: var(--ui-ink-2);
+    font-size: 12px;
+}
+.runtime-task-status[data-status="running"] {
+    background: var(--ui-accent-dim);
+    color: var(--ui-accent);
+}
+.runtime-task-status[data-status="completed"] {
+    background: var(--ui-ok-dim);
+    color: var(--ui-ok);
+}
+.runtime-task-status:is([data-status="queued"], [data-status="pending"], [data-status="paused"], [data-status="retry_wait"]) {
+    background: var(--ui-warn-dim);
+    color: #8a6108;
+}
+.runtime-task-status:is([data-status="failed"], [data-status="interrupted"], [data-status="needs_attention"], [data-status="completed_with_errors"]) {
+    background: var(--ui-danger-dim);
+    color: var(--ui-danger);
+}
+.runtime-task-progress {
+    flex-wrap: wrap;
+    color: var(--ui-ink-2);
+}
+.runtime-task-progress progress {
+    flex: 1 1 90px;
+    min-width: 0;
+    height: 6px;
+    border: 0;
+    border-radius: 6px;
+    overflow: hidden;
+    accent-color: var(--ui-accent);
+}
+.runtime-task-progress progress::-webkit-progress-bar {
+    background: var(--ui-line);
+}
+.runtime-task-progress progress::-webkit-progress-value {
+    background: var(--ui-accent);
+    border-radius: 6px;
+}
+.runtime-task-actions {
+    flex-wrap: wrap;
+}
+.runtime-task > p {
+    margin: 0;
+}
+.runtime-task-list .runtime-task details {
+    margin: 0;
+    border-top: 1px solid var(--ui-line);
+    padding-top: 8px;
+    min-width: 0;
+}
+.runtime-task details summary {
+    margin: 0;
+    color: var(--ui-ink-2);
+    cursor: pointer;
+}
+.runtime-task details[open] > :is(p, pre, ul) {
+    margin-top: 8px;
+}

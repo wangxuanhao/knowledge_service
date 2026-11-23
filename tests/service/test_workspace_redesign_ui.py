@@ -69,7 +69,8 @@ def redesign_page():
             elif path.endswith('/ingest-batches'): value={'batches':[]}
             elif path.endswith('/jobs'): value={'jobs':[]}
             elif path.endswith('/snapshots'): value={'snapshots':[]}
-            elif path.endswith('/applicability-values'): value={'platforms':[],'businesses':[],'audiences':[]}
+            elif path.endswith('/applicability-values'):
+                value={'platforms':['美团','淘宝','统一平台','布局修整平台','问答筛选平台'],'businesses':[],'audiences':[]}
             elif path.endswith('/ontology-drafts'): value={'drafts':[]}
             elif path.endswith('/ontology-discovery'): value={'unpublished_candidate_count':0}
             route.fulfill(status=200,json=value)
@@ -164,14 +165,17 @@ def test_page_scope_drafts_tags_and_management_exclusion(redesign_page):
     page.click('[data-tab="sources"]')
     page.wait_for_selector('#source-list .source-item')
     assert page.locator('#cb-details').evaluate('(node)=>node.open') is False
-    page.click('#scope-toggle');page.fill('#query-platforms','美团')
+    page.click('#scope-toggle');page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='美团', exact=True).check()
     assert page.evaluate("scope().applicability||null") is None
     page.click('#apply-scope')
     assert '平台：美团' in page.locator('#applied-scope-chips').inner_text()
     assert page.evaluate("scope().applicability.platforms.values") == ['美团']
     page.click('[data-tab="qa"]')
     assert page.evaluate("scope().applicability||null") is None
-    page.click('#scope-toggle');page.fill('#query-platforms','淘宝');page.click('#scope-close')
+    page.click('#scope-toggle');page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='淘宝', exact=True).check()
+    page.click('#scope-close')
     assert page.evaluate("scope().applicability||null") is None
     page.click('[data-tab="sources"]')
     assert page.evaluate("scope().applicability.platforms.values") == ['美团']

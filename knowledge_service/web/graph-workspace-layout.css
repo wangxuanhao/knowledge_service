@@ -49,7 +49,8 @@ body main #tab-search #graph-workspace-surface #graph-type-buttons>.graph-type-b
 body main #tab-search #graph-workspace-surface .graph-type-bar>button{flex:0 0 auto;max-width:45%;min-width:0;overflow:hidden;text-overflow:ellipsis}
 body main #tab-search #graph-workspace-surface .graph-type-bar>.graph-type-toggle{flex:0 1 auto;max-width:65%;padding-right:24px;position:relative;overflow:hidden;text-overflow:ellipsis}
 body main #tab-search #graph-workspace-surface .graph-type-bar[hidden]{display:none}
-body main #tab-search #graph-workspace-surface .graph-type-toggle::after{content:'⌄';position:absolute;right:8px;top:3px;font-size:14px}
+body main #tab-search #graph-workspace-surface .graph-type-toggle::after{position:absolute;inset-block:0;inset-inline-end:6px;margin-block:auto}
+body main #tab-search #graph-workspace-surface .graph-type-toggle[aria-expanded=true]::after{transform:rotate(180deg)}
 body main #tab-search #graph-workspace-surface .full-graph-type-empty{margin:2px 0;font-size:12px}
 /* Popovers occupy the top layer, clear of the canvas and toolbar overflow clips. */
 body main #tab-search #graph-workspace-surface .graph-type-menu{position:fixed;inset:auto;box-sizing:border-box;margin:0;padding:12px;border:1px solid var(--ui-line-2);border-radius:9px;background:var(--ui-surface);color:var(--ui-ink);box-shadow:var(--ui-shadow-lift);overflow:hidden}

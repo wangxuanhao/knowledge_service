@@ -119,19 +119,26 @@ class ProjectionSchemaUpgradeTests(unittest.TestCase):
         self.assertEqual(connection.cursor['schema_version'], 3)
 
 
-def begin_capture(repo, project, schema):
+def begin_capture(repo, project, schema, target='milvus'):
     sync = ProjectionSync(repo.projections, {}, schema_version=schema)
-    return repo.projections.begin_rebuild(project, 'milvus', schema, 'schema-upgrade',
+    return repo.projections.begin_rebuild(project, target, schema, 'schema-upgrade',
         lease_guard=sync._rebuild_lease_guard, embedding_model='test', dim=1)
 
 
-def test_pg_explicit_upgrade_replaces_released_obsolete_capture_and_keeps_frozen_bodies(tmp_path):
+def test_pg_explicit_upgrade_prunes_obsolete_captures_only_for_its_project_and_target(tmp_path):
     repo = Repository(tmp_path / 'projection-schema-upgrade')
     project = repo.create_project('schema upgrade')['id']
+    other_project = repo.create_project('unrelated schema upgrade')['id']
     original = repo.put_record(project, {'id': 'body', 'kind': 'chunk', 'text': 'old body'})
+    repo.put_record(other_project, {'id': 'body', 'kind': 'chunk', 'text': 'other project body'})
+    other = begin_capture(repo, other_project, 3)
+    neo4j = begin_capture(repo, project, 3, target='neo4j')
     old = begin_capture(repo, project, 3)
     repo.projections.mark_failed(old['claim'], RuntimeError('clean stop before vector writes'), 3)
     current = repo.put_record(project, {'id': 'body', 'kind': 'chunk', 'text': 'current body'})
+    old_input, = list(CapturedProjectionInputs(repo, old['claim']))
+    assert old_input.record['version_id'] == original['version_id']
+    assert old_input.record['text'] == 'old body'
 
     rebuilt = begin_capture(repo, project, 4)
     assert rebuilt['claim'].build_id != old['claim'].build_id
@@ -140,9 +147,12 @@ def test_pg_explicit_upgrade_replaces_released_obsolete_capture_and_keeps_frozen
     captured, = list(CapturedProjectionInputs(repo, rebuilt['claim']))
     assert captured.record['version_id'] == current['version_id']
     assert captured.record['text'] == 'current body'
-    old_input, = list(CapturedProjectionInputs(repo, old['claim']))
-    assert old_input.record['version_id'] == original['version_id']
-    assert old_input.record['text'] == 'old body'
+    rows = repo._db.execute('SELECT project_id,target,build_id FROM projection_rebuild_snapshots').fetchall()
+    assert {(row['project_id'], row['target'], row['build_id']) for row in rows} == {
+        (project, 'milvus', rebuilt['claim'].build_id),
+        (project, 'neo4j', neo4j['claim'].build_id),
+        (other_project, 'milvus', other['claim'].build_id),
+    }
     repo.put_record(project, {'id': 'body', 'kind': 'chunk', 'text': 'later body'})
     assert list(CapturedProjectionInputs(repo, rebuilt['claim'])) == [captured]
     assert repo.projections.cursor(project, 'milvus')['schema_version'] == 4

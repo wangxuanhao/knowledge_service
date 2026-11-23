@@ -12,7 +12,7 @@ from knowledge_service.repository.projection_store import ProjectionLeaseLost
 
 
 MIGRATION = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
-             'repository' / 'migrations' / '0025_milvus_projection_receipts.sql')
+             'repository' / 'migrations' / 'legacy' / '0025_milvus_projection_receipts.sql')
 
 
 def legacy_state(expected):

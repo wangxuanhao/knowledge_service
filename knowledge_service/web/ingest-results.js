@@ -24,6 +24,8 @@
   // 每个任务一个条目：进度用 SSE，结果用 assertions。projectId/mode 在提交时固化，
   // 后续即使用户切换项目，也只读取该任务所属项目的明细。
   const jobs = new Map();
+  const streaming = new Set();
+  let focusedJob = null, returnFocus = null;
 
   const MODE_INFO = {
     ontology: {
@@ -83,13 +85,24 @@
   root.append(header, intro, listEl);
   document.body.appendChild(root);
 
-  const open = () => { root.hidden = false; };
-  const close = () => { root.hidden = true; };
+  function open(jobId=null,trigger=null){
+    focusedJob=jobId;returnFocus=trigger;root.hidden=false;
+    title.textContent=jobId?'资料处理进度':'抽取结果工作区';
+    intro.hidden=Boolean(jobId);
+    render();
+    if(trigger){closeBtn.focus?.();root.scrollIntoView?.({block:'nearest'});}
+  }
+  function close(){
+    if(root.hidden)return;
+    root.hidden=true;const trigger=returnFocus;returnFocus=null;
+    if(trigger?.isConnected)trigger.focus?.();
+  }
   closeBtn.addEventListener('click', close);
   root.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
 
   const openBtn = document.getElementById('open-ingest-results');
-  if (openBtn) openBtn.addEventListener('click', open);
+  if (openBtn) openBtn.addEventListener('click', () => open());
+  document.getElementById('project')?.addEventListener('change',close);
 
   // ===========================================================================
   // 订阅一个任务：先看 SSE 实时进度，完成后拉 assertions 明细
@@ -105,15 +118,18 @@
         resultError: false,
       });
     }
-    open();
-    render();
-    streamJob(jobId);
+    const data=jobs.get(jobId);
+    const subscribe=!streaming.has(jobId)&&data.status!=='completed';
+    if(subscribe&&context.focus)Object.assign(data,{status:'queued',progress:0,stage:'正在读取任务进度…',error:''});
+    open(context.focus?jobId:null,context.trigger);
+    if(!subscribe)return;
+    streaming.add(jobId);
+    void streamJob(jobId);
   }
 
   // ---- SSE：fetch + 复用全局 SSE 解析器 splitSseBuffer ----------------------
   async function streamJob(jobId) {
     const ctrl = new AbortController();
-    const data = jobs.get(jobId);
     let buffer = '';
     const parser = window.KnowledgeChat;
     try {
@@ -137,8 +153,9 @@
     } catch (e) {
       if (e.name === 'AbortError') return;
       const d = jobs.get(jobId);
-      if (d && d.status === 'running') d.stage = '进度流中断：' + e.message;
+      if (d && ['queued','running'].includes(d.status)) d.stage = '进度流中断：' + e.message;
     } finally {
+      streaming.delete(jobId);
       render();
     }
   }
@@ -418,7 +435,8 @@
 
   // ---- 整体渲染：最近 MAX_JOBS 个，倒序（最新在最上） ----------------------
   function render() {
-    const entries = Array.from(jobs.entries()).slice(-MAX_JOBS).reverse();
+    const entries = focusedJob&&jobs.has(focusedJob)?[[focusedJob,jobs.get(focusedJob)]]:
+      Array.from(jobs.entries()).slice(-MAX_JOBS).reverse();
     listEl.replaceChildren();
     if (!entries.length) {
       listEl.append(el('p', 'ingest-drawer__empty',

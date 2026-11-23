@@ -240,7 +240,7 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert 'criteria=clone(next);cursors=[null]' in creator
     assert "ontology_scope:'all',ontology_ids:null" in records
     assert "document:'文档'" not in records
-    assert "record-library-section" in records and "record-governance" in records
+    assert "record-library-panel" in records and "ledger-governance-drawer" in records
     assert all(step in records for step in ('按名称查找','选择保留的实体','选择另一个重复实体'))
     assert all(action in records for action in ('合并后保留','作为重复项合并','确认合并这两个实体'))
     assert '已完成查重' in records and '技术 ID：' in records
@@ -248,7 +248,7 @@ def test_knowledge_history_excludes_document_receipts_and_sources_show_build_sta
     assert 'governance-technical-id' in records
     assert not re.search(r'(?<!\.)\bget\([\'\"]',records)
     assert 'aliasButton.disabled=' in records
-    assert '#tab-records>.record-section' in styles and '.governance-step-risk' in styles
+    assert '.governance-step-risk' in styles
     assert '.governance-technical-id{display:none}' in styles
     assert '.governance-merge-preview' in styles and '.governance-selection' in styles
     assert "知识构建失败" in sources
@@ -265,9 +265,7 @@ def test_knowledge_ledger_is_the_instance_layer_home():
     styles=(ROOT/'workspace.css').read_text(encoding='utf-8')
     menu=(ROOT/'menu-hierarchy.js').read_text(encoding='utf-8')
     index=(ROOT/'index.html').read_text(encoding='utf-8')
-    # 一句话边界：这里管具体的东西，分类不在台账
-    assert '具体的东西' in records and '分类不在这' in records
-    assert '本体建模层' in records and '本体建模层' in records
+    assert '维护已入库的知识' in records and '本体建模层' in records
     # 四个视角（页签）与旧的下拉不能并存成两套入口；属性这一维是用户点名要的，别再漏
     assert all(view in records for view in ('实体','关系','属性','原文片段'))
     assert 'dataset.ledgerView' in records and 'ledger-tabs' in records
@@ -277,10 +275,9 @@ def test_knowledge_ledger_is_the_instance_layer_home():
     assert 'discovery_candidate_id' in records and 'byCanonical' in records
     # 撤销：以前接口有、UI 点不到；现在行内与"可撤销的操作"里都要能点到
     assert '可撤销的操作' in records and '/undo' in records
-    # 疑似重复是一个可点的数字，点了要摆出可用的卡片（不是一个死数）
-    assert 'dataset.ledgerKpi' in records and 'duplicate-groups' in records
-    # 台账的样式
-    assert '.ledger-kpi' in styles and '.ledger-tabs' in styles and '.ledger-operation' in styles
+    assert 'ledger-find-duplicates' in records and 'duplicate-groups' in records
+    ledger_styles=(ROOT/'records-view.css').read_text(encoding='utf-8')
+    assert '.ledger-tab-count' in ledger_styles and '.ledger-operation' in ledger_styles
     # 页面文案统一：知识与历史 → 知识台账（页签名、标题、菜单、指引同步）
     assert '知识台账' in index and '知识与历史' not in index
     # 页签名在 app.js 的 titles 映射里（menu-hierarchy.js 只存 id）
@@ -293,7 +290,7 @@ def test_knowledge_ledger_is_the_instance_layer_home():
     assert '.entity-governance-panel #operations{display:none}' in styles
     assert "可在「知识台账 → 可撤销的操作」撤销" in (ROOT/'workbench.js').read_text(encoding='utf-8')
     assert "「知识台账 → 可撤销的操作」" in (ROOT/'evidence-inspector.js').read_text(encoding='utf-8')
-    assert 'record-library-section' in records
+    assert 'ledger-operations-drawer' in records
 
 
 def test_successful_document_submission_opens_task_logs_immediately():

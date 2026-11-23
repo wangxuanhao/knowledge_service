@@ -116,6 +116,7 @@ class MilvusStore:
         self._schema_cache = None
         self._validated = {}
         self._loaded_at = 0
+        self._community_vectors = None
 
     @staticmethod
     def _rpc(method, *args, **kwargs):
@@ -132,6 +133,15 @@ class MilvusStore:
     @property
     def available(self):
         return self._client is not None
+
+    @property
+    def community_vectors(self):
+        from .community_vectors import CommunityVectors
+
+        with self._preparation_lock:
+            if self._community_vectors is None:
+                self._community_vectors = CommunityVectors(self)
+            return self._community_vectors
 
     def ping(self):
         if self._client is None:
@@ -481,11 +491,12 @@ class MilvusStore:
         """Deleted-project cleanup intentionally removes all of its builds."""
         if not isinstance(project_id, str) or not project_id:
             raise ValueError('无效的项目 ID')
-        if not self._rpc(self._client.has_collection, COLLECTION):
-            return {'deleted': 0}
-        result = self._rpc(self._client.delete, COLLECTION,
-                           filter='project_id == {project}', filter_params={'project': project_id})
-        return {'deleted': int(result.get('delete_count', result.get('deleted_count', 0)))}
+        deleted = 0
+        if self._rpc(self._client.has_collection, COLLECTION):
+            result = self._rpc(self._client.delete, COLLECTION,
+                               filter='project_id == {project}', filter_params={'project': project_id})
+            deleted = int(result.get('delete_count', result.get('deleted_count', 0)))
+        return {'deleted': deleted + self.community_vectors.cleanup_project(project_id)}
 
     def delete_versions(self, project_id, versions):
         scopes = [self._scope(project_id, version) for version in sorted(set(versions))]

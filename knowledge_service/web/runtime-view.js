@@ -18,12 +18,12 @@
  * 这里只负责"什么时候该拉"，避免把四份加载逻辑复制到这个文件里。
  */
 (()=>{
-  const VIEWS=['overview','jobs','snapshots'];
+  const VIEWS=['overview','jobs','snapshots','communities'];
   const DEFAULT='overview';
-  const LABELS={overview:'项目概览',jobs:'后台任务',snapshots:'知识备份'};
+  const LABELS={overview:'项目概览',jobs:'后台任务',snapshots:'知识备份',communities:'社区索引'};
   // 面板 id 沿用原来的四个 id：既有的"当前是否在这一屏"判断（如 tab-jobs / tab-dashboard）
   // 不用改，改动面收在导航与显隐这一层。
-  const PANEL_IDS={project:'tab-projects',overview:'tab-dashboard',jobs:'tab-jobs',snapshots:'tab-evaluation'};
+  const PANEL_IDS={project:'tab-projects',overview:'tab-dashboard',jobs:'tab-jobs',snapshots:'tab-evaluation',communities:'tab-community-index'};
   const tab=document.querySelector('[data-tab="runtime"]');
   const page=document.getElementById('tab-runtime');
   if(!tab||!page)return;

@@ -9,8 +9,11 @@ from knowledge_service.repository.scoped_reads import ScopedReads
 
 class CanonicalSourceContextTests(unittest.TestCase):
     def test_unmapped_fact_cannot_use_obsolete_chunk_metadata(self):
+        statements = []
+
         class EmptyDatabase:
-            def execute(self, *_args):
+            def execute(self, statement, _params):
+                statements.append(statement)
                 return SimpleNamespace(fetchall=lambda: [])
 
         repo = SimpleNamespace(_db=EmptyDatabase(), _lock=RLock())
@@ -25,8 +28,11 @@ class CanonicalSourceContextTests(unittest.TestCase):
                     if row['id'] in ids and row['kind'] in kinds]
 
         with patch.object(ScopedReads, 'by_ids', by_ids):
-            context = ScopedReads(repo).source_context('project', {}, [fact])
+            context = ScopedReads(repo).source_context('project', {'_platform_match': 'unknown_only'}, [fact])
         self.assertEqual(context, {'source_chunks': [], 'context_chunks': []})
+        self.assertEqual(len(statements), 1)
+        self.assertNotIn('identity_source_qualified', statements[0])
+        self.assertNotIn('support_fact', statements[0])
 
 
 if __name__ == '__main__':

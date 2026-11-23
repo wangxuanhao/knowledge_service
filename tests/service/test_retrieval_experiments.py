@@ -3,7 +3,9 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from test_retrieval import activate_index
+from keyword_index_fixture import activate_keyword_index, install_keyword_store
+
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
 
 
 def system(tmp_path):
@@ -13,7 +15,7 @@ def system(tmp_path):
     repository = Repository(tmp_path / 'experiment-orchestration.sqlite')
     project = repository.create_project('experiment-orchestration')['id']
     encoder = HashingEncoder()
-    activate_index(repository, project, encoder)
+    activate_keyword_index(repository, project)
     calls = []
     def answer(project, request):
         calls.append(deepcopy(request))
@@ -40,7 +42,7 @@ def test_variants_execute_actual_omitted_stages_and_fixed_inputs(tmp_path):
     assert completed['status'] == 'completed'
     assert len(calls) == len(completed['results']) == 5
     assert len({request['known_at'] for request in calls}) == 1
-    index = service.repository.projections.search_index(project, 3)
+    index = service.repository.projections.search_index(project, PROJECTION_SCHEMA_VERSIONS['milvus'])
     pin = {'project_id': project, 'index_version': index['index_version'], 'watermark': index['watermark']}
     assert completed['manifest']['qa_index_snapshot'] == pin
     assert all(request['_qa_index_snapshot'] == pin for request in calls)
@@ -136,8 +138,7 @@ def test_pg_experiment_persists_and_invalidates_after_source_revision(tmp_path, 
     repo.put_record(project, {'id': 'chunk', 'kind': 'chunk', 'source_id': 'doc', 'text': '退款依据',
         'valid_from': '2020-01-01', 'metadata': {**doc['metadata'], 'source_version_id': doc['version_id'], 'start_char': 0, 'end_char': 4}})
     service = KnowledgeService(repo, HashingEncoder())
-    from keyword_index_fixture import install_keyword_store
-    activate_index(repo, project, service.encoder)
+    activate_keyword_index(repo, project)
     install_keyword_store(service, monkeypatch)
     manager = RetrievalExperiments(service, authorize=lambda *args, **kwargs: None)
     run = manager.create(project, {'questions': [{'query': '退款依据', 'expected_record_ids': ['chunk']}],

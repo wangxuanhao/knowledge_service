@@ -91,6 +91,7 @@
     actor:'操作人',reason:'原因',created_at:'创建时间',version_id:'版本标识',document_id:'文档标识',title:'标题',
     source_content:'原文完整性',effective_time_source:'有效时间来源',excerpt_before:'前文',highlight:'定位原文',excerpt_after:'后文',
     attempt:'尝试次数',updated_at_at_capture:'当时更新时间'};
+  const timestampFields=new Set(['valid_from','valid_until','recorded_at','created_at','updated_at_at_capture']);
   const scalar=value=>typeof value==='string'||typeof value==='number'||typeof value==='boolean'?String(value):'';
   const list=value=>Array.isArray(value)?value:[];
   const element=(tag,text,className)=>{
@@ -243,11 +244,11 @@
       const card=element('article',undefined,'provenance-node');
       card.appendChild(element('small',nodeLabels[node.type]));
       card.appendChild(element('h3',scalar(node.label)||nodeLabels[node.type]));
-      card.appendChild(element('p',[scalar(node.status),scalar(node.occurred_at)].filter(Boolean).join(' · '),'provenance-node-meta'));
+      card.appendChild(element('p',[scalar(node.status),window.DisplayTime.format(node.occurred_at,"")].filter(Boolean).join(' · '),'provenance-node-meta'));
       const details=node.details&&typeof node.details==='object'?node.details:{};
       const fields=element('dl');
       for(const key of detailFields[node.type]){
-        const value=scalar(details[key]);if(!value)continue;
+        const value=timestampFields.has(key)?window.DisplayTime.format(details[key],''):scalar(details[key]);if(!value)continue;
         const timeLabels={explicit:'明确维护',valid_from:'规范生效时间',valid_until:'规范失效时间',source_validity:'来源有效期',missing_valid_from:'未维护生效时间',published_at:'发布日期推定',unknown:'待核对'};
         fields.append(element('dt',fieldLabels[key]),element('dd',key==='effective_time_source'?(timeLabels[value]||value):value));
       }

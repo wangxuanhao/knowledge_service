@@ -47,7 +47,9 @@ async function fixture(width=1440){
       throw Error('unexpected '+url);
     };
   });
+  await page.addScriptTag({path:path.join(web,'display-time.js')});
   await page.addScriptTag({path:path.join(web,'entity-governance.js')});
+  await page.addScriptTag({path:path.join(web,'workspace-drawers.js')});
   await page.addScriptTag({path:path.join(web,'task-review.js')});
   await page.evaluate(()=>EntityGovernance.mount(document.getElementById('governance'),{reload:async()=>{}}));
   return page;

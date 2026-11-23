@@ -71,19 +71,18 @@
     const serial=request,p=current;
     const saved=await api(endpoint('/records/'+encodeURIComponent(record.id)),{record,expected_version:expectedVersion},'PUT');
     const refresh=window.KnowledgeChanges?.notify({projectId:p,records:[saved],kind:'revise'});
-    if(serial!==request||p!==current||!dialog.open||!activeScope?.()){await refresh;return;}
+    if(serial!==request||p!==current||!dialog.open||!activeScope?.())return;
     activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);editContext();
-    // Update the open card before announcing success; closing the modal cannot
-    // cancel an already-committed revision's immediate presentation.
-    syncInspector(saved);
     const summary=RecordVersionContext.summary(saved,activeOntologies);
     const message=`已保存${summary}；旧修订保留，本体结构未修改。`;
     $('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=message;status(message);
-    const refreshFailed=refresh?await refresh:await refreshViews();
-    if(serial!==request||p!==current||!dialog.open||activeRow?.version_id!==saved.version_id)return;
-    $('record-dialog-message').textContent=message+(refreshFailed?' 部分视图刷新失败，请刷新图谱或台账。':'');
-    if(!window.KnowledgeChanges)await syncInspector(saved);
-    if(serial===request&&p===current&&dialog.open&&activeRow?.version_id===saved.version_id)return saved;
+    const reportRefresh=async failed=>{
+      if(serial!==request||p!==current||!dialog.open||!activeScope?.()||activeRow!==saved)return;
+      if(failed)$('record-dialog-message').textContent=message+' 部分视图刷新失败，请刷新图谱或台账。';
+      if(failed||!refresh)await syncInspector(saved);
+    };
+    void (refresh||refreshViews()).then(reportRefresh,()=>reportRefresh(true)).catch(console.error);
+    return saved;
   }
   async function compareConflict(local,serial,p){
     try{
@@ -101,7 +100,7 @@
   async function renderStructured(row){
     const serial=request,p=current;structured.innerHTML='<p class="subtle">正在加载可选类型和实体…</p>';
     try{
-      const versions=await api(endpoint('/ontologies'),undefined,'GET');
+      const versions=await api(endpoint('/ontologies?metadata_only=true'),undefined,'GET');
       if(serial!==request||p!==current||activeRow?.id!==row.id||activeRow?.version_id!==row.version_id)return;
       activeOntologies=RecordVersionContext.build(versions.versions||[]);editContext();
       if(['entity','relation','attribute'].includes(row.kind)&&!activeOntologies.byId.has(row.ontology_id)){
@@ -219,9 +218,9 @@
     appendFact(facts,'知识类别',revisionKind[row.kind]||row.kind||'未知');
     appendFact(facts,'删除状态',row.metadata?._deleted?'已删除':'有效');
     appendFact(facts,'本体归属',revisionOntology(row,ontologies));
-    appendFact(facts,'记录时间',row.recorded_at||'未知');
-    appendFact(facts,'被取代时间',row.superseded_at||'尚未被取代');
-    appendFact(facts,'业务有效期',`${row.valid_from||'未知'} → ${row.valid_until||'未知'}`);
+    appendFact(facts,'记录时间',window.DisplayTime.format(row.recorded_at,"未知"));
+    appendFact(facts,'被取代时间',window.DisplayTime.format(row.superseded_at,'尚未被取代'));
+    appendFact(facts,'业务有效期',`${window.DisplayTime.format(row.valid_from,"未知")} → ${window.DisplayTime.format(row.valid_until,"未知")}`);
     const content=nodeText('p',row.text||'（无文本内容）');content.className='version-content';
     const rawDetail=document.createElement('details'),summary=nodeText('summary','查看这次修订的 metadata 与属性');
     const pre=nodeText('pre',JSON.stringify({metadata:row.metadata||{},properties:row.properties||{}},null,2));
@@ -244,7 +243,7 @@
       const button=document.createElement('button');button.type='button';button.className='record-revision-item'+(currentRevision?' is-selected':'');
       button.dataset.revision=String(revision.version);button.setAttribute('aria-pressed',String(currentRevision));
       button.append(nodeText('b',`修订 r${revision.version}${currentRevision?' · 当前':' · 已取代'}`),
-        nodeText('small',`修订 ID ${shortRevisionId(revision.version_id)} · ${revision.recorded_at||'时间未知'}`),
+        nodeText('small',`修订 ID ${shortRevisionId(revision.version_id)} · ${window.DisplayTime.format(revision.recorded_at,"时间未知")}`),
         nodeText('small',`${revisionKind[revision.kind]||revision.kind||'未知类别'} · ${revisionOntology(revision,ontologies)}`));
       if(deleted){const badge=nodeText('span','已删除');badge.className='record-revision-deleted';button.append(badge);}
       button.onclick=()=>{
@@ -272,7 +271,7 @@
     try{
       const [result,ontologyResult]=await Promise.all([
         api(endpoint('/records/'+encodeURIComponent(record.id)+'/history'),undefined,'GET'),
-        api(endpoint('/ontologies'),undefined,'GET').catch(()=>null),
+        api(endpoint('/ontologies?metadata_only=true'),undefined,'GET').catch(()=>null),
       ]);
       if(serial!==request||projectId!==current||!dialog.open)return;
       renderRevisionTimeline(record,result,ontologyResult);

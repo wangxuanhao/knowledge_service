@@ -3,7 +3,7 @@
 规划依据：`docs/2026-09-30-PostgreSQL替换与本体知识服务优化规划.md` §5.1。
 
 设计要点（逐条对应规划）：
-  1. `repository/migrations/NNNN_name.sql` 编号迁移 + `schema_migrations`
+  1. 空库从合并基线初始化。已有库按归档和后续编号 SQL 升级，保留 `schema_migrations`
      版本/校验和表；**已应用迁移的内容被改动即报错**（防止有人在生产偷偷
      改一条旧迁移，导致同一版本号在不同环境对应不同 schema）。
   2. 使用 advisory lock 串行迁移：多个实例/多个人同时执行时只有一个真正跑，
@@ -39,6 +39,10 @@ from ..core.config import load_environment
 
 # 迁移文件所在目录（随包分发，见 pyproject.toml 的 package-data）
 MIGRATIONS_DIR = Path(__file__).resolve().parent / 'migrations'
+LEGACY_MIGRATIONS_DIR = MIGRATIONS_DIR / 'legacy'
+BASELINE_VERSION = 45
+BASELINE_FILENAME = 'baseline_0045.sql'
+BASELINE_CHECKSUM = '29622bf7d402653444c5addb00f973200c766140fb7cf16e53607025161d4284'
 
 # advisory lock 键：固定值，保证所有迁移者竞争同一把锁。
 # 取值无业务含义，只要全局唯一即可；这里是 "kschema" 的十六进制。
@@ -124,9 +128,17 @@ def discover_migrations(directory: Optional[Path] = None) -> List[Migration]:
     if not directory.is_dir():
         raise MigrationError(f'迁移目录不存在：{directory}')
 
+    paths = list(directory.glob('*.sql'))
+    if directory.resolve() == MIGRATIONS_DIR:
+        baseline = directory / BASELINE_FILENAME
+        archive = directory / 'legacy'
+        if not baseline.is_file() or not archive.is_dir():
+            raise MigrationError('默认迁移目录缺少空库基线或旧库升级归档')
+        paths = [path for path in paths if path != baseline]
+        paths.extend(archive.glob('*.sql'))
     found: List[Migration] = []
     seen: dict[int, str] = {}
-    for path in sorted(directory.glob('*.sql')):
+    for path in paths:
         match = _FILENAME.match(path.name)
         if not match:
             raise MigrationError(
@@ -140,11 +152,32 @@ def discover_migrations(directory: Optional[Path] = None) -> List[Migration]:
 
     if not found:
         raise MigrationError(f'迁移目录中没有 .sql 文件：{directory}')
+    found.sort(key=lambda migration: migration.version)
     # 编号必须从 1 开始连续，缺号意味着有人漏提交了文件
     versions = [m.version for m in found]
     if versions != list(range(1, len(versions) + 1)):
         raise MigrationError(f'迁移编号不连续：{versions}')
     return found
+
+
+def _install_baseline(conn, migrations: List[Migration]) -> list[int]:
+    baseline = Migration(BASELINE_VERSION, 'baseline', MIGRATIONS_DIR / BASELINE_FILENAME)
+    history = [migration for migration in migrations if migration.version <= baseline.version]
+    if len(history) != baseline.version or baseline.checksum != BASELINE_CHECKSUM:
+        raise MigrationError('空库基线校验失败，请检查基线和历史归档')
+    receipts = [(migration.version, migration.name, migration.checksum) for migration in history]
+    try:
+        with conn.cursor() as cur:
+            cur.execute('BEGIN')
+            cur.execute(baseline.sql())
+            cur.executemany('INSERT INTO schema_migrations (version, name, checksum) VALUES (%s, %s, %s)',
+                            receipts)
+            cur.execute('COMMIT')
+    except Exception as exc:
+        with conn.cursor() as cur:
+            cur.execute('ROLLBACK')
+        raise MigrationError(f'安装空库基线 {baseline.version:04d} 失败：{type(exc).__name__}: {exc}') from exc
+    return [migration.version for migration in history]
 
 
 def _ensure_bookkeeping(conn) -> None:
@@ -218,6 +251,7 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
     重写台账 checksum 再继续（CLI 的 ``--rewrite-checksums`` 对应此开关）。
     """
     migrations = discover_migrations(directory)
+    use_baseline = directory is None or directory.resolve() == MIGRATIONS_DIR
     lock_timeout_ms = _lock_timeout_ms(lock_timeout_ms)
 
     # autocommit=True：迁移里显式 BEGIN/COMMIT，避免驱动隐式开事务干扰
@@ -233,6 +267,14 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
         try:
             _ensure_bookkeeping(conn)
             applied = _applied(conn)
+            bootstrapped = []
+            if use_baseline and not applied:
+                if verbose:
+                    print(f'  → 安装空库基线 {BASELINE_VERSION:04d} ...', end='', flush=True)
+                bootstrapped = _install_baseline(conn, migrations)
+                applied = _applied(conn)
+                if verbose:
+                    print(' ok')
 
             # 已应用的迁移内容一旦变化，默认必须报错而不是默默接受。
             # 但历史遗留可能导致台账 checksum 与当前文件不一致（例如切换后端时迁移文件
@@ -319,7 +361,7 @@ def apply_migrations(dsn: str, *, directory: Optional[Path] = None,
             with conn.cursor() as cur:
                 cur.execute('SELECT pg_advisory_unlock(%s)', (ADVISORY_LOCK_KEY,))
 
-    return {'applied': [m.version for m in pending], 'current': current}
+    return {'applied': bootstrapped + [m.version for m in pending], 'current': current}
 
 
 def check_schema(dsn: str, *, directory: Optional[Path] = None) -> dict:

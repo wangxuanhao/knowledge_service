@@ -186,7 +186,7 @@ def test_migration_grants_custom_application_role_snapshot_dml():
     suffix = uuid4().hex
     role, schema = 'qa_test_' + suffix, 'qa_schema_' + suffix
     source = (Path(__file__).resolve().parents[2] / 'knowledge_service' / 'repository'
-              / 'migrations' / '0028_qa_conversations.sql').read_text(encoding='utf-8')
+              / 'migrations' / 'legacy' / '0028_qa_conversations.sql').read_text(encoding='utf-8')
     with psycopg.connect(pg_support.admin_dsn()) as connection:
         with connection.transaction(force_rollback=True):
             connection.execute(sql.SQL('CREATE ROLE {}').format(sql.Identifier(role)))

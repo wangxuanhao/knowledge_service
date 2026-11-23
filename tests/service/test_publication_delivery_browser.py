@@ -54,7 +54,7 @@ def check_publication_delivery(width, output=None):
             throw Error('Unexpected offline route '+url);
           };
         }''')
-        for name in ['ontology-draft-data.js','ontology-model-catalog.js','ontology-draft-history.js','ontology-model-workspace.js','ontology-model.js','ontology-model-panel.js']:
+        for name in ['display-time.js','ontology-draft-data.js','ontology-model-catalog.js','ontology-draft-history.js','ontology-model-workspace.js','ontology-model.js','ontology-model-panel.js']:
             page.add_script_tag(content=(WEB/name).read_text(encoding='utf-8'))
         page.evaluate('''() => {
           Object.assign(OntologyModel.S,{summary:fixtureSummary,draft:structuredClone(fixtureDraft),showingDraft:true,view:'cards',stageAvailability:{stages:{review:{allowed:true}}},readiness:{ready:true,revision:6,validation_fingerprint:'fp',items:[],approval_counts:{approved:188}}});

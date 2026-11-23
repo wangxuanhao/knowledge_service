@@ -4,17 +4,22 @@ const fs=require('node:fs');
 const path=require('node:path');
 const file=path.resolve(__dirname,'../../knowledge_service/web/workspace-context.js');
 const context=fs.existsSync(file)?require(file):{};
-test('scope is applied explicitly and isolated by project and owning page',()=>{
+test('search and QA share the applied scope within one project',()=>{
   assert.equal(typeof context.createStore,'function','page context store is missing');
   const store=context.createStore();
   store.edit('a','qa',{filters:{field:'metadata.city',op:'eq',value:'杭州'}});
   assert.equal(store.read('a','qa').filters,null);
   store.apply('a','qa');
   assert.equal(store.read('a','qa').filters.value,'杭州');
+  assert.equal(store.read('a','search').filters.value,'杭州');
   assert.equal(store.read('a','sources').filters,null);
   assert.equal(store.read('b','qa').filters,null);
   assert.equal(store.read('a','runtime').filters,null);
   assert.equal(store.read('a','ontology-model').filters,null);
+  const previous = store.ticket('a','qa');
+  store.reset('a','search');
+  assert.equal(store.read('a','qa').filters,null);
+  assert.equal(store.accepts(previous,'a','qa'),false);
 });
 test('cancelled drafts cannot affect requests, invalid JSON preserves applied scope',()=>{
   const store=context.createStore();
@@ -63,6 +68,17 @@ test('applied scopes survive a page reload in the login session and logout clear
   const first=context.createStore(storage);first.edit('a','qa',{filters:{field:'x',op:'eq',value:1}});first.apply('a','qa');
   const restored=context.createStore(storage);assert.equal(restored.read('a','qa').filters.value,1);
   restored.clear();assert.equal(context.createStore(storage).read('a','qa').filters,null);
+});
+
+test('legacy search and QA scopes prefer configured search filters and keep QA-only filters',()=>{
+  const search={filters:{field:'type',op:'eq',value:'SearchType'}}, qa={filters:{field:'type',op:'eq',value:'QAType'}};
+  const storage={getItem:()=>JSON.stringify([
+    [JSON.stringify(['a','search']),search],[JSON.stringify(['a','qa']),qa],
+    [JSON.stringify(['b','qa']),qa],[JSON.stringify(['b','search']),{}],
+  ])};
+  const store=context.createStore(storage);
+  assert.deepEqual(store.read('a','qa').filters,search.filters);
+  assert.deepEqual(store.read('b','search').filters,qa.filters);
 });
 
 test('scope store rejects obsolete list dimensions and ignores obsolete session entries',()=>{

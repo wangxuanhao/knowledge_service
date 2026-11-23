@@ -128,7 +128,7 @@
 .ontology-intake .oi-source-heading{position:static;padding:9px 10px;align-items:center}
 .ontology-intake .oi-document-toggle{display:flex;align-items:center;gap:8px;flex:1;min-width:0;text-align:left;background:none;border:0;color:var(--oi-ink);font:inherit;cursor:pointer;padding:4px 0}
 .ontology-intake .oi-document-toggle strong{font-size:12px}
-.ontology-intake .oi-document-chevron{font-size:18px;flex:0 0 14px}
+.ontology-intake .oi-document-toggle[aria-expanded=false] .oi-document-chevron{transform:rotate(-90deg)}
 .ontology-intake .oi-directory-tools{display:flex;gap:8px;justify-content:flex-end;margin:0 0 8px}
 .ontology-intake .oi-directory-tools .om-btn{margin:0;padding:4px 8px;font-size:11px}
 .ontology-intake .oi-document-body{padding-bottom:8px}.ontology-intake .oi-document-body[hidden]{display:none}

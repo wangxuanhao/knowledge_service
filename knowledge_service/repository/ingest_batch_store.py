@@ -206,12 +206,14 @@ class IngestBatchStore:
                  generation,source['original_name'],source['size_bytes'],source['sha256'],
                  'document-reprocess:'+idempotency_key,_json(options or {}),source['source_object_id'])).fetchone())
 
-    def list_items(self, project_id, batch_id, limit=50, offset=0, status=None):
+    def list_items(self, project_id, batch_id, limit=50, offset=0, status=None, *, item_id=None):
         limit,offset = self._page(limit,offset)
         with self.repo._transaction():
             if self.get_batch(project_id,batch_id) is None:
                 raise KeyError(batch_id)
-            where='batch_id=?'; values=[batch_id]
+            where='project_id=? AND batch_id=?'; values=[project_id,batch_id]
+            if item_id:
+                where+=' AND id=?';values.append(item_id)
             if status:
                 where+=' AND status=?';values.append(status)
             total = self.db.execute('SELECT COUNT(*) FROM ingest_batch_items WHERE '+where, values).fetchone()[0]

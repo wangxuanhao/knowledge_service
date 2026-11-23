@@ -11,10 +11,12 @@ from datetime import datetime
 from decimal import Decimal
 from functools import wraps
 from inspect import isgeneratorfunction
+from uuid import uuid4
 
 from ..core.time import normalize_time
 from ..domain.applicability import normalize_applicability
 from ..utils.filters import encode_filter_json, validate_filter
+from .pg_engine import translate
 
 
 KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
@@ -477,6 +479,24 @@ class ScopedReads:
         return {'records': [dict(row) if compact_graph else self.repo._record(row) for row in rows], 'next_cursor': cursor, 'total': total}
 
     @_snapshot_read
+    def evaluation_facts(self, project, scope, *, kind):
+        """Stream qualified metric fields without materializing record payloads."""
+        self.repo.get_project(project)
+        qualified, params = self._qualified(project, scope, kinds=[kind])
+        if kind == 'entity':
+            # The generated graph caption is capped at 160 characters.
+            fields = "r.id,r.payload::jsonb->>'text' AS text"
+        else:
+            fields = 'r.read_subject_id AS subject_id,r.read_type AS type,r.read_object_id AS object_id'
+        query = f'SELECT {fields} FROM record_versions r WHERE {qualified} ORDER BY r.id,r.version'
+        # A complete evaluation reads every qualified row. Keeping a single
+        # cursor avoids replanning the authority joins for each batch.
+        with self.repo._db.raw.cursor(name='evaluation_' + uuid4().hex) as cursor:
+            cursor.itersize = 1000
+            cursor.execute(translate(query), params)
+            yield from cursor
+
+    @_snapshot_read
     def ranked_keyword(self, project, scope, query, *, kinds, limit):
         """Historical keywords are filtered/ranked/limited in SQL before decode."""
         if not isinstance(query, str) or not query.strip():
@@ -573,7 +593,7 @@ class ScopedReads:
 
     @_snapshot_read
     def neighbors(self, project, scope, seeds, *, hops=1, max_nodes=500, max_edges=1000,
-                  direction='forward', entity_type=None, predicate=None):
+                  direction='forward', entity_type=None, predicate=None, relationship_types=None):
         if type(hops) is not int or not 0 <= hops <= 10:
             raise ValueError('邻域跳数必须是 0 到 10 之间的整数')
         if type(max_nodes) is not int or not 1 <= max_nodes <= 10000 or type(max_edges) is not int or not 1 <= max_edges <= 10000:
@@ -584,7 +604,8 @@ class ScopedReads:
                for value in (entity_type, predicate)):
             raise ValueError('图谱实体类型和关系谓词必须是非空字符串')
         entity_scope = {**scope, '_type_iris': [entity_type]} if entity_type else scope
-        relation_scope = {**scope, '_type_iris': [predicate]} if predicate else scope
+        relation_types = [predicate] if predicate else relationship_types
+        relation_scope = {**scope, '_type_iris': relation_types} if relation_types else scope
         def entities(ids):
             ids = list(ids)
             return [row for offset in range(0, len(ids), 5000)
@@ -601,13 +622,18 @@ class ScopedReads:
             sql, params = self._qualified(project, relation_scope or {}, kinds=['relation'], keyset=True)
             columns = (['subject_id', 'object_id'] if direction == 'both' else
                        ['subject_id' if direction == 'forward' else 'object_id'])
-            predicate = ' OR '.join(f"r.payload::jsonb->>'{column}'=ANY(?::text[])" for column in columns)
+            adjacency = ' OR '.join(f"r.payload::jsonb->>'{column}'=ANY(?::text[])" for column in columns)
+            if edges:
+                # Revisiting a previously loaded edge cannot extend the frontier.
+                # Exclude it before applying the remaining edge budget.
+                sql += ' AND NOT (r.id=ANY(?::text[]))'
+                params.append(list(edges))
             # Keep the ordered LIMIT outside adjacency selection: a generic
             # prepared plan otherwise scans every relation in key order rather
             # than using the subject/object indexes for this small frontier.
             # OFFSET 0 preserves that boundary without a materialized payload CTE.
             with self.repo._lock:
-                rows = self.repo._db.execute(f"SELECT * FROM (SELECT {fields} FROM record_versions r WHERE {sql} AND ({predicate}) OFFSET 0) adjacent ORDER BY id,version LIMIT ?", [*params, *[sorted(frontier) for _ in columns], max_edges - len(edges) + 1]).fetchall()
+                rows = self.repo._db.execute(f"SELECT * FROM (SELECT {fields} FROM record_versions r WHERE {sql} AND ({adjacency}) OFFSET 0) adjacent ORDER BY id,version LIMIT ?", [*params, *[sorted(frontier) for _ in columns], max_edges - len(edges) + 1]).fetchall()
             if len(rows) > max_edges - len(edges):
                 truncated = True
             found = [self.repo._record(row) for row in rows[:max_edges - len(edges)]]
@@ -686,7 +712,8 @@ class ScopedReads:
         anchor_ids = {row['id'] for row in hits if row.get('kind') == 'chunk'}
         anchors = self.by_ids(project, scope, sorted(anchor_ids), kinds=['chunk'])
         anchor_versions = {row['version_id']: {row['version_id']} for row in anchors}
-        artifact_scope = {**scope, '_source_artifact': True}
+        # Both mapped anchors and neighboring artifacts are chunk reads.
+        artifact_scope = {**scope, '_source_artifact': True, '_read_kinds': ['chunk']}
         qualified, params = self._base(project, artifact_scope, 'r')
         # Formal facts retain source identity in assertion mappings, rather
         # than a mutable top-level source_id or a guessed ID prefix.

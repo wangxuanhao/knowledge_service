@@ -19,7 +19,8 @@ def test_unified_workspace_keeps_original_controls_and_handlers(redesign_page):
     page.click('#ontology-expansion-toggle')
     assert page.locator('#ontology-expansion').is_checked()
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '统一平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='统一平台', exact=True).check()
     page.click('#apply-scope')
     assert '统一平台' in page.locator('#applied-scope-chips').inner_text()
     assert page.evaluate("() => WorkspaceContext.read(current, 'search').applicability.platforms.values") == ['统一平台']

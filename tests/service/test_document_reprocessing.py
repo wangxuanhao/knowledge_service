@@ -60,6 +60,18 @@ def test_reprocess_creates_new_generation_for_same_document_and_preserves_histor
     assert operation['item']['source_version_id'] == document['metadata']['source_document_version_id']
     assert operation['batch']['status'] == 'running'
     assert not {'content', 'upload_object_id', 'lease_token'} & operation['item'].keys()
+    sources = f'/api/projects/{project}/sources?summary_only=true&document_id={document["id"]}'
+    queued = client.post(sources, json={}).json()['documents'][0]
+    assert queued['metadata']['batch_id'] == old_batch['id']
+    assert queued['processing_task']['batch_id'] == operation['batch']['id']
+    assert queued['processing_task']['batch_item_id'] == operation['item']['id']
+    historical = client.post(sources, json={'known_at': document['recorded_at']}).json()['documents'][0]
+    assert 'processing_task' not in historical
+    items = f'/api/projects/{project}/ingest-batches/{operation["batch"]["id"]}/items?limit=1'
+    assert client.get(f'{items}&item_id={old_item["id"]}').json()['total'] == 0
+    exact = client.get(f'{items}&item_id={operation["item"]["id"]}').json()
+    assert exact['total'] == 1 and exact['next_cursor'] is None
+    assert exact['items'][0]['status'] == 'queued'
     old = repo.ingest_batches.list_items(project, old_batch['id'])['items'][0]
     assert old['status'] == 'succeeded' and old['document_generation'] == 4
     assert repo.ingest_checkpoints.get(document['id'], 0, 'old-checkpoint')

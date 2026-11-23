@@ -92,7 +92,7 @@ def overview_page(request):
             elif path.endswith('/ontology-discovery'):
                 value = {'unpublished_candidate_count': 7}
             elif path.endswith('/applicability-values'):
-                value = dict(platforms=[], businesses=[], audiences=[])
+                value = dict(platforms=['台账平台', '来源平台', '未命中平台'], businesses=[], audiences=[])
             elif path.endswith('/timeline'):
                 value = dict(events=[], truncated=False)
             elif path.endswith('/evidence'):
@@ -223,7 +223,8 @@ def test_ledger_relation_navigation_keeps_exact_edge_and_ledger_scope(overview_p
     page.click('[data-ledger-view="relation"]')
     page.wait_for_selector('#records tr[data-record-id="edge-exact"]')
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '台账平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='台账平台', exact=True).check()
     page.click('#apply-scope')
     page.wait_for_selector('#records tr[data-record-id="edge-exact"]')
     before = len(calls)
@@ -332,7 +333,8 @@ def test_source_canonical_navigation_keeps_originating_scope_and_frozen_evidence
         dict(id='source-assertion', kind='relation', status='accepted', canonical_record_id='edge-exact', payload={'text': '来源关系'}, quote='历史来源正文')]}))
     page.evaluate("() => KnowledgeTabs.open('sources')")
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '来源平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='来源平台', exact=True).check()
     page.click('#apply-scope')
     page.evaluate('''() => {
       const value={...WorkspaceContext.read(current,'sources'),known_at:'2025-01-01T00:00:00Z'};
@@ -427,7 +429,8 @@ def test_filtered_empty_overview_explains_and_operates_existing_filter_actions(o
     _loaded(page)
     state.update(nodes=[], edges=[], entity_count=0, relation_count=0)
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '未命中平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='未命中平台', exact=True).check()
     page.click('#apply-scope')
     _loaded(page)
     assert page.locator('.full-graph-empty').count() == 1

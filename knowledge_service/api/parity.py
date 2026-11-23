@@ -175,10 +175,10 @@ def install(app,service):
 
     @router.get('/projects/{p}/ingest-batches/{batch_id}/items')
     def list_ingest_items(p:str,batch_id:str,limit:int=Query(50,ge=1,le=1000),
-                          cursor:int=Query(0,ge=0),status:str|None=None):
+                          cursor:int=Query(0,ge=0),status:str|None=None,item_id:str|None=None):
         batches.get(p,batch_id)
         internal={'queued':'pending','staged':'pending','completed':'succeeded','needs_attention':'failed'}.get(status,status)
-        result=batches.store.list_items(p,batch_id,limit,cursor,internal)
+        result=batches.store.list_items(p,batch_id,limit,cursor,internal,item_id=item_id)
         result['items']=[public_item(row) for row in result['items']]
         result['next_cursor']=str(cursor+len(result['items'])) if cursor+len(result['items'])<result['total'] else None
         return result
@@ -279,7 +279,8 @@ def install(app,service):
             headers={'Cache-Control':'no-cache','X-Accel-Buffering':'no','Connection':'keep-alive'})
 
     @router.get('/jobs')
-    def all_jobs():return {'jobs':service.data.list_artifacts('job')[:100]}
+    def all_jobs():
+        return {'jobs': jobs.recent(limit=100)}
 
     @router.get('/projects/{p}/jobs')
     def project_jobs(p:str):
@@ -464,9 +465,11 @@ def install(app,service):
     def snapshot(p:str,request:Snapshot):return explorer.snapshot(p,request.name)
 
     @router.get('/projects/{p}/snapshots')
-    def snapshots(p:str):
-        service.data.get_project(p)
-        return {'snapshots':[{k:v for k,v in s.items() if k not in ('records','ontologies')} for s in service.data.list_artifacts('snapshot',p)]}
+    def snapshots(p: str, limit: int | None = Query(None, ge=1, le=100),
+                  before: int | None = Query(None, ge=1)):
+        if before is not None and limit is None:
+            limit = 32
+        return service.data.list_snapshot_summaries(p, limit=limit, before=before)
 
     @router.post('/projects/{p}/snapshots/{snapshot_id}/restore')
     def restore_snapshot(p:str,snapshot_id:str):return explorer.restore_snapshot(p,snapshot_id)

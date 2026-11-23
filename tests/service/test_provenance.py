@@ -664,6 +664,44 @@ def test_all_source_reads_share_the_completion_transaction(provenance, monkeypat
     assert service.trace_answer_evidence(project, answer, 'E1')['integrity']['complete']
 
 
+def test_qa_batches_evidence_sources_at_frozen_knowledge_time(provenance, monkeypatch):
+    from knowledge_service.core.time import utc_now
+    from knowledge_service.repository.pg_engine import SqliteishConnection
+    from knowledge_service.services.answer_validity import apply_validity, classify
+
+    repo, _, project = provenance
+    effective = {'valid_from': '2020-01-01'}
+    doc = repo.put_record(project, {'id': 'qa-doc', 'kind': 'document', 'text': 'support', **effective})
+    chunks = [repo.put_record(project, {
+        'id': f'qa-chunk-{index}', 'kind': 'chunk', 'text': 'support', 'source_id': doc['id'],
+        'metadata': {'source_version_id': doc['version_id'], 'start_char': 0, 'end_char': 7},
+        **effective}) for index in range(8)]
+    fact, assertions = _mapped(repo, project, sources=[(doc, chunk, None) for chunk in chunks])
+    fact.update(effective)
+    frozen_at = utc_now()
+    repo.transition_assertion(project, assertions[0]['id'], 2, 'superseded', 'withdrawn', 'reviewer')
+    repo.put_record(project, {'id': doc['id'], 'kind': 'document', 'text': 'new text', **effective},
+                    expected_version=doc['version'])
+    service = SimpleNamespace(repository=repo)
+    for at, expected_count in ((frozen_at, 8), (utc_now(), 7)):
+        request = {'query': 'support', 'valid_at': at, 'known_at': at, 'include_references': False}
+        expected = classify(service, project, fact, request)
+        with monkeypatch.context() as patch:
+            statements = []
+            execute = SqliteishConnection.execute
+
+            def count(connection, statement, params=()):
+                statements.append(statement)
+                return execute(connection, statement, params)
+
+            patch.setattr(SqliteishConnection, 'execute', count)
+            result = apply_validity(service, project, {'hits': [fact], 'evidence_rows': [fact]}, request)
+        assert result['evidence_rows'] == [expected]
+        assert len(expected['_allowed_chunk_version_ids']) == expected_count
+        assert expected['_allowed_source_version_ids'] == [doc['version_id']]
+        assert len(statements) <= 10, f'{len(statements)} SQL executions for {expected_count} occurrences'
+
+
 def test_same_answer_captures_consistent_frozen_ingest_state(provenance):
     """同一答案内的引用必须捕获**一致**的摄取状态，并在提交边界之后被冻结。
 

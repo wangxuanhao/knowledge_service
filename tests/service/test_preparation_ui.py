@@ -1,9 +1,113 @@
 """Browser workflow against deterministic API responses, without OCR/model work."""
 import json
+import re
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from test_chunk_preview_ui import browser, native_workbench
+
+
+@pytest.fixture
+def progress_workbench(browser):
+    web = Path(__file__).resolve().parents[2] / 'knowledge_service' / 'web'
+    markup = re.sub(r'<script\b[^>]*>.*?</script>|<link\b[^>]*>', '',
+                    (web / 'index.html').read_text(encoding='utf-8'), flags=re.DOTALL)
+    page = browser.new_page(viewport={'width': 1100, 'height': 800})
+    page.set_default_timeout(5000)
+    page.route('http://progress.test/', lambda r: r.fulfill(body=markup, content_type='text/html; charset=utf-8'))
+    page.route('http://progress.test/api/**', lambda r: r.fulfill(json={
+        'documents': [], 'items': [], 'concurrency_choices': ['auto']}))
+    page.goto('http://progress.test/')
+    page.evaluate("""() => {
+      document.documentElement.classList.remove('auth-pending');
+      window.$ = id => document.getElementById(id);
+      window.current = 'p';
+      $('project').replaceChildren(new Option('测试项目', 'p'));
+      $('tab-sources').classList.remove('hidden');
+      document.body.classList.add('is-admin');
+      window.scope = () => ({});
+      window.esc = value => String(value ?? '').replace(/[&<>"]/g,
+        character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+      window.Auth = {isAdmin: () => true};
+      window.status = (message, error) => {if(error) throw Error(message);};
+      window.api = async (url, data, method='POST') => {
+        const response = await fetch(url, {method, ...(data && {body: JSON.stringify(data)})});
+        if(!response.ok) throw Error('HTTP ' + response.status);
+        return response.json();
+      };
+    }""")
+    page.add_style_tag(content='.hidden { display: none !important }')
+    for asset in ('library-workspace.css', 'ingest-batches.css', 'sources-library.css', 'document-preparation.css'):
+        page.add_style_tag(path=str(web / asset))
+    for asset in ('workspace-drawers.js', 'document-preparation.js', 'document-preparation-view.js',
+                  'source-content.js', 'source-reader.js', 'ingest-batches.js', 'sources-view.js', 'library-workspace.js'):
+        page.add_script_tag(path=str(web / asset))
+    try:
+        yield SimpleNamespace(page=page, project='p')
+    finally:
+        page.close()
+
+
+def test_library_reopens_the_current_file_progress_without_visiting_jobs(progress_workbench):
+    page = progress_workbench.page
+    library = page.locator('#tab-sources')
+    batch_drawer = page.locator('#library-workspace-drawer')
+    project = progress_workbench.project
+    file = {'id': 'focused', 'document_id': 'receipt', 'original_name': '售后规则.md',
+            'status': 'running', 'stage': 'ocr', 'progress': 35, 'source_version_id': 'fixed'}
+    document = {'id': 'receipt', 'text': '用于核对的正文', 'metadata': {
+        'title': '售后规则', 'status': 'processing', 'active_stage': 'ocr',
+        'batch_id': 'active-batch', 'batch_item_id': 'focused', 'source_document_version_id': 'fixed'}}
+    batch = {'id': 'active-batch', 'status': 'running', 'counts': {'running': 1, 'queued': 1},
+             'total_items': 2, 'requested_concurrency': 'auto', 'effective_concurrency': 1}
+    page.route(f'**/projects/{project}/sources?*', lambda r: r.fulfill(json={'documents': [document], 'total': 1}))
+    page.route(f'**/projects/{project}/records/receipt', lambda r: r.fulfill(json=document))
+    page.route(f'**/projects/{project}/source-documents/fixed/rendered',
+               lambda r: r.fulfill(content_type='text/html', body='<p>用于核对的正文</p>'))
+    page.route(f'**/projects/{project}/ingest-batches?*', lambda r: r.fulfill(json={'items': [batch]}))
+    page.route(f'**/projects/{project}/ingest-batches/active-batch', lambda r: r.fulfill(json=batch))
+    page.route(f'**/projects/{project}/ingest-batches/active-batch/items?*', lambda r: r.fulfill(json={
+        'items': [file] if 'item_id=focused' in r.request.url else [
+            file, {'id': 'other', 'original_name': '其他文件.md', 'status': 'queued'}]}))
+    library.get_by_role('button', name='刷新', exact=True).click()
+    progress = library.get_by_role('button', name='查看进度 · 售后规则', exact=True)
+    for value in [35, 65]:
+        file['progress'] = value
+        progress.click()
+        batch_drawer.get_by_text(f'当前阶段：图像识别 · {value}%', exact=True).wait_for()
+        assert batch_drawer.get_by_text('其他文件.md', exact=True).count() == 0
+        batch_drawer.get_by_role('button', name='查看本批全部文件').click()
+        batch_drawer.get_by_text('其他文件.md', exact=True).wait_for()
+        batch_drawer.get_by_role('button', name='关闭 ×', exact=True).click()
+    progress.click()
+    batch_drawer.get_by_role('button', name='查看资料', exact=True).click()
+    detail = page.locator('#source-detail-drawer')
+    detail.get_by_text('用于核对的正文', exact=True).wait_for()
+    assert detail.get_by_role('button', name='解析', exact=True).is_visible()
+    assert detail.get_by_role('button', name='重新处理', exact=True).is_hidden()
+
+
+def test_library_restores_submission_preview_progress_after_closing_the_drawer(progress_workbench):
+    page = progress_workbench.page
+    drawer = page.locator('#library-workspace-drawer')
+    close = drawer.get_by_role('button', name='关闭 ×', exact=True)
+    project = progress_workbench.project
+    item = {'id': 'file', 'original_name': '待解析规则.md', 'status': 'running', 'options': {},
+            'progress': {'completed': 2, 'total': 8}}
+    draft = {'id': 'draft', 'items': [item]}
+    page.route(f'**/projects/{project}/preparations', lambda r: r.fulfill(json={'items': [draft]}))
+    page.route(f'**/projects/{project}/preparations/draft', lambda r: r.fulfill(json=draft))
+    entry = page.locator('#tab-sources').get_by_role('button', name='解析进度', exact=True)
+    entry.click()
+    drawer.get_by_role('button', name='待解析规则.md · 1 份 · 1 份解析中').click()
+    progress = drawer.locator('[data-preparation-step="2"] progress')
+    progress.wait_for()
+    assert progress.get_attribute('value') == '2'
+    close.click()
+    item['progress']['completed'] = 6
+    entry.click()
+    drawer.locator('[data-preparation-step="2"] progress[value="6"]').wait_for()
 
 
 @pytest.mark.parametrize('width', [390, 1280])
@@ -48,24 +152,61 @@ def test_upload_configure_parse_and_publish_are_separate(tmp_path, width):
             request.fulfill(json=result)
 
         page.route('http://test/api/**', route)
-        page.route('http://test/', lambda r: r.fulfill(body='<html><body><div id="host"></div></body></html>', content_type='text/html'))
+        page.route('http://test/', lambda r: r.fulfill(
+            body='<html><body><datalist id="doc-platform-options"></datalist><div id="host"></div></body></html>',
+            content_type='text/html'))
         page.goto('http://test/')
         page.add_style_tag(path=str(web / 'document-preparation.css'))
         page.add_script_tag(path=str(web / 'document-preparation.js'))
         page.add_script_tag(path=str(web / 'document-preparation-view.js'))
         page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p',settings:()=>({extraction_mode:'documents'})}); view.open()")
+        help_toggle = page.locator('summary').filter(has_text='ZIP 打包说明')
+        help_toggle.wait_for(timeout=3000)
+        file_choosers = []
+        page.on('filechooser', lambda chooser: file_choosers.append(chooser))
+        example = page.get_by_text('规则.zip', exact=False)
+        assert example.is_hidden()
+        help_toggle.click()
+        example.wait_for()
+        assert '规则.md' in example.inner_text() and 'assets/' in example.inner_text()
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        help_toggle.press('Enter')
+        assert example.is_hidden()
+        assert not file_choosers
         page.locator('#preparation-files').set_input_files({'name': 'rules.md', 'mimeType': 'text/markdown', 'buffer': b'# Rules'})
         page.get_by_text('待解析', exact=False).first.wait_for()
+        assert page.get_by_text('单文件最大 25.0 MB。', exact=True).is_visible()
+        assert not page.get_by_text('ZIP 无需 manifest.json', exact=False).is_visible()
         assert not any(path.endswith('/parse') for _, path in calls)
         page.get_by_role('button', name='下一步：配置资料').click()
         page.get_by_role('button', name='设置', exact=True).click()
         assert page.locator('.preparation-editor').evaluate("e => e.closest('.preparation-file')?.dataset.itemId") == 'a'
         page.locator('#preparation-edit-title').fill('美团规则')
+        platform_picker = page.get_by_label('添加已有平台', exact=True)
+        platform_value = page.get_by_label('平台值（逗号分隔）', exact=True)
+        assert platform_picker.is_hidden()
+        page.get_by_label('平台范围', exact=True).select_option('specific')
+        assert platform_picker.is_visible() and platform_picker.is_disabled()
+        assert platform_picker.locator('option').inner_text() == '暂无已有平台'
+        page.evaluate("""() => {
+          const list = document.getElementById('doc-platform-options');
+          list.append(new Option('美团', '美团'), new Option('京东', '京东'));
+        }""")
+        platform_picker.select_option('美团')
+        platform_picker.select_option('美团')
+        assert platform_value.input_value() == '美团'
+        platform_value.fill('美团，其他平台')
+        platform_picker.select_option('京东')
+        assert platform_value.input_value() == '美团，其他平台，京东'
+        assert platform_picker.input_value() == ''
         page.get_by_role('button', name='设置', exact=True).click()
         assert page.locator('.preparation-editor').is_hidden()
         page.get_by_role('button', name='设置', exact=True).click()
         assert page.locator('#preparation-edit-title').input_value() == '美团规则'
         page.get_by_role('button', name='保存设置').click()
+        assert item['options']['applicability']['platforms'] == {
+            'mode': 'specific', 'values': ['美团', '其他平台', '京东'],
+        }
         assert not any(path.endswith('/parse') for _, path in calls)
         page.get_by_role('button', name='开始解析（1 份）').click()
         page.get_by_role('button', name='查看正文与切片').click()
@@ -87,7 +228,7 @@ def test_native_file_entry_uses_staged_api_and_documents_mode(native_workbench, 
     page.on('request', lambda request: calls.append(request.url))
     page.set_input_files('#preparation-files', {
         'name': 'standalone.txt', 'mimeType': 'text/plain',
-        'buffer': '可以直接核对的独立资料正文。'.encode('utf-8'),
+        'buffer': '# 独立资料标题\n\n生效时间：2026年3月1日\n失效时间：2026年4月1日\n\n可以直接核对的独立资料正文。'.encode('utf-8'),
     })
     page.locator('[data-preparation-step="0"]').get_by_text('待解析', exact=False).wait_for()
     assert not any(url.endswith('/parse') for url in calls)
@@ -106,8 +247,15 @@ def test_native_file_entry_uses_staged_api_and_documents_mode(native_workbench, 
     page.get_by_role('button', name='开始解析（1 份）').click()
     page.get_by_role('button', name='查看正文与切片').wait_for(timeout=15000)
     page.get_by_role('button', name='查看正文与切片').click()
-    page.locator('#preparation-preview pre').first.wait_for()
-    assert '独立资料正文' in page.locator('#preparation-preview').inner_text()
+    preview = page.locator('#preparation-preview')
+    preview.get_by_role('heading', name='standalone.txt · 正文与切片', exact=True).wait_for()
+    preview.locator('pre').first.wait_for()
+    assert '原文标题 · 独立资料标题' in preview.inner_text()
+    assert '独立资料正文' in preview.inner_text()
+    assert '业务生效' in preview.inner_text()
+    assert '业务失效' in preview.inner_text()
+    preview.get_by_text('识别依据', exact=True).click()
+    assert '文首日期字段' in preview.inner_text()
     page.get_by_role('button', name='关闭预览').click()
     assert not any(url.endswith('/publish') for url in calls)
     page.reload(wait_until='load')
@@ -130,6 +278,10 @@ def test_native_same_name_files_and_mixed_platform_bulk_configuration(native_wor
     page = native_workbench.page
     calls = []
     page.on('request', lambda request: calls.append(request.url))
+    page.route('**/applicability-values', lambda route: route.fulfill(json={
+        'platforms': ['美团', '京东'], 'businesses': ['到店'], 'audiences': [],
+    }))
+    page.evaluate('loadApplicabilityVocabulary()')
     page.evaluate("""() => {
       const input=document.querySelector('#preparation-files'), files=new DataTransfer();
       files.items.add(new File(['第一份资料正文'], 'rules.txt', {type:'text/plain',lastModified:123}));
@@ -143,10 +295,10 @@ def test_native_same_name_files_and_mixed_platform_bulk_configuration(native_wor
     assert editor.evaluate("e => !e.closest('.preparation-file') && Boolean(e.compareDocumentPosition(document.querySelector('[data-preparation-step=\"1\"] .preparation-files')) & Node.DOCUMENT_POSITION_FOLLOWING)")
     editor.get_by_role('checkbox', name='修改平台', exact=True).check()
     editor.get_by_label('平台范围', exact=True).select_option('specific')
-    editor.get_by_label('平台值（逗号分隔）', exact=True).fill('美团')
+    editor.get_by_label('添加已有平台', exact=True).select_option('美团')
     editor.get_by_role('checkbox', name='修改业务', exact=True).check()
     editor.get_by_label('业务范围', exact=True).select_option('specific')
-    editor.get_by_label('业务值（逗号分隔）', exact=True).fill('到店')
+    editor.get_by_label('添加已有业务', exact=True).select_option('到店')
     editor.get_by_role('button', name='保存设置').click()
     editor.wait_for(state='hidden')
     page.get_by_role('button', name='设置', exact=True).nth(1).click()
@@ -325,8 +477,8 @@ def test_finished_drafts_are_not_restored_and_recovery_only_lists_pending_files(
     page.add_script_tag(path=str(web/'document-preparation.js'));page.add_script_tag(path=str(web/'document-preparation-view.js'))
     page.evaluate("window.view=PreparationView.mount(document.querySelector('#host'),{project:()=> 'p'});view.open()")
     assert page.locator('.preparation-file').count()==0
-    page.get_by_text('继续未完成上传',exact=True).click()
-    page.get_by_role('button',name='继续上传 · 1 份 · continue.md',exact=True).wait_for()
+    page.get_by_text('未提交的文件与解析进度',exact=True).click()
+    page.get_by_role('button',name='continue.md · 1 份 · 查看详情',exact=True).wait_for()
     assert page.get_by_role('button',name='finished',exact=False).count()==0
     page.close()
 

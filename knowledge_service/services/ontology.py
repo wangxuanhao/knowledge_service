@@ -210,6 +210,13 @@ class Ontology:
             return
         records = index_governed_vocabulary(self.graph)
         self._governed_records = {record.node: record for record in records}
+        # Exact IRIs and decoded names can collide, so keep every candidate.
+        spellings = {}
+        for record in records:
+            spellings.setdefault(record.iri, []).append(record.node)
+            if record.local_name != record.iri:
+                spellings.setdefault(record.local_name, []).append(record.node)
+        self._term_spellings = spellings
         for target, kind in (
                 (self.classes, "class"),
                 (self.relations, "relation"),
@@ -240,22 +247,25 @@ class Ontology:
         return self._term_surfaces_cache[1]
 
     def _resolve_current(self, name: str, allowed):
-        matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
+        if allowed is None or allowed is self.classes or allowed is self.relations or allowed is self.attributes:
+            candidates = self._term_spellings.get(name, ()) if isinstance(name, str) else ()
+            matches = candidates if allowed is None else [uri for uri in candidates if uri in allowed]
+        else:
+            matches = [uri for uri in allowed if str(uri) == name or local_name(uri) == name]
         if len(matches) != 1:
-            raise UnknownOntologyTerm(name, expected=allowed)
+            expected = self.classes | self.relations | self.attributes if allowed is None else allowed
+            raise UnknownOntologyTerm(name, expected=expected)
         return matches[0]
 
     def resolve(self, name: str, allowed=None):
         self._refresh_vocabulary()
-        allowed = allowed if allowed is not None else self.classes | self.relations | self.attributes
         return self._resolve_current(name, allowed)
 
     def is_active_term(self, term):
         """Return false only for an explicitly truthy ``owl:deprecated`` marker."""
         self._refresh_vocabulary()
         try:
-            node = term if isinstance(term, URIRef) else self._resolve_current(
-                str(term), self.classes | self.relations | self.attributes)
+            node = term if isinstance(term, URIRef) else self._resolve_current(str(term), None)
         except ValueError:
             return False
         record = self._governed_records.get(node)

@@ -17,6 +17,12 @@ class TaskStore:
     def __init__(self, repository):
         self.repo = repository
 
+    def recent_jobs(self, *, limit):
+        with self.repo.independent_read_view() as reader:
+            rows = reader._db.execute('''SELECT payload FROM artifacts
+                WHERE kind='job' ORDER BY seq DESC LIMIT ?''', (limit,)).fetchall()
+        return [json.loads(row['payload']) for row in rows]
+
     def claim(self, kind, owner, *, lease_seconds=120, task_id=None):
         stamp = now()
         with self.repo.unit_of_work():

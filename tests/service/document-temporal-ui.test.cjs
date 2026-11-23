@@ -40,8 +40,8 @@ test('legacy inferred validity and saved revision are labelled with their actual
     published_at:'2026-09-24T16:00:00Z',revised_at:'2026-10-01T16:00:00Z',effective_time_source:'published_at'}});
   assert.match(html,/发布时间推定/);
   assert.match(html,/原文修订时间/);
-  assert.match(html,/2026-09-25/);
-  assert.match(html,/Asia\/Shanghai/);
+  assert.match(html,/2026年09月25日 00:00:00/);
+  assert.match(html,/北京时间/);
   assert.doesNotMatch(html,/持续有效/);
 });
 
@@ -89,7 +89,7 @@ test('time helper is versioned and loaded before preview and saved-source consum
   assert.match(html,/手工填写（兼容发布时间推定）/);
   assert.match(html,/id="doc-upload-package-help"/);
   assert.match(fs.readFileSync('knowledge_service/web/ingest-mode.js','utf8'),/ZIP[^\n]*相对目录/);
-  const helper=html.indexOf('/assets/document-temporal-ui.js?v=document-time-20261110-1');
+  const helper=html.indexOf('/assets/document-temporal-ui.js?v=display-time-20261123-1');
   assert.ok(helper>=0);
   for(const file of ['ingest-mode','workbench','sources-view','ingest-batches','library-workspace','ingest-results']){
     const tag=new RegExp(`<script src="/assets/${file}\\.js\\?v=[^"\\s]+"></script>`).exec(html);
@@ -115,7 +115,7 @@ test('reopened source details render persisted dates and evidence alongside the 
   const env=setup({documents:[doc]});env.context.DocumentTemporalUI=require('../../knowledge_service/web/document-temporal-ui.js');
   await settle();await env.rows()[0].click();
   const publication=env.get('source-meta').querySelectorAll('p').find(node=>node.querySelector('strong')?.textContent==='原文发布时间');
-  assert.match(publication.textContent,/2026-09-25/);
+  assert.match(publication.textContent,/2026年09月25日 00:00:00/);
   assert.match(env.get('source-meta').textContent,/解析正文位置 0–17/);
   assert.ok(env.body.querySelector('p'),'frozen rich content remains mounted');
   env.drawers[0].close();await env.rows()[0].click();

@@ -14,10 +14,10 @@ async function renderEntity(attributes,details={},withMounts=false,windowOverrid
   const get=id=>{if(!elements.has(id))elements.set(id,make());return elements.get(id);};
   const temporalFile=path.resolve(__dirname,'../../knowledge_service/web/temporal-scope.js');
   const shared={mount:(host,options)=>{mounts.push(options);return {dispose(){}};}};
-  const window={TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{},EntityAttributePanel:shared,...windowOverrides},context={window,EntityAttributePanel:shared,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
+  const window={DisplayTime:require('../../knowledge_service/web/display-time.js'),TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{},EntityAttributePanel:shared,...windowOverrides},context={window,EntityAttributePanel:shared,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
     document:{createElement:make,body:make()},esc:value=>String(value??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),
     labelOf:value=>value,term:value=>value,RecordVersionContext:{revision:()=>1,summary:()=>''},
-    api:async url=>url==='/ontologies'?{versions:[]}:{documents:[],message:'没有来源'}};
+    api:async url=>url==='/ontologies?metadata_only=true'?{versions:[]}:{documents:[],message:'没有来源'}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
   await window.renderEvidenceInspector({id:'entity',kind:'entity',type:'urn:test:Thing',text:'事物',version:1,
     properties:{age:'raw metadata value'},attributes,...details},[]);

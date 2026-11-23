@@ -1,11 +1,45 @@
 import unittest
 from types import SimpleNamespace
+from unittest.mock import patch
 
 
 class AttributeRetrievalHitsTests(unittest.TestCase):
     def helper(self):
         from knowledge_service.services.retrieval_hits import qualified_hits
         return qualified_hits
+
+    def test_hydrates_supports_only_for_exact_context_candidates(self):
+        from knowledge_service.repository.projection_contexts import ProjectionContexts
+
+        plain = dict(id='plain', version_id='plain-v1', kind='entity', text='manual')
+        contextual = dict(id='context', version_id='context-v1', kind='entity', text='contextual',
+                          metadata={'identity_source_qualified': True})
+        rejected = dict(id='rejected', version_id='rejected-v1', kind='entity', text='stale')
+        hits = [
+            dict(record_id='plain', version_id='plain-v1', score=3),
+            dict(record_id='context', version_id='context-v1', score=2,
+                 support_context_id='support', support_context_version=4),
+            dict(record_id='other', version_id='rejected-v1', score=1,
+                 support_context_id='bad', support_context_version=1),
+        ]
+        support = {'id': 'support', 'version': 4, 'metadata': {'applicability': {
+            'platforms': {'mode': 'specific', 'values': ['美团']}}}}
+        with patch.object(ProjectionContexts, 'collect', return_value={'context': [support]}) as collect:
+            result = self.helper()(SimpleNamespace(_db=object()), 'p', {'known_at': '2026-01-01'},
+                                   [plain, contextual, rejected], iter(hits))
+
+        collect.assert_called_once_with('p', [contextual], known_at='2026-01-01')
+        self.assertEqual([row['id'] for row in result], ['plain', 'context'])
+        self.assertEqual(result[1]['matched_source_context']['version'], 4)
+
+    def test_context_free_search_does_not_read_source_support(self):
+        from knowledge_service.repository.projection_contexts import ProjectionContexts
+
+        row = dict(id='plain', version_id='v1', kind='entity', text='manual')
+        with patch.object(ProjectionContexts, 'collect', side_effect=AssertionError('unused source read')):
+            result = self.helper()(SimpleNamespace(_db=object()), 'p', {}, [row],
+                                   [dict(record_id='plain', version_id='v1', score=2)])
+        self.assertEqual(result, [{**row, 'score': 2.0}])
 
     def test_support_context_must_match_all_scope_fields_and_exact_version(self):
         contexts = {'e': [dict(id='a', version=1, valid_from='2020-01-01', valid_until='2021-01-01',

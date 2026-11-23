@@ -1,13 +1,14 @@
 /* Shared scoped property reader. It never adds nodes or edges to a graph. */
 (function(root,factory){
-  const api=factory(root);if(typeof module==='object'&&module.exports)module.exports=api;else root.EntityAttributePanel=api;
-})(typeof window==='object'?window:globalThis,root=>{
+  const displayTime=typeof module==='object'&&module.exports?require('./display-time.js'):root.DisplayTime;
+  const api=factory(root,displayTime);if(typeof module==='object'&&module.exports)module.exports=api;else root.EntityAttributePanel=api;
+})(typeof window==='object'?window:globalThis,(root,displayTime)=>{
   const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const clone=value=>JSON.parse(JSON.stringify(value));
   const text=value=>typeof value==='string'?value:JSON.stringify(value)??'';
   const preview=value=>Array.from(String(value??'')).slice(0,400).join('');
   const cleanScope=value=>{const {entity_type,predicate,...scope}=clone(value||{});return scope;};
-  const interval=value=>!value.valid_from&&!value.valid_until?'时间待核':`${value.valid_from||'起始未知'} → ${value.valid_until||'未设结束时间'}${value.valid_until?'（不含）':''}`;
+  const interval=value=>!value.valid_from&&!value.valid_until?'时间待核':`${displayTime.format(value.valid_from,'起始未知')} → ${displayTime.format(value.valid_until,'未设结束时间')}${value.valid_until?'（不含）':''}`;
   const conflict=value=>value.status==='contradicting'||value.conflict_state&&value.conflict_state!=='clear';
   const sameVersion=(expected,actual)=>expected.version_id?expected.version_id===actual.version_id:expected.version===undefined||expected.version===actual.version;
   const matchesFactVersion=(expected,actual)=>Boolean(actual)&&(typeof expected?.version_id==='string'&&expected.version_id?expected.version_id===actual.version_id:Number.isInteger(expected?.version)&&expected.version>0&&expected.version===actual.version);
@@ -200,6 +201,27 @@
     drawer.querySelector('h3').textContent=options.entity.text||options.entity.id;
     if(!drawer.open){drawerTrigger=root.document.activeElement;drawer.show();}return mount(drawer.querySelector('.attribute-drawer-body'),{...options,accepts:()=>drawer.open&&(!options.accepts||options.accepts())});
   }
+  function createHoverPreview({schedule=setTimeout,cancel=clearTimeout,delay=150}={}){
+    let active=null;
+    function clear(){if(active?.timer!=null)cancel(active.timer);active=null;}
+    function show(key,read,render){
+      if(active?.key===key){
+        active.render=render;
+        if(active.answer)render(...active.answer);
+        return;
+      }
+      clear();
+      const target=active={key,render,timer:null,answer:null};
+      target.timer=schedule(async()=>{
+        if(active!==target)return;
+        target.timer=null;
+        try{target.answer=[await read()];}
+        catch(error){target.answer=[null,error];}
+        if(active===target)target.render(...target.answer);
+      },delay);
+    }
+    return {show,clear};
+  }
   const hoverCache=new Map();
   async function hoverHtml(entity,{projectId,scope={},request=root.api}={}){
     const fixed=cleanScope(scope),key=JSON.stringify([projectId,entity.id,entity.version_id||entity.version,fixed]),prior=hoverCache.get(key);
@@ -212,5 +234,5 @@
     hoverCache.set(key,{at:Date.now(),promise});if(hoverCache.size>64)hoverCache.delete(hoverCache.keys().next().value);
     try{return await promise;}catch(error){hoverCache.delete(key);throw error;}
   }
-  return {createController,renderHtml,summaryHtml,mount,open,hoverHtml,focus:(id,predicate,expectedVersion)=>latest?.focus(id,predicate,expectedVersion)};
+  return {createController,renderHtml,summaryHtml,mount,open,createHoverPreview,hoverHtml,focus:(id,predicate,expectedVersion)=>latest?.focus(id,predicate,expectedVersion)};
 });

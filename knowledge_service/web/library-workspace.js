@@ -53,13 +53,17 @@
       tabs[key]=button(label,()=>open(key),key==='batches'?'secondary':'secondary admin-only');
       tabs[key].dataset.libraryView=key;nav.append(tabs[key]);
     }
-    sections.upload.append(panel);sections.batches.append(batches,host.querySelector('.ingest-results-bar'));
+    sections.upload.append(panel);sections.batches.append(batches);
+    host.querySelector('.ingest-results-bar').hidden=true;
     structured.open=true;structured.querySelector('summary').hidden=true;sections.structured.append(structured);
     const note=node('p','subtle','导入结构化记录会执行整批校验；已有记录请到知识台账修订。');sections.structured.prepend(note);
     const notice=node('p','library-workspace-notice');notice.id='library-workspace-notice';notice.setAttribute('role','status');notice.setAttribute('aria-live','polite');
     const context=node('p','library-project-context');context.id='library-project-context';
     host.append(nav,context,notice,...Object.values(sections));
-    const taskLink=button('打开构建与任务 ↗',()=>{shell.close({restoreFocus:false});showRuntimeView('jobs');});sections.batches.append(taskLink);
+    const taskLink=button('查看全部后台任务 ↗',async()=>{
+      shell.close({restoreFocus:false});
+      await root.KnowledgeNavigation.open('jobs',{projectId:project()});
+    });sections.batches.append(taskLink);
     const workspace=panel.querySelector('.document-upload-workspace'),fileMain=panel.querySelector('.document-upload-main'),options=panel.querySelector('.document-options');
     const fileZone=fileMain.querySelector('.document-upload-zone');fileZone.classList.add('library-upload-drop');
     fileZone.append(get('doc-batch-help'));
@@ -120,23 +124,30 @@
       next.textContent=currentState.step===0?'下一步：资料与处理方式':'下一步：确认处理';
       if(currentState.step===2)updateSummary();shell.body.scrollTop=0;
     }
-    function open(mode,{trigger}={}){
+    function open(mode,{trigger,progress=false}={}){
       try{
         const view=state.open(mode,project());
         mode=view.mode;
         sections.upload.hidden=mode!=='upload';sections.batches.hidden=mode!=='batches';sections.structured.hidden=mode!=='structured';
         for(const [key,b] of Object.entries(tabs))b.setAttribute('aria-pressed',String(key===mode));
-        title.textContent={upload:'添加文件',batches:'处理批次',structured:'结构化记录导入'}[mode];
+        title.textContent=progress?'解析进度':{upload:'添加文件',batches:'处理批次',structured:'结构化记录导入'}[mode];
         context.textContent='当前项目：'+(get('project').selectedOptions?.[0]?.textContent||view.project);
         notice.textContent='';clearTimeout(noticeTimer);host.classList.remove('hidden');shell.open({trigger});if(mode==='upload')setStep(view.step);
-        if(preparation){if(mode==='upload')void preparation.open();else preparation.close();}
+        if(preparation){if(mode==='upload')void preparation.open({progress});else preparation.close();}
         root.IngestBatches?.visibilityChanged();
         if(mode==='upload'){void root.IngestBatches?.loadCapabilities();void root.loadApplicabilityVocabulary?.();void root.IngestOntology?.refresh();}
         if(mode==='batches')root.IngestBatches?.loadRecent();return true;
       }catch(error){if(typeof status==='function')status(error.message,true);return false;}
     }
+    function openBatch({projectId,batchId,itemId,trigger}){
+      if(projectId!==project()||!batchId||!root.IngestBatches)return false;
+      if(!open('batches',{trigger}))return false;
+      const control=root.IngestBatches.monitor(projectId,{id:batchId},{itemId});
+      control.card.scrollIntoView?.({block:'start'});
+      return true;
+    }
     const controls=get('tab-sources').querySelector('.panel > .row');
-    const batchesButton=button('处理批次',()=>open('batches'));
+    const batchesButton=button('处理批次',()=>open('batches',{trigger:batchesButton}));
     controls.append(batchesButton);
     get('upload-source').onclick=()=>open(undefined,{trigger:get('upload-source')});
     if(root.MutationObserver)new root.MutationObserver(()=>{
@@ -154,20 +165,23 @@
       const slot=get('ingest-mode-slot');
       preparation=root.PreparationView.mount(preparationHost,{project,modeSlot:slot,advanced,
         settings(){const p=project(),mode=get('extraction-mode').value;return {...readParseSettings(),...root.IngestOntology.settings(p,mode),extraction_mode:mode};},
-        onPublished(result){if(!result.batch_id)return;open('batches');root.IngestBatches.monitor(project(),{id:result.batch_id});}});
+        onPublished(result){
+          const view=state.snapshot();
+          if(result.batch_id&&view.active&&view.mode==='upload')openBatch({projectId:view.project,batchId:result.batch_id});
+        }});
+      const parsingButton=button('解析进度',()=>open('upload',{trigger:parsingButton,progress:true}),'secondary admin-only');
+      controls.append(parsingButton);
       panel.hidden=true;
       // 拖放只在"添加文件"抽屉内生效：资料库页面级的全屏拖放提示、自动切换页签
       // 已按下述结论移除——拖到页面其它位置是浏览器自身的文件拖放行为差异
       // （Chrome 与 Edge 表现不同），不做页面级兜底；需要上传时打开本抽屉即可。
     }
     setStep(0);
-    return {open,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});preparation?.projectChanged();state.projectChanged(id);get('ingest').disabled=false;},
+    return {open,openBatch,close:options=>shell.close(options),projectChanged(id){shell.close({restoreFocus:false});preparation?.projectChanged();state.projectChanged(id);get('ingest').disabled=false;},
       ticket:()=>state.ticket(),
       accepts:(ticket,id)=>state.accepts(ticket,id)&&project()===id,
       queueChanged(){const view=state.snapshot();if(view.active&&view.mode==='upload'){updateSelection();if(view.step===2)updateSummary();}},
-      showBatch({projectId,batchId,ticket}){if(!state.accepts(ticket,projectId)||project()!==projectId)return;open('batches');
-        root.IngestBatches?.monitor(projectId,{id:batchId});
-        const card=[...batches.querySelectorAll('[data-batch-id]')].find(n=>n.dataset.batchId===batchId);card?.scrollIntoView({block:'start'});},
+      showBatch({projectId,batchId,ticket}){if(state.accepts(ticket,projectId))openBatch({projectId,batchId});},
       snapshot:()=>state.snapshot()};
   }
   return {createState,init};

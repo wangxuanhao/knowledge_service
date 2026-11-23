@@ -279,6 +279,11 @@ def resolve_document_temporal(text: str, settings: dict, *, excluded_ranges=()) 
 
 def document_time_preview(text: str, settings: dict, *, excluded_ranges=()) -> dict:
     resolved = resolve_document_temporal(text, settings, excluded_ranges=excluded_ranges)
-    return {**{key: resolved.get(key) for key in ('published_at', 'valid_from', 'valid_until')},
-            **{key: resolved.get('metadata', {}).get(key)
-               for key in ('effective_time_source', 'document_temporal')}}
+    dates = {key: resolved.get(key) for key in ('published_at', 'valid_from', 'valid_until')}
+    metadata = resolved['metadata']
+    temporal = metadata.get('document_temporal')
+    if settings.get('document_time_mode', 'manual') == 'manual':
+        temporal = {'fields': {key: {'value': value, 'status': 'manual'}
+                               for key, value in dates.items() if value}}
+    return {**dates, 'effective_time_source': metadata.get('effective_time_source'),
+            'document_temporal': temporal}

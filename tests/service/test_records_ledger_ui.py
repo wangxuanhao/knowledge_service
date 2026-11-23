@@ -252,14 +252,15 @@ def page(ledger_browser):
     pg.set_content(SHELL)
     pg.add_style_tag(path=str(WEB / 'style.css'))
     pg.add_style_tag(path=str(WEB / 'workspace.css'))
+    pg.add_style_tag(path=str(WEB / 'library-workspace.css'))
+    pg.add_style_tag(path=str(WEB / 'records-view.css'))
+    pg.add_script_tag(path=str(WEB / 'workspace-drawers.js'))
     pg.add_script_tag(path=str(WEB / 'record-version-context.js'))
     pg.add_script_tag(path=str(WEB / 'record-attribute-editor.js'))
     pg.add_script_tag(path=str(WEB / 'record-create.js'))
     pg.add_script_tag(path=str(WEB / 'records-view.js'))
     pg.click('[data-tab="records"]')
-    pg.wait_for_selector('.ledger-kpi', timeout=10000)
-    pg.wait_for_function("() => [...document.querySelectorAll('.ledger-kpi:not([data-ledger-kpi=duplicates]) b')].every(node => node.textContent.trim() !== '—')",
-                         timeout=10000)
+    pg.wait_for_selector('.ledger-tab-count:not([hidden])', timeout=10000)
     pg.wait_for_function("() => !document.getElementById('records').hasAttribute('aria-busy') || document.getElementById('records').getAttribute('aria-busy')==='false'")
     pg.set_default_timeout(5000)
     pg._errors = errors
@@ -286,9 +287,9 @@ def ledger_rows(page):
     return rows
 
 
-def kpis(page):
-    return {node.get_attribute('data-ledger-kpi'): node.inner_text().strip()
-            for node in page.query_selector_all('.ledger-kpi')}
+def category_counts(page):
+    return {tab.get_attribute('data-ledger-view'): tab.locator('.ledger-tab-count').inner_text()
+            for tab in page.locator('.ledger-tab').all()}
 
 
 def headers(page):
@@ -343,21 +344,13 @@ def test_long_ledger_content_can_be_expanded_in_full_as_literal_text(page, kind,
 
 
 def test_ledger_speaks_its_scope_and_names_the_other_pages(page):
-    """一句话边界：这里管具体的东西；改分类、审结构都去「本体建模层」。"""
     intro = page.inner_text('.ledger-intro')
-    assert '具体的东西' in intro
+    assert '维护已入库的知识' in intro
     assert '本体建模层' in intro
 
 
-def test_top_numbers_come_from_the_server_not_from_guesswork(page):
-    page.click('.ledger-kpi[data-ledger-kpi="duplicates"]')
-    page.wait_for_function("() => document.querySelector('[data-ledger-kpi=duplicates] b').textContent==='1'")
-    numbers = kpis(page)
-    assert numbers['entity'].startswith('3') and '实体' in numbers['entity']
-    assert numbers['relation'].startswith('1') and '关系' in numbers['relation']
-    assert numbers['attribute'].startswith('1') and '属性' in numbers['attribute']
-    assert numbers['chunk'].startswith('1') and '原文片段' in numbers['chunk']
-    assert numbers['duplicates'].startswith('1') and '疑似重复' in numbers['duplicates']
+def test_category_counts_come_from_the_server(page):
+    assert category_counts(page) == {'entity': '3', 'relation': '1', 'attribute': '1', 'chunk': '1'}
 
 
 def test_four_views_are_tabs_and_switch_the_columns(page):
@@ -366,7 +359,7 @@ def test_four_views_are_tabs_and_switch_the_columns(page):
     属性这一维以前没有视角（查询把它滤掉了），用户点名要它 ——
     所以四个页签的顺序与列都是硬契约，别再把属性漏掉。
     """
-    tabs = [node.inner_text().strip() for node in page.query_selector_all('.ledger-tab')]
+    tabs = [node.inner_text().strip() for node in page.query_selector_all('.ledger-tab-label')]
     assert tabs == ['实体', '关系', '属性', '原文片段']
     assert headers(page) == ['名称', '本体类型', '本体归属', '知识修订', '关联断言', '操作']
     select_view(page, 'relation')
@@ -447,8 +440,10 @@ def test_ontology_history_navigation_preselects_the_ledger_filter(page):
 
 
 def test_record_revision_and_migration_status_are_truthful(page):
+    page.click('#ledger-open-model')
     page.get_by_role('button',name='检查本体归属',exact=True).click()
     page.wait_for_function("() => document.querySelector('.ledger-migration-badge').textContent==='待迁移'")
+    page.keyboard.press('Escape')
     rows = ledger_rows(page)
     old = next(item for item in rows if item['name'] == '价格说明' and '本体 v1' in item['cells'][2].inner_text())
     assert '修订 r4' in old['row'].inner_text()
@@ -542,10 +537,9 @@ def test_linked_assertions_show_review_state_without_claiming_all_are_support(pa
 
 
 def test_undo_is_reachable_and_hits_the_undo_endpoint(page):
-    page.get_by_role('button',name='读取操作历史',exact=True).click()
+    page.get_by_role('button', name='可撤销的操作', exact=True).click()
     page.wait_for_selector('.ledger-operation')
-    section = page.inner_text('#ledger-operations')
-    assert '可撤销的操作' in section and '合并实体' in section
+    assert '合并实体' in page.get_by_role('dialog', name='可撤销的操作').inner_text()
     page.click('[data-undo-operation="op1"]')
     page.wait_for_function("() => window.undoCalls && window.undoCalls.length === 1", timeout=5000)
     assert page.evaluate("() => window.undoCalls") == ['op1']
@@ -554,12 +548,65 @@ def test_undo_is_reachable_and_hits_the_undo_endpoint(page):
     page.wait_for_function("() => (window.__status?.message||'').includes('已撤销')", timeout=5000)
 
 
+def test_ledger_tools_open_on_demand_and_return_to_the_same_list(page):
+    assert not page.locator('#ledger-operations').is_visible()
+    assert not page.locator('#resolve-text').is_visible()
+    assert 'GET /api/projects/p1/operations' not in page.evaluate('window.apiLog')
+    select_view(page, 'relation')
+    tool = page.get_by_role('button', name='可撤销的操作', exact=True)
+    tool.click()
+    drawer = page.get_by_role('dialog', name='可撤销的操作')
+    assert drawer.is_visible()
+    drawer.locator('[data-undo-operation="op1"]').wait_for()
+    page.keyboard.press('Escape')
+    drawer.wait_for(state='hidden')
+    assert tool.evaluate('button => document.activeElement === button')
+    assert page.locator('table.ledger-relation').is_visible()
+    assert not page._errors
+
+
+def test_review_drawer_keeps_ledger_open_at_mobile_width(page):
+    page.evaluate("""() => {
+      const base = window.api;
+      document.getElementById('title').textContent = '知识台账';
+      window.bind = () => {};
+      window.reviewReads = 0;
+      window.api = (url, ...args) => {
+        if (url.endsWith('/reviews')) { window.reviewReads++; return Promise.resolve({reviews: []}); }
+        if (url.endsWith('/ontology')) return Promise.resolve({id: 'o1'});
+        if (url.endsWith('/health')) return Promise.resolve({capabilities: ['typed_reviews']});
+        if (url.endsWith('/attribute-conflicts')) return Promise.resolve({conflict_sets: []});
+        return base(url, ...args);
+      };
+    }""")
+    page.add_script_tag(path=str(WEB / 'task-review.js'))
+    assert page.evaluate('window.reviewReads') == 0
+    assert page.get_by_role('button', name='新增实体', exact=True).is_visible()
+    assert not page.locator('.ledger-entry-actions [data-create-record="relation"]').is_visible()
+    page.click('[data-ledger-view="relation"]')
+    assert page.get_by_role('button', name='新增关系', exact=True).is_visible()
+    assert not page.locator('.ledger-entry-actions [data-create-record="entity"]').is_visible()
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.click('#ledger-open-reviews')
+    drawer = page.get_by_role('dialog', name='知识审核')
+    drawer.wait_for()
+    page.wait_for_function("document.getElementById('review-view-facts').textContent === '待审核事实 0'")
+    assert page.locator('#tab-records').is_visible()
+    assert page.inner_text('#title') == '知识台账'
+    assert abs(drawer.bounding_box()['width'] - 390) <= 1
+    drawer.get_by_role('button', name='关闭 ×').click()
+    assert page.locator('#ledger-open-reviews').evaluate('button => document.activeElement === button')
+    assert page.locator('[data-ledger-view="relation"]').get_attribute('aria-selected') == 'true'
+    assert page.evaluate('window.reviewReads') == 1
+    assert not page._errors
+
+
 def test_operations_list_is_newest_first_and_says_how_many(page):
     """审计记录回来的顺序不等于时间顺序：列表必须自己按时间倒序，并写明共几条。
 
     这条来自真机：一次验收下来列表里堆了十几条，"哪条才是刚做的那个动作"看不出来。
     """
-    page.get_by_role('button',name='读取操作历史',exact=True).click()
+    page.get_by_role('button', name='可撤销的操作', exact=True).click()
     page.wait_for_selector('.ledger-operation')
     rows = [row.inner_text().replace('\n', ' ') for row in page.query_selector_all('.ledger-operation')]
     assert len(rows) == 2, rows
@@ -568,9 +615,10 @@ def test_operations_list_is_newest_first_and_says_how_many(page):
     assert '共 2 条' in page.inner_text('.ledger-operations-head'), page.inner_text('.ledger-operations-head')
 
 
-def test_duplicate_number_opens_the_merge_wizard_with_ready_made_cards(page):
-    """「疑似重复」不是一个死数字：点它就摆出可直接选角色的卡片。"""
-    page.click('.ledger-kpi[data-ledger-kpi="duplicates"]')
+def test_duplicate_lookup_in_the_drawer_shows_selectable_cards(page):
+    page.click('#ledger-open-governance')
+    page.click('#ledger-find-duplicates')
+    page.wait_for_function("document.getElementById('ledger-duplicate-feedback').textContent.includes('找到 1 组')")
     page.wait_for_selector('#resolve-result .candidate [data-keep]', timeout=5000)
     cards = page.locator('#resolve-result .candidate')
     cards.nth(0).locator('[data-keep]').click()
@@ -582,7 +630,7 @@ def test_duplicate_number_opens_the_merge_wizard_with_ready_made_cards(page):
 
 def test_merge_preview_states_the_impact_before_confirming(page):
     """合并是不可逆动作：确认之前必须看到影响面，且口径写清楚是按哪些记录统计的。"""
-    page.click('.record-governance > summary')       # 这一节默认折叠，先展开
+    page.click('#ledger-open-governance')
     page.click('#resolve-entity')
     page.wait_for_selector('#resolve-result [data-keep]', timeout=5000)
     cards = page.locator('#resolve-result .candidate')
@@ -602,13 +650,11 @@ def test_ledger_never_blanks_the_table_when_a_side_request_fails(page):
     page.evaluate("() => { window.mockFailSide = 'duplicate-groups'; }")
     page.click('#load-records')
     page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
-    page.click('.ledger-kpi[data-ledger-kpi="duplicates"]')
-    page.wait_for_function("() => document.querySelector('.ledger-kpi[data-ledger-kpi=duplicates] b').textContent.trim() === '—'",
-                           timeout=10000)
+    page.click('#ledger-open-governance')
+    page.click('#ledger-find-duplicates')
+    page.wait_for_function("document.getElementById('ledger-duplicate-feedback').textContent.includes('治理信息读取失败')")
     assert page.query_selector_all('.record-library tbody tr'), '分组接口挂了，表格也不能消失'
-    assert page.evaluate("() => window.__errors === undefined")
-    page.wait_for_function("() => (window.__status?.message||'').includes('治理信息读取失败')")
-    assert page.evaluate("() => window.__status.isError"), '显式读取失败应报告失败，不能显示成功'
+    assert not page._errors
 
 
 # —— D1「台账 ⇄ 图谱双向直达」的浏览器契约 ——

@@ -72,7 +72,7 @@ for(const outcome of ['success','failure','stale'])test('OCR retry '+outcome+' r
   const start=source.indexOf("const retry=make('button',progress.incomplete?");
   const handler=source.slice(start,source.indexOf("const ignore=make('button'",start));
   const messages=[],views=[],context={progress:{incomplete:true},projectId:'p',versionId:'v',asset:{id:'image'},sourceUrl:ui.sourceUrl,
-    make:()=>({}),accepts:()=>outcome!=='stale',status:(...args)=>messages.push(args),show:async view=>views.push(view),
+    make:()=>({}),accepts:()=>outcome!=='stale',status:(...args)=>messages.push(args),onRefresh:async()=>views.push('parsed'),
     api:async()=>{if(outcome==='failure')throw Error('重试失败');}};
   require('node:vm').runInNewContext(handler+';globalThis.retry=retry;',context);
   await context.retry.onclick();

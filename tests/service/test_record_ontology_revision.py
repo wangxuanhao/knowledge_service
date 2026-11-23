@@ -16,7 +16,7 @@ ex:knows a owl:ObjectProperty .
 
 @pytest.mark.parametrize('record_id', ['a', 'rel'])
 @pytest.mark.parametrize('binding', ['omitted', 'null'])
-def test_plain_revision_preserves_binding_and_all_views_agree(tmp_path, record_id, binding):
+def test_plain_revision_preserves_binding_and_all_views_agree(tmp_path, monkeypatch, record_id, binding):
     app = create_app(tmp_path / 'revision.sqlite', HashingEncoder())
     with TestClient(app) as client:
         project = client.post('/api/projects', json={
@@ -38,8 +38,13 @@ def test_plain_revision_preserves_binding_and_all_views_agree(tmp_path, record_i
         record['text'] = 'Edited'
         if binding == 'null':
             record['ontology_id'] = None
-        response = client.put(base + '/records/' + record_id,
-                              json={'record': record, 'expected_version': 1})
+        def load_history(*_args, **_kwargs):
+            raise AssertionError('record revision read every historical version')
+
+        with monkeypatch.context() as guard:
+            guard.setattr(repo, 'history', load_history)
+            response = client.put(base + '/records/' + record_id,
+                                  json={'record': record, 'expected_version': 1})
         assert response.status_code == 200, response.text
         assert response.json()['ontology_id'] == first['id']
         assert response.json()['version'] == 2

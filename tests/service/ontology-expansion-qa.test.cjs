@@ -36,7 +36,7 @@ function fixture(){
   }
   const document={createElement:tag=>new Element(tag),querySelector:()=>null};
   const transcript=new Element('ol'),hero=new Element(),opened=[],selected=[],tabs=[];
-  const context={document,window:{},current:'project-frozen',transcript,hero,sessionManager:null,qaHistory:[],evidenceSerial:0,
+  const context={document,window:{DisplayTime:require('../../knowledge_service/web/display-time.js')},current:'project-frozen',transcript,hero,sessionManager:null,qaHistory:[],evidenceSerial:0,
     provenance:{sanitizeEvidenceSummary,open:value=>opened.push(value),decorateAnswer:(node,text)=>{node.textContent=text;}},
     labelOf:value=>value||'',esc:value=>String(value??''),atEnd(){},platformGroupLabel:group=>group.platform,
     showTab:tab=>tabs.push(tab),status(){},$c:()=>null,addScopeNote(){},markDraft(){},markUnresolvedProvenance(){}};

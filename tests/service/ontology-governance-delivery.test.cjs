@@ -147,7 +147,7 @@ function actionFixture(options={}){
   Object.assign(state,options.state||{});
   const model={S:state,status:(message,error)=>messages.push({message,error}),uid:options.uid||(()=> 'publish-key'),refresh:async()=>{}};
   const sessionStorage={getItem:key=>stored.get(key)||null,setItem:(key,value)=>stored.set(key,value),removeItem:key=>stored.delete(key)};
-  const context={window:{OntologyModel:model,sessionStorage,Auth:{user:()=>({id:options.actor||'reviewer'}),isAdmin:()=>true}},current:options.project||'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
+  const context={window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),OntologyModel:model,sessionStorage,Auth:{user:()=>({id:options.actor||'reviewer'}),isAdmin:()=>true}},current:options.project||'p',console,CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
     document:{createElement:element,dispatchEvent(event){events.push(event);}},endpoint:suffix=>'/api/projects/'+context.current+suffix,
     setTimeout(fn){timers.push(fn);return timers.length;},clearTimeout(){},
     api:async(url,body,method='GET')=>{calls.push({url,body,method});if(url.endsWith('/ontologies'))return {versions:[]};

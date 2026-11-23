@@ -100,6 +100,34 @@ class LocalGraphPresentationTests(unittest.TestCase):
         self.assertNotIn('embedding', by_id['e'])
         reads.entity_attributes.assert_not_called()
 
+    def test_neighborhood_resolves_shared_class_families_once_per_bound_release(self):
+        rows = [
+            {'id': f'e{index}', 'kind': 'entity', 'type': 'urn:Thing', 'ontology_id': release}
+            for index, release in enumerate(['old', 'old', 'new', 'new', 'missing', 'missing', None])
+        ]
+        rows.insert(4, {'id': 'other', 'kind': 'entity', 'type': 'urn:Other', 'ontology_id': 'new'})
+        families = {
+            ('old', 'urn:Thing'): {'ontology_id': 'old', 'label': 'Old label'},
+            ('new', 'urn:Thing'): {'ontology_id': 'new', 'label': 'New label'},
+            ('new', 'urn:Other'): {'ontology_id': 'new', 'label': 'Other label'},
+        }
+        record_family = Mock(side_effect=lambda _project, row:
+                             families.get((row.get('ontology_id'), row['type']), {}))
+        service = SimpleNamespace(ontology_labels=lambda _project: {'urn:Thing': 'Type label'},
+                                  record_family=record_family, annotate_structure_pending=Mock())
+
+        result = present_neighborhood(service, Mock(), 'p', {}, {'records': rows}, ['e0'])
+
+        self.assertEqual([row['class_label'] for row in result['records']],
+                         ['Old label', 'Old label', 'New label', 'New label', 'Other label',
+                          'Type label', 'Type label', 'Type label'])
+        self.assertEqual([row['class_ontology_id'] for row in result['records']],
+                         ['old', 'old', 'new', 'new', 'new', None, None, None])
+        looked_up = [call.args[1] for call in record_family.call_args_list]
+        self.assertEqual([(row['ontology_id'], row['type']) for row in looked_up],
+                         [('old', 'urn:Thing'), ('new', 'urn:Thing'), ('new', 'urn:Other'),
+                          ('missing', 'urn:Thing'), (None, 'urn:Thing')])
+
     def test_legacy_expanded_subgraph_uses_bounded_neighbors_and_shared_sidebar(self):
         entity = {'id': 'e', 'kind': 'entity', 'type': 'urn:Known', 'text': '主体'}
         reads = Mock()

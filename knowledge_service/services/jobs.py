@@ -14,6 +14,7 @@ from pathlib import Path
 from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 from ..core.time import utc_now
+from ..repository.task_store import TaskStore
 from ..utils.diagnostics import redact
 
 
@@ -59,6 +60,9 @@ class Jobs:
         self.repo.save_artifact('job', job)
         self.start()
         return job
+
+    def recent(self, *, limit):
+        return TaskStore(self.repo).recent_jobs(limit=limit)
 
     def control(self, job_id, action):
         job = self.repo.get_artifact('job', job_id)

@@ -90,7 +90,7 @@
         const link = button(item.title || '未命名草案', () => { if (viewActive(ctx)) void show(item.id); });
         link.disabled = !item.id;
         row.append(link, el('span', 'om-dh-status', statusLabel(item)),
-          el('p', 'om-dh-meta', `修订 ${item.revision ?? '未提供'}${item.created_at ? ' · ' + item.created_at : ''}`));
+          el('p', 'om-dh-meta', `修订 ${item.revision ?? '未提供'}${item.created_at ? ' · ' + window.DisplayTime.format(item.created_at) : ''}`));
         list.append(row);
       }); body.append(list);
     } catch (_) { if (requestActive(ctx)) failure(ctx, '历史草案目录', showList); }

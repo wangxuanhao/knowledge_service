@@ -9,7 +9,7 @@ from psycopg.conninfo import make_conninfo
 import pytest
 
 import pg_support
-from knowledge_service.repository.migrate import MIGRATIONS_DIR, apply_migrations
+from knowledge_service.repository.migrate import LEGACY_MIGRATIONS_DIR, apply_migrations
 
 
 def test_dashboard_index_upgrade_preserves_rows_and_accepts_long_endpoints(tmp_path):
@@ -28,7 +28,7 @@ def test_dashboard_index_upgrade_preserves_rows_and_accepts_long_endpoints(tmp_p
                     project_id text, read_kind text, read_type text, id text,
                     valid_from_known boolean, read_subject_id text, read_object_id text,
                     superseded_at text, read_visible boolean)''')
-                conn.execute((MIGRATIONS_DIR / '0027_dashboard_aggregate_index.sql').read_text())
+                conn.execute((LEGACY_MIGRATIONS_DIR / '0027_dashboard_aggregate_index.sql').read_text(encoding='utf-8'))
                 assert apply_migrations(dsn, directory=tmp_path, verbose=False)['current'] == 30
                 original = ('project', 'relation', 'https://test/knows', 'original',
                             True, 'a', 'b', None, True)
@@ -40,7 +40,7 @@ def test_dashboard_index_upgrade_preserves_rows_and_accepts_long_endpoints(tmp_p
                 with pytest.raises(psycopg.errors.ProgramLimitExceeded):
                     conn.execute('INSERT INTO record_versions VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)', relation)
 
-                (tmp_path / migration).write_bytes((MIGRATIONS_DIR / migration).read_bytes())
+                (tmp_path / migration).write_bytes((LEGACY_MIGRATIONS_DIR / migration).read_bytes())
                 result = apply_migrations(dsn, directory=tmp_path, verbose=False)
                 assert result['current'] == 31
                 conn.execute('INSERT INTO record_versions VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)', relation)

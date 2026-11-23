@@ -48,9 +48,10 @@ def test_temporal_filters_apply_to_search_and_frozen_qa_turns(redesign_page):
     assert searches[-1]['include_unknown'] is False
 
     page.click('[data-tab="qa"]')
-    # QA now owns its filter entry; apply the same temporal scope in place.
+    assert page.evaluate("WorkspaceContext.read('p','qa')") == applied
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '问答筛选平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='问答筛选平台', exact=True).check()
     page.select_option('#scope-time-mode', 'current')
     page.uncheck('#scope-include-unknown')
     page.click('#apply-scope')
@@ -102,7 +103,7 @@ def test_temporal_filters_apply_to_search_and_frozen_qa_turns(redesign_page):
     assert page.evaluate("WorkspaceContext.read('p','qa').valid_at") is None
     assert page.evaluate("WorkspaceContext.read('p','qa').include_unknown") is True
     assert page.locator('.qa-submitted-scope').first.inner_text() == first_note
-    assert page.evaluate("WorkspaceContext.read('p','search')") == applied
+    assert page.evaluate("WorkspaceContext.read('p','search')") == page.evaluate("WorkspaceContext.read('p','qa')")
     page.set_viewport_size({'width': 390, 'height': 850})
     page.click('#scope-toggle')
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')

@@ -53,6 +53,7 @@ function fixture(options = {}) {
     if (url === '/p/ontology-drafts/old') return { id: 'old', status: 'accepted', ontology: summary('old') };
     return {};
   };
+  window.DisplayTime = require('../../knowledge_service/web/display-time.js');
   const context = {
     window, current: 'p', api, endpoint: suffix => '/p' + suffix,
     document: { getElementById: id => options.withRoot && id === 'tab-ontology-model' ? root

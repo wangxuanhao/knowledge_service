@@ -1,34 +1,21 @@
 /* Project-scoped task summaries and explicit ontology relation review. */
 (() => {
   const states={queued:'排队中',running:'处理中',completed:'已完成',failed:'失败',interrupted:'已中断',cancelled:'已取消'};
-  const kinds={ingest:'文档解析',neo4j_sync:'Neo4j 同步',ontology_publish:'本体发布',semantic_index:'语义索引'};
-  const beijingTime=value=>{
-    if(!value)return '—';
-    const date=new Date(value);
-    if(Number.isNaN(date.getTime()))return String(value);
-    const parts=new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).formatToParts(date);
-    const part=type=>parts.find(item=>item.type===type)?.value||'';
-    return `${part('year')}-${part('month')}-${part('day')} ${part('hour')}:${part('minute')}:${part('second')}`;
-  };
-  const displayLog=line=>String(line).replace(/\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\]/g,(_,value)=>`[${beijingTime(value)}]`);
+  const kinds={ingest:'文档解析',ingest_upload:'文档解析',neo4j_sync:'Neo4j 同步',ontology_publish:'本体发布',semantic_index:'检索索引构建',community_build:'社区构建'};
+  const displayLog=line=>window.DisplayTime.formatLogLine(line);
   const safeTerm=type=>typeof term==='function'?term(type):String(type||'').split(/[\/#]/).pop();
   const safeLabel=type=>typeof labelOf==='function'?labelOf(type):safeTerm(type);
   const ontoName=t=>t.label_zh||((t.label&&t.label!==t.name)?t.label:'')||t.description||t.name||'';
   const typeHint=type=>{const primary=safeLabel(type),local=safeTerm(type);return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
   const panel=document.createElement('div');panel.className='panel';
-  panel.innerHTML='<div class="row"><h2>知识审核</h2><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">本体建模层 ↗</button></div><p class="subtle">这里审核已有正式本体下的具体事实：批准后写入正式图谱。开放候选与证据异常在本体建模层处理；本体异常在单独队列确认例外或标记整改。</p><nav class="review-view-tabs" aria-label="知识审核视图"><button id="review-view-facts" type="button" aria-pressed="true">待审核事实</button><button id="review-view-exceptions" type="button" class="secondary" aria-pressed="false">约束异常</button><button id="review-view-history" type="button" class="secondary" aria-pressed="false">已处理</button></nav><label id="review-kind-wrap">事实类型<select id="review-kind"><option value="">全部事实</option><option value="entity">实体映射</option><option value="relation">关系事实</option><option value="attribute">属性事实</option></select></label><div id="relation-reviews"></div>';
-  const reviewPage=document.createElement('section');reviewPage.id='tab-reviews';reviewPage.className='tab hidden';reviewPage.append(panel);
-  document.querySelector('main').append(reviewPage);
-  // P0（2026-10-04）：知识审核（reviews，实例层的 domain/range 冲突审核）并入「知识台账」，
-    // 不再作为独立侧栏入口插入 nav；原 .after(nav) 会因 ontology-workbench 按钮已移除而抛错，
-    // 这里直接不再挂载。页面本体（审具体事实）暂时保留，P1 接进台账后本入口删除。
-    const reviewNav=document.createElement('button');reviewNav.dataset.tab='reviews';reviewNav.textContent='知识审核';
-  reviewNav.onclick=()=>{
-    document.querySelectorAll('.tab').forEach(t=>t.classList.add('hidden'));reviewPage.classList.remove('hidden');
-    document.querySelectorAll('[data-tab]').forEach(b=>b.classList.toggle('active',b===reviewNav));
-    $('title').textContent='知识审核';$('scope').classList.add('hidden');reviews();
-  };
-  window.TaskReview={open:()=>reviewNav.click()};
+  panel.innerHTML='<div class="row"><button id="refresh-reviews" class="secondary">刷新审核</button><button id="review-ontology" class="secondary">本体建模层 ↗</button></div><nav class="review-view-tabs" aria-label="知识审核视图"><button id="review-view-facts" type="button" aria-pressed="true">待审核事实</button><button id="review-view-exceptions" type="button" class="secondary" aria-pressed="false">约束异常</button><button id="review-view-history" type="button" class="secondary" aria-pressed="false">已处理</button></nav><label id="review-kind-wrap">事实类型<select id="review-kind"><option value="">全部事实</option><option value="entity">实体映射</option><option value="relation">关系事实</option><option value="attribute">属性事实</option></select></label><div id="relation-reviews"></div>';
+  const reviewDrawer=window.WorkspaceDrawers.create({id:'knowledge-review-drawer',title:'知识审核',
+    description:'审核待入库的实体、关系与属性事实，或处理本体约束异常。',content:panel,dismissOnBackdrop:false,
+    onClose:()=>{generation++;}});
+  window.TaskReview={open({trigger}={}){
+    reviewDrawer.open({trigger});
+    return reviews();
+  }};
   // One knowledge-review surface owns multi-member conflict decisions. Graph
   // readers supply only the set identity; the server reloads exact CAS members.
   window.openAttributeConflictReview=async function(set,options={}) {
@@ -66,7 +53,7 @@
         for(const member of exact.members||[]) {
           const card=make('fieldset'),legend=make('legend',`${member.record_id} · 修订 ${member.version}`);
           const value=make('pre',typeof member.value_preview==='string'?member.value_preview:JSON.stringify(member.value_preview));
-          card.append(legend,value,make('p',`${member.datatype||''} · ${member.valid_from||'未知起点'} — ${member.valid_until||'未知终点'}`));
+          card.append(legend,value,make('p',`${member.datatype||''} · ${window.DisplayTime.format(member.valid_from,"未知起点")} — ${window.DisplayTime.format(member.valid_until,"未知终点")}`));
           card.append(make('p','适用范围：'+['platforms','businesses','audiences'].map((key,index)=>{
             const dimension=member.applicability?.[key];return ['平台','业务','受众'][index]+' '+
               (dimension?.mode==='specific'?dimension.values.join('、'):dimension?.mode==='all'?'通用':'待确认');
@@ -136,7 +123,7 @@
   $('review-ontology').onclick=()=>showTab('ontology-model');
   $('review-kind').onchange=()=>reviews();
   let reviewView='facts';
-  let generation=0;
+  let generation=0,projectGeneration=0;
   async function reviews(){
     const p=current,serial=++generation,host=$('relation-reviews');
     if(!p){host.textContent='请先选择项目';return;}
@@ -158,7 +145,7 @@
       $('review-view-facts').textContent=`待审核事实 ${factQueue.length}`;$('review-view-exceptions').textContent=`约束异常 ${exceptionQueue.length}`;$('review-view-history').textContent=`已处理 ${done.length}`;$('review-kind-wrap').hidden=reviewView!=='facts';
       if(!ontology){host.innerHTML='<p class="subtle">本项目尚未发布本体。可继续开放发现并累计候选。到「本体建模层」核对候选，将所需定义加入草案后审核发布。符合条件的关联候选可随发布入图。</p><button id="reviews-goto-discovery">前往本体建模层 ↗</button>';host.querySelector('#reviews-goto-discovery').onclick=()=>showTab('ontology-model');return;}
       if(reviewView==='history'){
-        host.innerHTML=`<p>已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+(done.length?done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(r.reviewed_at)}</p>`).join(''):'<p class="subtle">暂无已处理记录。</p>');return;
+        host.innerHTML=`<p>已处理 ${done.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+(done.length?done.map(r=>`<p>${esc(labels[r.kind||'relation'])} · ${esc(r.document_title)} · ${esc(r.path_label||safeLabel(r.proposed_type)||safeLabel(r.predicate)||'')} · ${r.kind==='validation'?(r.resolution==='accepted_exception'?'已确认例外':'需整改'):(r.status==='approved'?'已批准':'已拒绝')} · ${esc(r.target_type||'')} · ${esc(r.note)} · ${esc(window.DisplayTime.format(r.reviewed_at))}</p>`).join(''):'<p class="subtle">暂无已处理记录。</p>');return;
       }
       host.innerHTML=`<p>${reviewView==='facts'?'待审核事实':'待处理约束异常'} ${pending.length} 条 · 当前本体 ${esc(ontology.id)}</p>`+pending.map((r,i)=>{
         const kind=r.kind||'relation',terms=ontology.summary[{entity:'classes',relation:'relations',attribute:'attributes'}[kind]]||[];
@@ -247,7 +234,7 @@
   // 后台任务并入「项目与运行」的「后台任务」分区：进入该分区才刷新一次任务列表。
   window.RuntimeView?.on('jobs',()=>refresh().catch(e=>status(e.message,true)));
   const previousProjectChange=$('project').onchange;
-  $('project').onchange=function(...args){previousProjectChange?.apply(this,args);generation++;if(!reviewPage.classList.contains('hidden'))reviews();if(!$('tab-jobs').classList.contains('hidden'))refresh().catch(e=>status(e.message,true));};
+  $('project').onchange=function(...args){previousProjectChange?.apply(this,args);generation++;projectGeneration++;if(!$('tab-jobs').classList.contains('hidden'))refresh().catch(e=>status(e.message,true));};
   let jobsGeneration=0;
   const taskActor=()=>window.Auth?.user?.()||null;
   const canReviewDiscovery=()=>Boolean(window.Auth?.isAdmin?.());
@@ -264,16 +251,20 @@
       label:runId?'核对本次处理的候选':documentId?'核对这份资料当前发现候选':'核对项目当前发现候选'};
   }
   jobList=async()=>{
-    const serial=++jobsGeneration,p=current,projectGeneration=generation,actor=taskActor();
-    const accepts=()=>serial===jobsGeneration&&projectGeneration===generation&&p===current&&actor===taskActor();
+    const serial=++jobsGeneration,p=current,projectStamp=projectGeneration,actor=taskActor();
+    const accepts=()=>serial===jobsGeneration&&projectStamp===projectGeneration&&p===current&&actor===taskActor();
     const watching=typeof wb!=='undefined'&&wb.jobs.size>0;
     const visible=!$('tab-jobs').classList.contains('hidden')&&!$('tab-runtime').classList.contains('hidden');
     const [result,scoped]=await Promise.all([
       watching?api('/api/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
-      visible&&p?api('/api/projects/'+encodeURIComponent(p)+'/jobs',undefined,'GET'):Promise.resolve({jobs:[]}),
+      visible&&p?api('/api/projects/'+encodeURIComponent(p)+'/jobs',undefined,'GET').catch(error=>({error})):Promise.resolve({jobs:[]}),
     ]);
     if(!accepts())return result.jobs;
     if(!visible||$('tab-jobs').classList.contains('hidden')||$('tab-runtime').classList.contains('hidden'))return result.jobs;
+    if(scoped.error){
+      $('tasks').innerHTML=`<p class="runtime-task-message error" role="alert">任务列表读取失败：${esc(scoped.error.message)}</p>`;
+      return result.jobs;
+    }
     const open=new Set([...$('tasks').querySelectorAll('details[open]')].map(d=>d.dataset.key));
     // Preserve each open log panel's scroll position across the full re-render; follow the
     // newest line only when the reader was already at the bottom.
@@ -286,22 +277,67 @@
       const logs=j.logs||[],last={};
       for(const line of logs){
         if(/仍在等待|处理失败/.test(line))continue;
-        const group=/实体抽取/.test(line)?'实体抽取':/关系抽取/.test(line)?'关系抽取':/待审核|等待审核/.test(line)?'关系审核':/LLM|抽取模块/.test(line)?'模型配置':/片段 \d/.test(line)?'切片处理':/融合|消歧/.test(line)?'消歧融合':/校验/.test(line)?'本体校验':/向量化/.test(line)?'向量化':/落库|提交/.test(line)?'保存':/切片/.test(line)?'切片准备':'任务';
+        const group=/已复用解析切片/.test(line)?'切片复用':/实体抽取/.test(line)?'实体抽取':/关系抽取/.test(line)?'关系抽取':/待审核|等待审核/.test(line)?'关系审核':/LLM|抽取模块/.test(line)?'模型配置':/片段 \d/.test(line)?'切片处理':/融合|消歧/.test(line)?'消歧融合':/校验/.test(line)?'本体校验':/向量化/.test(line)?'向量化':/落库|提交/.test(line)?'保存':/切片/.test(line)?'切片准备':'任务';
         last[group]=line;
       }
-      const title=j.result?.document?.metadata?.title||logs.find(l=>l.includes('文档开始 · '))?.split('文档开始 · ')[1]?.split(' · ')[0]||kinds[j.kind]||j.kind;
+      const kind=kinds[j.kind]||j.kind||'后台任务';
+      const documentTask=['ingest','ingest_upload'].includes(j.kind);
+      const title=(documentTask&&(j.result?.document?.metadata?.title||logs.find(l=>l.includes('文档开始 · '))?.split('文档开始 · ')[1]?.split(' · ')[0]))||kind;
+      const metadata=[title!==kind?kind:'','任务 #'+j.id.slice(0,8),j.created_at?window.DisplayTime.format(j.created_at):''].filter(Boolean).join(' · ');
       const key=j.id+'-raw';
       const action=['queued','running'].includes(j.status)?'cancel':
         ['failed','interrupted'].includes(j.status)?'retry':j.status==='cancelled'?'resume':null;
-      const controls=action&&Object.hasOwn(j,'payload')?
+      const jobControl=action&&Object.hasOwn(j,'payload')?
         `<div class="admin-only"><button type="button" class="secondary" data-job-action="${action}" data-job-id="${esc(j.id)}">${{cancel:'取消任务',retry:'重试任务',resume:'重新排队'}[action]}</button></div>`:'';
-      const resultSummary=j.result?(window.IngestResultSummary?.text(j.result)||'结果摘要尚未就绪，请刷新页面。'):'';
+      const documentId=j.result?.document?.id||j.result?.document_id;
+      const controls=jobControl+(documentId?`<button type="button" class="secondary" data-job-document="${esc(documentId)}">查看资料</button>`:'');
+      const resultSummary=documentTask&&j.result?(window.IngestResultSummary?.text(j.result)||'结果摘要尚未就绪，请刷新页面。'):'';
       const followup=followups[index],discoveryAction=followup&&canReviewDiscovery()
         ?`<p class="admin-only"><button type="button" class="secondary" data-open-discovery="${index}">${esc(followup.label)}</button>${!followup.runId&&!followup.documentId?' <span class="subtle">显示当前项目全部发现候选，不按本次任务筛选</span>':''}</p>`:'';
-      return `<article class="card task-summary"><div class="row"><h3>${esc(title)}</h3><b>${esc(states[j.status]||j.status)}</b></div><small>${esc(kinds[j.kind]||j.kind)} · ${esc(j.id)} · ${esc(beijingTime(j.created_at))}（北京时间） · 已运行 ${j.elapsed_seconds??'—'} 秒</small><p>${j.failed_stage?'失败阶段：':''}${esc(j.failed_stage||j.stage||'等待前序任务完成')}</p>${j.error?`<p class="error">错误：${esc(j.error)}</p>`:''}${controls}${j.result?.pending_reviews?`<p>本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}${resultSummary?`<p class="task-result-summary">${esc(resultSummary)}</p>`:''}${discoveryAction}<progress max="100" value="${j.progress||0}"></progress><small>阶段进度 ${j.progress||0}%（非模型处理比例）</small><details data-key="${esc(j.id)}-stages" ${open.has(j.id+'-stages')?'open':''}><summary>阶段记录（${Object.keys(last).length} 组）</summary><ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul></details>${j.heartbeat_at?`<small>最近心跳 ${esc(beijingTime(j.heartbeat_at))}（北京时间），仅表示线程仍在等待，不代表实际推进。</small>`:''}<details data-key="${key}" ${open.has(key)?'open':''}><summary>完整日志与执行位置（${logs.length} 条，含重复等待）</summary><pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre></details></article>`;
-    }).join('')||'<p>当前项目暂无任务。</p>';
+      const stage=j.failed_stage||j.stage;
+      const progress=Math.min(100,Math.max(0,Number(j.progress)||0));
+      const diagnostics=[j.elapsed_seconds!=null?`已运行 ${j.elapsed_seconds} 秒`:'',
+        j.heartbeat_at?`最近心跳 ${window.DisplayTime.format(j.heartbeat_at)}（北京时间）`:''].filter(Boolean).join(' · ');
+      return `<article class="runtime-task task-summary" data-task-id="${esc(j.id)}">
+        <header class="runtime-task-header">
+          <div class="runtime-task-identity">
+            <h4 class="runtime-task-title">${esc(title)}</h4>
+            <p class="runtime-task-meta" title="${esc(j.id)}">${esc(metadata)}</p>
+          </div>
+          <span class="runtime-task-status" data-status="${esc(j.status)}">${esc(states[j.status]||j.status)}</span>
+        </header>
+        <div class="runtime-task-progress">
+          <progress aria-label="阶段进度" max="100" value="${progress}"></progress>
+          <span title="表示处理阶段的进度">阶段进度 ${progress}%</span>
+        </div>
+        ${stage?`<p class="runtime-task-context">${j.failed_stage?'失败阶段：':''}${esc(stage)}</p>`:''}
+        ${j.error?`<p class="runtime-task-context error">错误：${esc(j.error)}</p>`:''}
+        ${resultSummary?`<p class="task-result-summary">${esc(resultSummary)}</p>`:''}
+        ${controls?`<div class="runtime-task-actions">${controls}</div>`:''}
+        ${j.result?.pending_reviews?`<p class="runtime-task-context">本次产生 ${j.result.pending_reviews} 条知识候选。<button data-open-review class="secondary">前往知识审核 ↗</button></p>`:''}
+        ${discoveryAction}
+        ${Object.keys(last).length?`<details data-key="${esc(j.id)}-stages" ${open.has(j.id+'-stages')?'open':''}>
+          <summary>阶段记录（${Object.keys(last).length} 组）</summary>
+          <ul>${Object.entries(last).map(([group,line])=>`<li><b>${group}</b> · ${esc(displayLog(line))}</li>`).join('')}</ul>
+        </details>`:''}
+        ${logs.length||diagnostics||j.worker_stack||j.failure_stack?`<details data-key="${esc(key)}" ${open.has(key)?'open':''}>
+          <summary>完整日志与执行位置（${logs.length} 条）</summary>
+          ${diagnostics?`<p class="runtime-task-context">${esc(diagnostics)}</p>`:''}
+          <pre>${esc(logs.map(displayLog).join('\n'))}${j.worker_stack?'\n\n线程位置\n'+esc(j.worker_stack.join('\n')):''}${j.failure_stack?'\n\n失败位置\n'+esc(j.failure_stack.join('\n')):''}</pre>
+        </details>`:''}
+      </article>`;
+    }).join('')||`<p class="runtime-task-message">${p?'当前项目暂无任务。':'请先选择项目。'}</p>`;
     $('tasks').querySelectorAll('details[data-key]').forEach(d=>{const pre=d.querySelector('pre'),state=scrollState[d.dataset.key];if(pre&&state)pre.scrollTop=state.atBottom?pre.scrollHeight:state.top;});
-    $('tasks').querySelectorAll('[data-open-review]').forEach(button=>button.onclick=()=>reviewNav.click());
+    $('tasks').querySelectorAll('[data-open-review]').forEach(button=>button.onclick=()=>{
+      if(accepts())return window.TaskReview.open({trigger:button});
+    });
+    $('tasks').querySelectorAll('[data-job-document]').forEach(button=>button.onclick=async()=>{
+      if(!accepts())return;
+      try{
+        await window.KnowledgeNavigation.open('sources',{projectId:p});
+        if(accepts()&&!$('tab-sources').classList.contains('hidden'))await window.selectSource(button.dataset.jobDocument);
+      }catch(error){if(accepts())status(error.message,true);}
+    });
     $('tasks').querySelectorAll('[data-open-discovery]').forEach(button=>button.onclick=async()=>{
       if(!accepts()||!canReviewDiscovery())return;
       const followup=followups[Number(button.dataset.openDiscovery)];if(!followup)return;

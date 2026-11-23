@@ -39,6 +39,7 @@ def layout_page():
           </div></section>
           </main><script>window.Auth={{isAdmin:()=>true}};
             window.status=(message,isError)=>{{window.__layoutStatus={{message,isError:Boolean(isError)}};}};</script>
+          <script src="/assets/display-time.js"></script>
           <script src="/assets/ingest-batches.js"></script></body></html>'''
 
         def respond(route):

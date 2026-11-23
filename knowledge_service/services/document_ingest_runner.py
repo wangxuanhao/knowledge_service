@@ -130,8 +130,13 @@ class DocumentIngestRunner:
             (item.get('options') or {}).get('extraction_mode', settings.get('extraction_mode', 'ontology')) != 'documents')
     def run(self, item, settings, owner):
         if self.halt is not None and self.halt.is_set():raise InterruptedError('ingest worker shutdown')
+        prepared=item.get('prepared_result')
+        if isinstance(prepared,str):
+            import json
+            prepared=json.loads(prepared)
         self.store.update_progress(item['id'], owner, item['lease_token'],
-                                   stage='parsing', progress=max(item.get('progress') or 0, 3))
+                                   stage='reusing_chunks' if prepared else 'parsing',
+                                   progress=max(item.get('progress') or 0, 3))
         options = {**settings, **(item.get('options') or {})}
         options.pop('requested_concurrency', None)
         title = options.pop('title', None) or item['original_name']
@@ -148,22 +153,18 @@ class DocumentIngestRunner:
         guard_token=ingest_commit_guard.set(provisional.formal_guard)
         try:
             with self.service.repository._formal_write_transaction():
-                existing=self._ensure_receipt(item,source,options,title)
+                existing=self._ensure_receipt(item,source,options,title,prepared=bool(prepared))
         finally:
             ingest_commit_guard.reset(guard_token)
         if (existing and existing.get('metadata',{}).get('status')=='ready'
                 and existing.get('metadata',{}).get('document_generation',0)==item.get('document_generation',0)):
             return {'document':existing,'records':[],'replayed':True}
-        from .source_ingest import prepare_source_ingest
-        prepared=item.get('prepared_result')
-        if isinstance(prepared,str):
-            import json
-            prepared=json.loads(prepared)
         if prepared:
             if prepared['source_version_id']!=source['id']:
                 raise ValueError('Prepared source version mismatch')
             chunks,text,warnings=prepared['chunks'],prepared['text'],prepared['warnings']
         else:
+            from .source_ingest import prepare_source_ingest
             chunks,text,warnings=prepare_source_ingest(self.sources,item['project_id'],source,options,
                 ocr_semaphore=self.ocr_semaphore, progress=lambda:self.store.update_progress(
                     item['id'], owner, item['lease_token'], stage='ocr', progress=max(item.get('progress') or 0, 8)))
@@ -186,7 +187,7 @@ class DocumentIngestRunner:
         finally:
             ingest_commit_guard.reset(token)
 
-    def _ensure_receipt(self,item,source,options,title):
+    def _ensure_receipt(self,item,source,options,title,*,prepared):
         # Formal table locks precede the lease lock; keep one order across document workers.
         try:document=self.service.repository.get_record(item['project_id'],item['document_id'])
         except KeyError:document=None
@@ -197,7 +198,8 @@ class DocumentIngestRunner:
         if document is None or document.get('metadata',{}).get('source_document_version_id')!=source['id']:
             return self.service.repository.put_record(item['project_id'],dict(id=item['document_id'],
                 kind='document',text=source['source_text'],metadata={
-                    **options.get('metadata',{}),'title':title,'status':'processing','active_stage':'ocr',
+                    **options.get('metadata',{}),'title':title,'status':'processing',
+                    'active_stage':'reusing_chunks' if prepared else 'ocr',
                     'document_generation':generation,'source_document_version_id':source['id'],
                     'batch_id':item['batch_id'],'batch_item_id':item['id']}),expected_version=document['version'] if document else 0)
         return document

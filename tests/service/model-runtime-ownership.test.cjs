@@ -131,8 +131,9 @@ function jobsFixture({visible=false,watching=false}={}){
   const nodes=new Map(),get=id=>{if(!nodes.has(id))nodes.set(id,element());return nodes.get(id);};
   get('tab-jobs').className=visible?'':'hidden';get('tab-runtime').className=visible?'':'hidden';
   const calls=[],context={window:{RuntimeView:{on(){}}},current:'p',wb:{jobs:new Map(watching?[['watched',{}]]:[])},$:get,
-    bind(){},esc:String,status(){},showTab(){},document:{createElement:element,querySelector:()=>element()},
+    bind(){},esc:String,status(){},showTab(){},document:{body:element(),createElement:element,querySelector:()=>element()},
     api:async url=>{calls.push(url);return {jobs:[{id:url==='/api/jobs'?'watched':'scoped',status:'running',logs:[]}]};}};
+  context.window.WorkspaceDrawers=require('../../knowledge_service/web/workspace-drawers.js').createManager(context.document);
   vm.createContext(context);vm.runInContext('let jobList;',context);vm.runInContext(source('task-review.js'),context);
   return {context,calls,get,run:()=>vm.runInContext('jobList()',context)};
 }

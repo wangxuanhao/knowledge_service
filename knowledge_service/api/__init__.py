@@ -271,11 +271,13 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
         ontology_sync.start()
         projection_worker.start()
         app.state.jobs.start()
+        app.state.community_refresh.start()
         app.state.ingest_batch_runner.start()
         app.state.preparation_runner.start()
         yield
         ontology_sync.close()
         projection_worker.close()
+        app.state.community_refresh.close()
         app.state.jobs.close()
         app.state.ingest_batch_runner.close()
         app.state.preparation_runner.close()
@@ -340,6 +342,8 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     install_source_documents(app, service)
     from .parity import install
     install(app, service)
+    from .communities import install as install_communities
+    install_communities(app, service)
     from .preparations import install as install_preparations
     install_preparations(app, service)
     from .document_reprocessing import install as install_document_reprocessing

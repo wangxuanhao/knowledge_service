@@ -1,8 +1,11 @@
-/* Applied content scope belongs to a project and page, never to hidden controls. */
+/* Search and QA share one applied scope per project. Other pages own their scopes. */
 (function(root,factory){const api=factory();if(typeof module==='object'&&module.exports)module.exports=api;else root.WorkspaceContext=api;})(typeof window==='object'?window:globalThis,function(){
   const pages=new Set(['sources','qa','search','records']);
   const clone=value=>JSON.parse(JSON.stringify(value));
   const empty=()=>({known_at:null,valid_at:null,filters:null,include_unknown:true});
+  const scopePage=page=>page==='qa'?'search':page;
+  const hasRestrictions=value=>value.known_at||value.valid_at||value.filters||value.include_unknown===false||
+    value.kinds?.length||value.ontology_ids?.length||Object.values(value.applicability||{}).some(dimension=>dimension.values.length);
   function applicability(value){
     const dimensions=['platforms','businesses','audiences'];
     if(!value||Array.isArray(value)||typeof value!=='object'||Object.keys(value).some(key=>!dimensions.includes(key)))throw Error('适用范围必须为维度对象');
@@ -24,9 +27,18 @@
   function createStore(storage=null){
     const entries=new Map();let generation=0;
     const storageKey='kg_workspace_scope_v2';
-    try{for(const [id,value] of JSON.parse(storage?.getItem(storageKey)||'[]')){const [project,page]=JSON.parse(id);if(project&&pages.has(page)){const applied=normalize(value);entries.set(id,{applied,draft:clone(applied),revision:++generation});}}}catch{}
+    const key=(project,page)=>JSON.stringify([project,scopePage(page)]);
+    try{
+      for(const [id,value] of JSON.parse(storage?.getItem(storageKey)||'[]')){
+        const [project,page]=JSON.parse(id);
+        if(!project||!pages.has(page))continue;
+        const owner=key(project,page),applied=normalize(value),previous=entries.get(owner);
+        // Older sessions stored separate entries. Keep a configured search scope first.
+        if(previous&&(!hasRestrictions(applied)||(page==='qa'&&hasRestrictions(previous.applied))))continue;
+        entries.set(owner,{applied,draft:clone(applied),revision:++generation});
+      }
+    }catch{}
     const persist=()=>{try{storage?.setItem(storageKey,JSON.stringify([...entries].map(([id,row])=>[id,row.applied])));}catch{}};
-    const key=(project,page)=>JSON.stringify([project,page]);
     const entry=(project,page)=>{const id=key(project,page);if(!entries.has(id))entries.set(id,{applied:empty(),draft:empty(),revision:++generation});return entries.get(id);};
     const store={
       read(project,page){return !project||!pages.has(page)?empty():clone(entry(project,page).applied);},

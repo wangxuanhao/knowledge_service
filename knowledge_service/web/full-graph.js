@@ -124,6 +124,7 @@
       this.canvas=host.querySelector('.fg-gl');this.labels=host.querySelector('.fg-labels');this.labelContext=this.labels.getContext('2d');
       this.hoverCard=document.createElement('div');this.hoverCard.className='fg-hover-card';this.hoverCard.hidden=true;
       this.hoverCard.innerHTML='<div class="fg-hover-meta"><span class="fg-hover-kind"></span><span class="fg-hover-links"></span></div><p class="fg-hover-name"></p><div class="fg-hover-attributes"></div><p class="fg-hover-id"></p>';host.append(this.hoverCard);
+      this.hoverPreview=root.EntityAttributePanel?.createHoverPreview?.();
       this.gl=this.canvas.getContext('webgl',{alpha:false,antialias:false,preserveDrawingBuffer:false,powerPreference:'high-performance'});
       if(!this.gl)throw new Error('当前浏览器无法创建 WebGL，全量模式不可用。可切回局部探索。');
       this.setupGL();this.abort=new AbortController();const signal=this.abort.signal;
@@ -155,13 +156,13 @@
         drag=null;if(this.canvas.hasPointerCapture(e.pointerId))this.canvas.releasePointerCapture(e.pointerId);
       },{signal});
       for(const event of ['pointercancel','lostpointercapture'])this.canvas.addEventListener(event,()=>{drag=null;this.pendingNodeMove=null;},{signal});
-      this.canvas.addEventListener('wheel',e=>{e.preventDefault();const box=this.canvas.getBoundingClientRect();this.camera.zoomAt(Math.exp(-e.deltaY*.0015),e.clientX-box.left,e.clientY-box.top,this.width,this.height);this.requestDraw();},{signal,passive:false});
+      this.canvas.addEventListener('wheel',e=>{e.preventDefault();this.clearHover();const box=this.canvas.getBoundingClientRect();this.camera.zoomAt(Math.exp(-e.deltaY*.0015),e.clientX-box.left,e.clientY-box.top,this.width,this.height);this.requestDraw();},{signal,passive:false});
       this.canvas.addEventListener('dblclick',()=>{if(this.selected<0&&this.selectedEdge<0)this.reset();},{signal});
       this.canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();this.lost=true;this.onError('GPU 上下文丢失，请恢复图谱或切回局部探索。');},{signal});
       this.canvas.addEventListener('webglcontextrestored',()=>{this.lost=false;this.setupGL();this.sync();},{signal});
       this.observer=new ResizeObserver(()=>this.resize());this.observer.observe(host);this.resize();
     }
-    clearHover(){const changed=this.hovered>=0;this.hovered=-1;if(this.hoverCard)this.hoverCard.hidden=true;if(changed&&this.smallSession)this.requestDraw();}
+    clearHover(){const changed=this.hovered>=0;this.hovered=-1;this.hoverPreview?.clear();if(this.hoverCard)this.hoverCard.hidden=true;if(changed&&this.smallSession)this.requestDraw();}
     hoverAt(x,y){
       const d=this.displayDataset;
       // Hover decoration follows the small visible scene; the complete 300k
@@ -177,10 +178,13 @@
         this.hoverCard.querySelector('.fg-hover-id').textContent=row.id;
         const attributes=this.hoverCard.querySelector('.fg-hover-attributes');attributes.textContent='属性摘要读取中…';
         const dataset=d;
-        Promise.resolve(this.onHover(row)).then(html=>{
+        const render=(html,error)=>{
           if(this.destroyed||this.hovered!==index||this.displayDataset!==dataset||this.hoverCard.hidden)return;
-          attributes.innerHTML=html||'';
-        }).catch(()=>{if(this.hovered===index&&this.displayDataset===dataset)attributes.textContent='属性摘要暂不可用；点击查看详情';});
+          if(error)attributes.textContent='属性摘要暂不可用；点击查看详情';
+          else attributes.innerHTML=html||'';
+        };
+        if(this.hoverPreview)this.hoverPreview.show(index,()=>this.onHover(row),render);
+        else Promise.resolve(this.onHover(row)).then(render,error=>render(null,error));
         if(this.smallSession)this.requestDraw();
       }
       const card=this.hoverCard;card.hidden=false;
@@ -567,7 +571,7 @@
       this.requestDraw();return true;
     }
     stats(){return {loaded_entities:this.dataset.nodeCount,loaded_relations:this.dataset.edgeCount,drawn_entities:this.drawnNodes||0,drawn_relations:this.drawnEdges||0,relation_layer:'complete-world-cache',cached_relations:this.cachedRelations||0,node_layer:this.usedViewCache?'complete-view-cache':'live-color-groups',cached_entities:this.viewSnapshot?.nodes||0,view_cache_error:this.viewCacheError||0,layout:this.smallSession?'small-relations-v1':'stable-id-v1',canonical_layout:'stable-id-v1',last_pick_ms:this.lastPickMs||0,gpu:this.gl.getParameter(this.gl.RENDERER),context_lost:!!this.lost};}
-    destroy(){if(this.destroyed)return;this.destroyed=true;this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
+    destroy(){if(this.destroyed)return;this.destroyed=true;this.hoverPreview?.clear();this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
   }
   async function request(url,body,signal){
     const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});

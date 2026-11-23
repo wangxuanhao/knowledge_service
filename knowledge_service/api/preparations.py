@@ -117,7 +117,7 @@ def install(app,service):
 
     @router.get('/{identifier}/items/{item_id}/result')
     def result(p:str,identifier:str,item_id:str,http:HttpRequest):
-        return invoke(operations.result,p,identifier,owner(http),item_id)
+        return invoke(operations.result,p,identifier,owner(http),item_id,include_document_details=True)
 
     @router.get('/{identifier}/items/{item_id}/original')
     def original(p:str,identifier:str,item_id:str,http:HttpRequest):

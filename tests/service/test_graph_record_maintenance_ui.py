@@ -54,7 +54,7 @@ def record_page(redesign_page):
     page.route('**/records', create)
     page.route('**/records/a', revise)
     page.route('**/ontology**', lambda route: route.fulfill(json=release))
-    page.route('**/ontologies', lambda route: route.fulfill(json=dict(versions=[release])))
+    page.route('**/ontologies*', lambda route: route.fulfill(json=dict(versions=[release])))
     page.route('**/graph-sessions', manifest)
     page.route('**/graph-sessions/maintenance/page', graph_page)
     page.route('**/graph-neighborhood', neighborhood)
@@ -89,6 +89,24 @@ def test_editing_in_full_graph_keeps_mode_and_updates_name(record_page):
     page.click('#save-structured-record')
     page.wait_for_function('() => document.querySelector("#record-dialog-message").textContent.includes("已保存")')
     page.wait_for_function('() => FullGraphView.mode === "full" && FullGraphView.renderer.dataset.records.find(row=>row.id==="a")?.text === "修改后名称"')
+    assert calls['edits'] == 1
+
+
+def test_entity_editor_unlocks_before_graph_reload(record_page):
+    page, rows, calls = record_page
+    page.evaluate('''row => {
+        const refresh=window.refreshKnowledgeGraph;
+        window.refreshKnowledgeGraph=()=>new Promise(resolve=>{window.finishGraphRefresh=()=>resolve(refresh());});
+        editRecord(row);
+    }''', rows[0])
+    page.fill('#structured-record-text', '保存后立即可继续')
+    page.click('#save-structured-record')
+    page.wait_for_function('''() => document.getElementById('record-dialog-message').textContent.includes('已保存')
+        && typeof window.finishGraphRefresh==='function' ''')
+    page.locator('#save-structured-record:enabled').wait_for(timeout=1000)
+    assert page.locator('#revision-version').input_value() == '2'
+    page.evaluate('() => window.finishGraphRefresh()')
+    page.wait_for_function('''() => FullGraphView.renderer.dataset.records.find(row=>row.id==='a')?.version===2''')
     assert calls['edits'] == 1
 
 

@@ -168,6 +168,18 @@ test('repeated hover for the same entity and frozen scope shares one bounded req
   assert.equal(calls,1);
   await panel.hoverHtml({id:'e',version_id:'e-v4'},{...options,scope:{known_at:'2024-01-01'}});assert.equal(calls,2);
 });
+test('quick hover passes do not read attributes, and the settled hover uses the latest callback',async()=>{
+  const timers=new Set(),reads=[],shown=[];
+  const preview=panel.createHoverPreview({schedule:fn=>{timers.add(fn);return fn;},cancel:fn=>timers.delete(fn)});
+  const read=id=>async()=>{reads.push(id);return id;};
+  for(let i=0;i<40;i++)preview.show(i,read(i),value=>shown.push(value));
+  preview.show(39,read(39),value=>shown.push('current '+value));
+  assert.equal(timers.size,1);assert.deepEqual(reads,[]);
+  for(const tick of timers){timers.delete(tick);await tick();}
+  assert.deepEqual(reads,[39]);assert.deepEqual(shown,['current 39']);
+  preview.show(40,read(40),value=>shown.push(value));preview.clear();
+  assert.equal(timers.size,0);
+});
 test('isolated conflict sets remain separate from accepted values and expose one shared review action',async()=>{
   const conflictSet={id:'set-1',predicate:'p',version:3,state:'open',members:[value('x',{value_preview:'争议甲',support_count:4,applicability:{platforms:['平台甲']}}),value('y',{value_preview:'争议乙'})]};
   const h=harness(()=>page([],{groups:[],conflict_sets:[conflictSet]}));await h.controller.load();

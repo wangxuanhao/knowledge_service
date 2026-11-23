@@ -38,6 +38,7 @@ def _within(inner, outer):
 
 def test_unified_header_owns_existing_query_and_unique_page_scope(redesign_page):
     page, errors = redesign_page
+    page.route('**/applicability-values', lambda route: route.fulfill(json=dict(platforms=['布局平台'])))
     _open(page)
     header = _bounds(page, '#graph-workspace-header')
     assert 100 <= header['height'] <= 190
@@ -47,7 +48,8 @@ def test_unified_header_owns_existing_query_and_unique_page_scope(redesign_page)
         assert _within(_bounds(page, selector), header), selector
     assert not page.locator('#graph-workspace-panel').is_visible()
     page.click('#scope-toggle')
-    page.fill('#query-platforms', '布局平台')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='布局平台', exact=True).check()
     page.click('#apply-scope')
     assert page.evaluate("() => WorkspaceContext.read(current, 'search').applicability.platforms.values") == ['布局平台']
     assert '布局平台' in page.locator('#applied-scope-chips').inner_text()

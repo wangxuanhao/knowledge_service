@@ -39,7 +39,7 @@ function fixture(options={}){
     querySelector:selector=>selector==='[data-tab="records"]'?nav:null,
     addEventListener(name,fn){(events[name]??=[]).push(fn);},querySelectorAll:()=>[]};
   const rows=options.rows||[{id:'first',kind:'entity',text:'张三',type:'Employee',version:1,metadata:{},ontology_id:'published'}];
-  const context=vm.createContext({window:{RecordCreate:create,Auth:{isAdmin:()=>true},TaskReview:{open(){context.reviewOpened=true;}}},document,
+  const context=vm.createContext({window:{DisplayTime:require('../../../knowledge_service/web/display-time.js'),RecordCreate:create,Auth:{isAdmin:()=>true},TaskReview:{open(){context.reviewOpened=true;}}},document,
     $:get,current:'p',wb:{records:new Map(),versionContext:{}},RecordVersionContext:require('../../../knowledge_service/web/record-version-context.js'),
     scope:()=>({include_unknown:true,filters:{field:'metadata.city',op:'eq',value:'杭州'}}),
     endpoint:suffix=>'/api/projects/'+context.current+suffix,...helpers,

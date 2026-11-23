@@ -4,7 +4,7 @@ import psycopg
 from psycopg import sql
 
 import pg_support
-from knowledge_service.repository.migrate import MIGRATIONS_DIR
+from knowledge_service.repository.migrate import LEGACY_MIGRATIONS_DIR
 
 
 def test_projection_tables_allow_configured_app_dml_without_ddl():
@@ -27,7 +27,7 @@ def test_projection_tables_allow_configured_app_dml_without_ddl():
                 (role, f'{schema}.projection_outbox', 'SELECT'),
             ).fetchone()[0]
             admin.execute("SELECT set_config('knowledge_service.app_role', %s, true)", (role,))
-            admin.execute((MIGRATIONS_DIR / '0018_projection_application_permissions.sql').read_text(encoding='utf-8'))
+            admin.execute((LEGACY_MIGRATIONS_DIR / '0018_projection_application_permissions.sql').read_text(encoding='utf-8'))
             for table in tables:
                 for operation in ('SELECT', 'INSERT', 'UPDATE', 'DELETE'):
                     assert admin.execute(
@@ -60,7 +60,7 @@ def test_application_role_can_enqueue_and_rollback(tmp_path):
             schema = sql.Identifier(db.execute('SELECT current_schema()').fetchone()[0]).as_string()
             db.execute(f'GRANT USAGE ON SCHEMA {schema} TO {role}')
             db.execute("SELECT set_config('knowledge_service.app_role', ?, true)", (role,))
-            db.execute((MIGRATIONS_DIR / '0018_projection_application_permissions.sql').read_text(encoding='utf-8'))
+            db.execute((LEGACY_MIGRATIONS_DIR / '0018_projection_application_permissions.sql').read_text(encoding='utf-8'))
             db.execute(f'SET LOCAL ROLE {role}')
             assert db.execute('SELECT current_user').fetchone()[0] == role
             for n in (1, 2):

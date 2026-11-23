@@ -210,7 +210,7 @@ def test_document_upload_workspace_contract():
                    '@media(max-width:850px)', ':focus-visible'):
         assert marker in css, marker
     assert '/assets/workbench.css?v=split-previews-20261110-1' in html
-    assert '/assets/ingest-mode.js?v=unified-media-20261111-1' in html
+    assert '/assets/ingest-mode.js?v=display-time-20261123-1' in html
     assert 'max_batch_items' in js and 'max_batch_bytes' in js
     assert re.search(r'/assets/workbench\.js\?v=[\w.-]+', html)
 
@@ -356,8 +356,9 @@ def test_workspace_navigation_has_fixed_management_and_real_runtime_loaders():
         assert f'data-tab="{tab}"' in html
     assert "management.className='nav-group nav-management'" in menu
     assert 'nav.after(management)' in menu
-    assert "const VIEWS=['overview','jobs','snapshots']" in read('runtime-view.js')
-    for name, view in (('workspace.js', 'overview'), ('task-review.js', 'jobs'), ('workbench.js', 'snapshots')):
+    assert "const VIEWS=['overview','jobs','snapshots','communities']" in read('runtime-view.js')
+    for name, view in (('workspace.js', 'overview'), ('task-review.js', 'jobs'), ('workbench.js', 'snapshots'),
+                       ('community-workspace.js', 'communities')):
         assert f"RuntimeView?.on('{view}'" in read(name)
     assert 'window.ProjectsView=' in read('projects-view.js')
     assert 'window.WorkspaceContext?.enter' in read('app.js')

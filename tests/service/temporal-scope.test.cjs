@@ -48,7 +48,8 @@ test('restoring a frozen current point never silently refreshes it',()=>{
   assert.equal(draft.mode,'at');assert.equal(draft.includeUnknown,false);
   assert.deepEqual(temporal.capture(draft),scope);
   assert.equal(temporal.restore({}).mode,'all');
-  assert.match(temporal.describe(scope),/2026-10-28T01:02:03.456Z/);
+  assert.match(temporal.describe(scope),/2026年10月28日 09:02:03/);
+  assert.match(temporal.describe(scope),/2024年01月01日 08:30:00/);
   assert.match(temporal.describe(scope),/不含生效时间未知/);
   assert.match(temporal.describe({}),/全部业务时间.*当前系统版本/);
 });
@@ -85,7 +86,7 @@ function editor(){
   const get=id=>{if(!controls.has(id))controls.set(id,{id,value:'',checked:false,hidden:false,disabled:false,open:false,children:[],
     listeners:{},classList:{toggle(){}},addEventListener(type,fn){this.listeners[type]=fn;},setAttribute(){},focus(){},prepend(){},replaceChildren(){this.children=[];},append(node){this.children.push(node);}});return controls.get(id);};
   const context={store,get page(){return page;},isContentPage:workspace.isContentPage,read:p=>store.read(p,page),register:value=>{bridge=value;value.restore();}};
-  const environment={window:{WorkspaceContext:context,TemporalScope:temporal,ScopeFields:fields,KnowledgeTabs:{open:value=>{page=value;bridge.restore();}},
+  const environment={window:{DisplayTime:require(path.join(web,'display-time.js')),WorkspaceContext:context,TemporalScope:temporal,ScopeFields:fields,KnowledgeTabs:{open:value=>{page=value;bridge.restore();}},
     ApplicabilityUI:{readQueryScope:()=>({applicability:{platforms:{mode:'specific',values:['平台甲']}}})}},
     document:{getElementById:get,createElement:()=>({setAttribute(){}}),addEventListener(){},dispatchEvent(){}},
     current:'p',CustomEvent:class{},showRuntimeView(){},Date:class extends Date{constructor(...args){super(...(args.length?args:['2026-10-28T01:02:03.456Z']));}},JSON,Error};

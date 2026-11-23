@@ -47,8 +47,11 @@ class PreparationStore:
 
     def list(self,project,owner):
         with self.repo._transaction():
-            rows=self.db.execute('SELECT id FROM preparation_sessions WHERE project_id=? AND owner_id=? AND expires_at>now() ORDER BY created_at DESC LIMIT 100',(project,owner)).fetchall()
-            return [self.get(project,row['id'],owner) for row in rows]
+            rows = self.db.execute(
+                '''SELECT payload, expires_at FROM preparation_sessions
+                   WHERE project_id=? AND owner_id=? AND expires_at>now()
+                   ORDER BY created_at DESC LIMIT 100''', (project, owner)).fetchall()
+        return [dict(decoded(row['payload']), expires_at=str(row['expires_at'])) for row in rows]
 
     def save(self,value):
         self.db.execute('UPDATE preparation_sessions SET payload=?::jsonb WHERE id=?',(encoded(value),value['id']))
@@ -62,6 +65,24 @@ class PreparationStore:
             if row is None:raise KeyError('staged bytes expired')
             return bytes(row['content'])
 
+    def rechunk_result(self, file_id, source_version_id, chunk_version, build):
+        """Keep one derived result per staged file, outside the session status payload."""
+        with self.repo._transaction():
+            row = self.db.execute(
+                'SELECT rechunked_result FROM preparation_files WHERE id=? FOR UPDATE',
+                (file_id,)).fetchone()
+            if row is None:
+                raise KeyError('staged bytes expired')
+            cached = decoded(row['rechunked_result'])
+            if (cached and cached['source_version_id'] == source_version_id
+                    and cached['chunk_version'] == chunk_version):
+                return cached['content']
+            content = build()
+            saved = dict(source_version_id=source_version_id, chunk_version=chunk_version, content=content)
+            self.db.execute('UPDATE preparation_files SET rechunked_result=?::jsonb WHERE id=?',
+                            (encoded(saved), file_id))
+            return content
+
     def task(self,identifier):
         with self.repo._transaction():
             row=self.db.execute('SELECT * FROM preparation_tasks WHERE id=?',(identifier,)).fetchone()
@@ -70,6 +91,27 @@ class PreparationStore:
             for name in ('options','result'):
                 value[name]=decoded(value.get(name))
             return value
+
+    def _task_status(self, condition, params):
+        """Project task polling fields without sending recognized text or chunks."""
+        with self.repo._transaction():
+            row = self.db.execute(
+                '''SELECT id, fingerprint, status, stage, started_at, heartbeat_at, error,
+                          CASE WHEN result <> '{}'::jsonb THEN jsonb_build_object(
+                              'warnings', COALESCE(result->'warnings', '[]'::jsonb),
+                              'vectorization', result->'vectorization',
+                              'chunk_settings', result->'chunk_settings')
+                          END AS result
+                   FROM preparation_tasks WHERE ''' + condition, params).fetchone()
+        if row is None:
+            return None
+        return {**dict(row), 'result': decoded(row['result'])}
+
+    def task_status(self, identifier):
+        return self._task_status('id=?', (identifier,))
+
+    def find_task_status(self, project, fingerprint):
+        return self._task_status('project_id=? AND fingerprint=?', (project, fingerprint))
 
     def find_task(self,project,fingerprint):
         with self.repo._transaction():

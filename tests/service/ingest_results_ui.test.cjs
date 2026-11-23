@@ -265,7 +265,7 @@ for(const entry of ['task','batch'])test(entry+' completion retains saved docume
     {projectId:'p',mode:'documents'});
   const time=f.list.children[0].children.find(node=>node.innerHTML?.includes('文档时间'));
   assert.ok(time,'saved document time remains available when current assertions cannot load');
-  assert.match(time.innerHTML,/原文发布时间.*2026-09-25/);
+  assert.match(time.innerHTML,/原文发布时间.*2026年09月25日 00:00:00/);
   assert.match(time.innerHTML,/业务生效.*未知/);
   assert.match(time.innerHTML,/识别依据/);
   assert.doesNotMatch(time.innerHTML,/持续有效/);

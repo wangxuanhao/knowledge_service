@@ -584,7 +584,7 @@
     host.setAttribute('role','status');host.setAttribute('aria-live','polite');
     const heading=document.createElement('strong');heading.textContent=`已发布${receipt.version!=null?'为 v'+receipt.version:''} · 正式版本已生效`;
     const text=document.createElement('p'),facts=receipt.facts;
-    const time=receipt.createdAt?new Date(receipt.createdAt).toLocaleString('zh-CN',{hour12:false}):'服务端未提供发布时间';
+    const time=window.DisplayTime.format(receipt.createdAt,"服务端未提供发布时间");
     text.textContent=`发布时间：${time}`;
     const knowledge=document.createElement('p');knowledge.textContent=['selected','added','reused','skipped'].some(key=>facts[key]!=null)
       ?`关联知识：本次新增 ${facts.added??'待核对'} / 复用 ${facts.reused??'待核对'} / 跳过 ${facts.skipped??'待核对'} 条知识`
@@ -644,7 +644,7 @@
           <span class="om-ctx" id="om-version" hidden>当前本体 v?</span>
           <button type="button" class="om-btn ghost" id="om-history" title="查看发布版本、来源草案与恢复记录">版本历史</button>
           <button type="button" class="om-btn om-workspace-toggle" id="om-workspace-toggle" aria-controls="om-workspace-shell" aria-expanded="false">草案变更</button>
-          <details class="om-definition-menu admin-only" id="om-definition-menu"><summary class="om-btn primary">新增定义 ▾</summary><div role="group" aria-label="新增定义种类"><button type="button" data-om-create="class">实体类型</button><button type="button" data-om-create="relation">关系类型</button><button type="button" data-om-create="attribute">属性字段</button></div></details>
+          <details class="om-definition-menu admin-only" id="om-definition-menu"><summary class="om-btn primary">新增定义</summary><div role="group" aria-label="新增定义种类"><button type="button" data-om-create="class">实体类型</button><button type="button" data-om-create="relation">关系类型</button><button type="button" data-om-create="attribute">属性字段</button></div></details>
         </div>
         <div class="om-worktools">
           <div class="om-seg" role="group" aria-label="视图切换">
@@ -758,7 +758,7 @@
     const classTree = () => {
       if(window.OntologyCatalog?.hierarchyRows){
         return window.OntologyCatalog.hierarchyRows(S.summary,{collapsed:collapsedBranches}).map(c=>`<li role="treeitem" aria-level="${c.depth+1}"${c.childCount&&!c.reference?` aria-expanded="${c.expanded}"`:''} class="om-tree-row ${c.id===S.selected?'sel':''}" style="--tree-depth:${c.depth}">
-          <div class="om-tree-line">${c.childCount&&!c.reference?`<button type="button" class="om-tree-toggle" data-tree-toggle="${escHtml(c.id)}" aria-label="${c.expanded?'折叠':'展开'}${escHtml(label(c))}" aria-expanded="${c.expanded}">${c.expanded?'⌄':'›'}</button>`:'<span class="om-tree-spacer"></span>'}
+          <div class="om-tree-line">${c.childCount&&!c.reference?`<button type="button" class="om-tree-toggle" data-tree-toggle="${escHtml(c.id)}" aria-label="${c.expanded?'折叠':'展开'}${escHtml(label(c))}" aria-expanded="${c.expanded}"></button>`:'<span class="om-tree-spacer"></span>'}
           <button type="button" class="om-tree-select" data-sel="${escHtml(c.id)}" title="${escHtml(c.id)}"><span class="om-chip cls"></span>${escHtml(label(c))}${c.reference?`<small>${c.cycle?'循环引用':'多父类引用'}</small>`:''}${c.childCount&&!c.reference?`<small class="om-tree-count" title="${c.childCount} 个直属子类 · ${c.descendantCount} 个后代">${c.childCount}</small>`:''}</button></div>${c.externalParents.length?`<small class="om-tree-external">${c.externalParents.length} 个外部父类</small>`:''}</li>`).join('');
       }
       return classes.map(c=>row(c,'cls')).join('');

@@ -12,7 +12,7 @@ EDGE = r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
 HOST = 'http://rich-reader.test'
 
 
-def reader_page(browser, width=1440):
+def reader_page(browser, width=1440, include_ocr=False):
     page = browser.new_page(viewport={'width': width, 'height': 960})
     calls, errors = [], []
     page.on('pageerror', lambda error: errors.append(str(error)))
@@ -41,6 +41,10 @@ def reader_page(browser, width=1440):
             return route.fulfill(status=401, json={'detail': 'unauthorized'})
         if path.endswith('/rendered'):
             return route.fulfill(content_type='text/html; charset=utf-8', body=rich)
+        if path.endswith('/assets/good/ocr'):
+            return route.fulfill(json={'run': {'id': 'ocr-v1', 'status': 'completed', 'blocks': [
+                {'text': '图中文字', 'x': .1, 'y': .2, 'width': .4, 'height': .2},
+            ]}})
         if '/assets/' in path:
             if path.endswith('/failed'):
                 return route.fulfill(status=404, body='missing')
@@ -52,7 +56,13 @@ def reader_page(browser, width=1440):
         if '/source-documents/' in path:
             return route.fulfill(json={'original_name': 'guide.md', 'format': 'markdown',
                                        'mime_type': 'application/zip', 'version': 1,
-                                       'source_text': '# 解析正文', 'blocks': [], 'assets': []})
+                                       'source_text': '# 解析正文',
+                                       'blocks': [{'block_id': 'before', 'type': 'paragraph',
+                                                   'source_start_line': 3, 'source_end_line': 3,
+                                                   'normalized_text': '解析正文片段'}],
+                                       'chunks': [{'id': 'chunk-1', 'version_id': 'chunk-v1', 'text': '模型输入片段'}],
+                                       'assets': [{'id': 'good', 'original_path': '流程图.png', 'status': 'completed',
+                                                   'width': 960, 'height': 320}] if include_ocr else []})
         if '/records/one' in path:
             return route.fulfill(json=record)
         if '/sources' in path:
@@ -68,7 +78,7 @@ def reader_page(browser, width=1440):
           .workspace-drawer-body{padding:24px;overflow:auto;height:calc(100vh - 130px)}
           </style></head><body><select id="project"><option>p</option><option>other</option></select>
           <section id="tab-sources"><button id="load-sources">刷新</button><button id="upload-source">上传</button>
-          <div class="source-layout"><div id="source-list"></div><article><h3 id="source-title"></h3><pre id="source-body"></pre></article></div></section></body></html>''')
+          <div class="source-layout"><div id="source-list"></div><article><h3 id="source-title"></h3><div id="source-body"></div></article></div></section></body></html>''')
 
     page.route('**/*', respond)
     page.goto(HOST)
@@ -83,10 +93,39 @@ def reader_page(browser, width=1440):
     }""")
     for name in ('library-workspace.css', 'source-reader.css', 'sources-library.css'):
         page.add_style_tag(path=str(WEB / name))
-    for name in ('workspace-drawers.js', 'source-content.js', 'source-reader.js', 'sources-view.js'):
+    for name in ('display-time.js', 'workspace-drawers.js', 'source-content.js', 'source-reader.js', 'sources-view.js'):
         if (WEB / name).exists():
             page.add_script_tag(path=str(WEB / name))
     return page, calls, errors
+
+
+def test_library_shows_parsing_alongside_rich_and_plain_reading():
+    with sync_playwright() as runtime:
+        browser = runtime.chromium.launch(headless=True, executable_path=EDGE)
+        page, calls, errors = reader_page(browser, width=390, include_ocr=True)
+        page.set_default_timeout(3000)
+        page.locator('.source-item').click()
+        drawer = page.locator('#source-detail-drawer')
+        body = drawer.locator('#source-body')
+        body.locator('h1').wait_for()
+        assert not any(url.endswith('/source-documents/v') for url in calls)
+        parsed = drawer.get_by_role('button', name='解析', exact=True)
+        parsed.click()
+        body.get_by_text('解析正文片段', exact=True).wait_for()
+        body.locator('summary').filter(has_text='chunk-1').click()
+        assert body.get_by_text('模型输入片段', exact=True).is_visible()
+        assert parsed.get_attribute('aria-pressed') == 'true'
+        assert drawer.is_visible() and page.locator('#source-reader').is_hidden()
+        body.get_by_role('button', name='定位原图文字 1').click()
+        body.locator('.source-region-focus').wait_for()
+        assert drawer.is_visible() and page.locator('#source-reader').is_hidden()
+        drawer.get_by_role('button', name='纯文本', exact=True).click()
+        assert body.inner_text() == '已保存纯文本 BEFORE AFTER'
+        drawer.get_by_role('button', name='图文', exact=True).click()
+        body.locator('h1').wait_for()
+        assert drawer.evaluate('(node) => node.scrollWidth <= node.clientWidth + 1')
+        assert not errors
+        browser.close()
 
 
 def test_library_rich_reading_widths_zoom_and_fallback():
@@ -125,10 +164,10 @@ def test_library_rich_reading_widths_zoom_and_fallback():
             assert '附录图片' in body.inner_text()
             assert page.locator('#source-detail-drawer').evaluate('(n)=>n.scrollWidth<=n.clientWidth+1')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
-            page.get_by_role('button', name='已保存正文', exact=True).click()
+            page.get_by_role('button', name='纯文本', exact=True).click()
             assert body.inner_text() == '已保存纯文本 BEFORE AFTER'
             assert page.evaluate('liveUrls.size') == 0
-            page.get_by_role('button', name='图文阅读', exact=True).click()
+            page.get_by_role('button', name='图文', exact=True).click()
             body.locator('h1').wait_for()
             page.get_by_role('button', name='关闭 ×', exact=True).first.click()
             assert page.evaluate('liveUrls.size') == 0

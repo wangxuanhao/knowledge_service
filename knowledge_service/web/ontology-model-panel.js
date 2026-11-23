@@ -81,13 +81,7 @@
     positiveInteger: '正整数', nonNegativeInteger: '非负整数',
   };
   const shortId = id => { const t = String(id == null ? '' : id); return !t ? '—' : (t.length > 16 ? `${t.slice(0, 9)}…${t.slice(-4)}` : t); };
-  const fmtTime = value => {
-    if (!value) return '时间未记录';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return String(value);
-    const pad = n => String(n).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  };
+  const fmtTime = value => window.DisplayTime.format(value, '时间未记录');
 
   // ---- 模块内部状态 ----------------------------------------------------------
   let detailHost = null, actionsHost = null, ctx = null;

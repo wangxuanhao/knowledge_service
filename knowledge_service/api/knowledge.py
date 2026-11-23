@@ -65,14 +65,12 @@ def install(app, service):
             raise ValueError('路径与记录 ID 不一致')
         row['id'] = record_id
         with service.lock:
-            history = repository.history(project_id, record_id)
-            if not history:
-                raise KeyError(record_id)
-            if history[-1]['kind'] != row['kind']:
+            latest = repository.latest_record_revision(project_id, record_id)
+            if latest['kind'] != row['kind']:
                 raise ValueError('修订期间记录类型不能改变')
             # Omitting a binding in a plain edit must not silently migrate it.
             if row.get('ontology_id') is None:
-                row['ontology_id'] = history[-1].get('ontology_id')
+                row['ontology_id'] = latest.get('ontology_id')
                 if row['kind'] in ('entity', 'relation', 'attribute') and not row['ontology_id']:
                     raise ValueError('未知本体归属：请显式指定本体或使用受控迁移')
             return public(service.write(project_id, [row], request.expected_version, revision=True)[0])
@@ -175,7 +173,9 @@ def install(app, service):
 
     # ------------------------------------------------------------------ 本体
     @router.get('/api/projects/{project_id}/ontologies')
-    def ontology_history(project_id: str):
+    def ontology_history(project_id: str, metadata_only: bool = False):
+        if metadata_only:
+            return {'versions': repository.list_ontology_version_metadata(project_id)}
         # 版本管理页要回答四件事：**第几版 / 什么时候发的 / 谁发的 / 为什么发**。
         # 版本号与同号复用标记由仓储按不可变发布记录统一解析；
         # 发布说明与发布人取自版本 metadata.publication（发布时必填，见 PublishRequest.note）。

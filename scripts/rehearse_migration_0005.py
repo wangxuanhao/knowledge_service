@@ -24,10 +24,10 @@ load_environment(include_admin=True)
 import psycopg  # noqa: E402
 
 from knowledge_service.repository.connection import resolve_dsn  # noqa: E402
-from knowledge_service.repository.migrate import MIGRATIONS_DIR, resolve_migration_dsn  # noqa: E402
+from knowledge_service.repository.migrate import LEGACY_MIGRATIONS_DIR, resolve_migration_dsn  # noqa: E402
 from knowledge_service.utils.diagnostics import redact  # noqa: E402
 
-MIGRATION = MIGRATIONS_DIR / '0005_draft_status_three_states.sql'
+MIGRATION = LEGACY_MIGRATIONS_DIR / '0005_draft_status_three_states.sql'
 EXPECTED = {
     'editing': 'pending', 'submitted': 'pending', 'reviewed': 'pending',
     'stale_base': 'pending', 'stale_source': 'pending',

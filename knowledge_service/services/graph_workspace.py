@@ -5,6 +5,7 @@ from functools import wraps
 from ..repository.scoped_reads import ScopedReads
 from .graph_sessions import GraphSessions
 from .graph_neighborhood import present_neighborhood
+from .graph_progressive_search import progressive_search
 from .service import public
 
 
@@ -30,6 +31,14 @@ class GraphWorkspace:
         options = {key: values.pop(key) for key in ('seeds', 'hops', 'direction', 'max_nodes', 'max_edges')}
         result = self.reads.neighbors(project, values, **options)
         return present_neighborhood(self.service, self.reads, project, values, result, options['seeds'])
+
+    @_snapshot_operation
+    def neighborhood_search(self, project, values):
+        scope = dict(values)
+        options = {key: scope.pop(key) for key in (
+            'seeds', 'hops', 'direction', 'max_nodes', 'max_edges', 'relationship_types', 'filter_steps')}
+        result = progressive_search(self.reads, project, scope, self.service.ontology_labels(project), **options)
+        return present_neighborhood(self.service, self.reads, project, scope, result, options['seeds'])
 
     @_snapshot_operation
     def records_page(self, project, values):

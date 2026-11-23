@@ -61,14 +61,13 @@ class OntologyDrafts(
 
     # ------------------------------------------------------------------ basics
     def _latest_id(self, project_id):
-        versions = self.repository.list_ontologies(project_id)
-        return versions[-1]['id'] if versions else None
+        return self.repository.current_ontology_id(project_id)
 
     def _version_number(self, project_id, ontology_id):
         """版本号按发布顺序现算（1 起）。库里不存序号 —— 存了就会与顺序脱节，
         而版本号是给人看的（"回到 v2"），必须和版本列表里显示的号一致。"""
-        for index, item in enumerate(self.repository.list_ontologies(project_id), start=1):
-            if item['id'] == ontology_id:
+        for index, version_id in enumerate(self.repository.ontology_version_signature(project_id), start=1):
+            if version_id == ontology_id:
                 return index
         return '?'
 
@@ -499,8 +498,7 @@ class OntologyDrafts(
         base = draft.get('base_ontology_id')
         if not base:
             return None
-        known = {item['id'] for item in self.repository.list_ontologies(project_id)}
-        return base if base in known else None
+        return base if base in self.repository.ontology_version_signature(project_id) else None
 
     def _check_current(self, project_id, draft, expected_revision, *,
                        expected_ontology_id=None, check_source=True):
@@ -793,9 +791,7 @@ class OntologyDrafts(
             if source_kind == REVERT_SOURCE:
                 # 「回到某一版」：允许（也**必须**）以历史版本为基线。校验那一版属于本项目，
                 # 免得回退变成一条能指向不存在基线的旁路。
-                known = {item['id']
-                         for item in self.repository.list_ontologies(project_id)}
-                if base_ontology_id_or_none not in known:
+                if base_ontology_id_or_none not in self.repository.ontology_version_signature(project_id):
                     raise StaleBase(
                         'revert requires an existing version of this project',
                         details={'base_ontology_id': base_ontology_id_or_none,

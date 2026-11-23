@@ -204,6 +204,7 @@ def _resolve_assertion_evidence(repository, project_id, assertion):
         'id': chunk['id'], 'start_char': start, 'end_char': end,
         'text': chunk.get('text'),
     }
+    resolution['chunk_version_id'] = chunk['version_id']
     if not (type(start) is int and type(end) is int
             and 0 <= start < end <= len(document['text'])):
         warnings.append(_warning('chunk_bounds_invalid'))
@@ -297,6 +298,32 @@ def resolve_assertion_evidence(repository, project_id, assertion_id):
     assertion = repository.get_assertion(project_id, assertion_id)
     return _serialize_assertion_resolution(
         _resolve_assertion_evidence(repository, project_id, assertion))
+
+
+def frozen_assertion_source(repository, project_id, assertion_id, *, quote_limit=800):
+    """Only freeze source spans verified against an immutable document version."""
+    assertion = repository.get_assertion(project_id, assertion_id)
+    resolution = _resolve_assertion_evidence(repository, project_id, assertion)
+    if not resolution['integrity']['complete']:
+        return None
+    document, chunk, location = (resolution[key] for key in ('document', 'chunk', 'location'))
+    if location['mode'] == 'exact':
+        start, end = location['start_char'], location['end_char']
+    else:
+        start, end = chunk['start_char'], chunk['end_char']
+    end = min(end, start + quote_limit)
+    return {
+        'assertion_id': assertion_id,
+        'document_id': document['id'],
+        'document_version_id': document['version_id'],
+        'source_version_id': (document.get('metadata') or {}).get('source_document_version_id'),
+        'source_location': resolution['source_location'],
+        'chunk_id': chunk['id'],
+        'chunk_version_id': resolution['chunk_version_id'],
+        'title': str(_document_contract(resolution)['title'])[:240],
+        'quote': document['text'][start:end], 'start_char': start, 'end_char': end,
+        'precision': location['mode'],
+    }
 
 
 def _serialize_formal_document(resolution):

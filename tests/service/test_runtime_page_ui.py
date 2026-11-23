@@ -112,6 +112,81 @@ def _visible_panels(page):
         .map(el => el.id)""")
 
 
+def test_community_controls_keep_scope_and_require_explicit_generation(runtime):
+    page = runtime.page
+    requests = []
+    community = {'id': 'c1', 'title': '未成年人规则', 'member_count': 2, 'relationship_count': 1,
+                 'report_status': 'ready', 'summary': '从正式规则归纳的主题'}
+    ready = {'state': 'ready', 'enabled': True, 'revision': 'test-community-revision',
+             'counts': {'communities': 1, 'entities': 2, 'covered_entities': 2, 'reports_ready': 1}}
+    unavailable = False
+    built = False
+
+    def response(route):
+        nonlocal built
+        path = route.request.url.split('/communities', 1)[1]
+        body = route.request.post_data_json
+        requests.append((path, body))
+        if path == '/status':
+            return route.fulfill(json=ready if built else {'state': 'disabled', 'enabled': False})
+        if path == '/build':
+            built = True
+            return route.fulfill(json={'status': ready})
+        if path == '/detail':
+            if unavailable:
+                return route.fulfill(status=409,json={'detail': '社区报告已失效，请刷新'})
+            return route.fulfill(json={**community, 'status': ready, 'members': [], 'evidence': []})
+        if path == '/ask':
+            return route.fulfill(json={'communities': [community], 'generated': body['generate'],
+                                       'answer': '生成的回答' if body['generate'] else None})
+        return route.fulfill(json={'status': ready, 'communities': [community], 'total': 1})
+
+    page.route('**/api/projects/*/communities**', response)
+    page.locator('[data-retrieval-kind="community"]').click()
+    page.get_by_role('heading', name='未成年人规则').wait_for()
+    page.get_by_role('button', name='打开社区').click()
+    page.get_by_text('从正式规则归纳的主题', exact=True).wait_for()
+    page.get_by_role('button', name='就此社区提问').click()
+    page.get_by_role('button', name='未成年人规则 ×').wait_for()
+    page.locator('#community-question-text').fill('适用哪些限制？')
+    page.get_by_role('button', name='查看相关报告').click()
+    page.get_by_text('找到 1 份相关报告。', exact=True).wait_for()
+    page.get_by_role('button', name='生成答案').click()
+    page.get_by_text('生成的回答', exact=True).wait_for()
+    assert [body['generate'] for path, body in requests if path == '/ask'] == [False, True]
+    assert all(body['community_ids'] == ['c1'] for path, body in requests if path == '/ask')
+    assert all(body['expected_revision'] == ready['revision'] for path, body in requests
+               if path in ('/detail', '/ask'))
+
+    page.evaluate("""(id) => {
+      WorkspaceContext.store.edit(id, 'search',
+        {applicability:{platforms:{mode:'specific',values:['京东']}}});
+      WorkspaceContext.store.apply(id, 'search');
+      document.dispatchEvent(new CustomEvent('workspace:scope-changed',
+        {detail:{page:'qa',projectId:id}}));
+    }""", runtime.project)
+    page.get_by_text('范围 · 京东', exact=True).wait_for()
+    page.wait_for_function("() => !document.getElementById('community-question-submit').disabled")
+    assert requests[-1][1]['scope'] == {'kind': 'platform', 'platform': '京东'}
+    assert not page.get_by_text('生成的回答', exact=True).count()
+    _click_runtime(page, 'communities')
+    page.locator('#community-build-preview', has_text='2 个实体').wait_for()
+    assert not any(path == '/build' for path, _ in requests)
+    page.get_by_role('button', name='构建社区', exact=True).click()
+    page.locator('#community-build-status', has_text='社区索引可用。').wait_for()
+    assert [body['scope'] for path, body in requests if path == '/build'] == [{'kind': 'project'}]
+    assert _visible_panels(page) == ['tab-community-index']
+    page.locator('aside nav [data-tab="search"]').click()
+    page.get_by_role('button', name='打开社区').click()
+    page.get_by_role('button', name='就此社区提问').wait_for()
+    unavailable = True
+    page.locator('[data-retrieval-kind="knowledge"]').click()
+    page.locator('[data-retrieval-kind="community"]').click()
+    page.get_by_text('社区报告已失效，请刷新', exact=True).wait_for()
+    assert not page.get_by_role('button', name='就此社区提问').count()
+    page.get_by_role('button', name='返回社区列表').wait_for()
+
+
 def test_stable_navigation_exposes_global_management_and_quality(runtime):
     page = runtime.page
     assert page.locator('[data-tab="runtime"]').inner_text() == '构建与任务'

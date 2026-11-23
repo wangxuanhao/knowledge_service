@@ -22,7 +22,8 @@ def evaluate(types, gold, vocabulary=(), *, scope=None, other_vocabulary=()):
     nodes = [dict(id='s', kind='entity', text='甲'), dict(id='o', kind='entity', text='乙')]
     edges = [dict(kind='relation', type=t, subject_id='s', object_id='o', text='展示标题') for t in types]
     explorer = Explorer(SimpleNamespace(repository=repo))
-    with patch.object(ScopedReads, 'page', return_value={'records': [*nodes, *edges], 'next_cursor': None}):
+    with patch.object(ScopedReads, 'evaluation_facts',
+                      side_effect=lambda p, scope, *, kind: nodes if kind == 'entity' else edges):
         return explorer.evaluate('project', scope or {}, ['甲', '乙'], [('甲', p, '乙') for p in gold])['relations']
 
 
@@ -69,7 +70,7 @@ def test_excluded_release_cannot_make_an_in_scope_predicate_ambiguous():
     assert evaluate([a], ['refund'], terms, other_vocabulary=excluded)['f1'] == 0
 
 
-def test_evaluation_api_uses_selected_platform_release_and_known_time(tmp_path):
+def test_evaluation_api_uses_selected_platform_release_and_known_time(tmp_path, monkeypatch):
     def ontology(namespace):
         return f'''
             @prefix ex: <urn:{namespace}:> .
@@ -101,6 +102,15 @@ def test_evaluation_api_uses_selected_platform_release_and_known_time(tmp_path):
         seed_project_ontology(client, base, ontology('b'))
         gold = {'entities': [merchant, '平台'], 'relations': [[merchant, '退还', '平台']]}
 
+        decoded = []
+        decode = type(service.repository)._record
+
+        def track_decode(row):
+            decoded.append(row['id'])
+            return decode(row)
+
+        monkeypatch.setattr(type(service.repository), '_record', staticmethod(track_decode))
+
         def run(**scope):
             response = client.post(base + '/evaluate', json={**gold, **scope})
             assert response.status_code == 200, response.text
@@ -113,3 +123,4 @@ def test_evaluation_api_uses_selected_platform_release_and_known_time(tmp_path):
         assert run()['relations']['f1'] == 0
         assert run(**selected, applicability={'platforms': {'mode': 'specific', 'values': ['京东']}})[
             'relations']['predicted'] == 0
+        assert decoded == []

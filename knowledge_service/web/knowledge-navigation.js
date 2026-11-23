@@ -42,10 +42,7 @@
     }
     const switched=await selectProject(projectId,selector);
     if(target==='reviews'){
-      // The review page owns a project-change listener that reloads its queue.
-      // Reopening an already visible page would issue the same request twice.
-      if(switched&&isVisible('reviews'))return 'reviews';
-      if(!window.TaskReview?.open)throw Error('知识审核页面尚未加载');
+      if(!window.TaskReview?.open)throw Error('知识审核抽屉尚未加载');
       return window.TaskReview.open();
     }
     if(target==='sources'){

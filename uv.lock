@@ -1312,6 +1312,7 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "markdown-it-py" },
+    { name = "networkx" },
     { name = "numpy" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
@@ -1362,7 +1363,6 @@ s3 = [
 ]
 semantica-runtime = [
     { name = "docling" },
-    { name = "networkx" },
     { name = "openai" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
@@ -1387,7 +1387,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "markdown-it-py", specifier = ">=4.0,<5" },
     { name = "neo4j", marker = "extra == 'neo4j'", specifier = ">=6,<7" },
-    { name = "networkx", marker = "extra == 'semantica-runtime'", specifier = ">=3" },
+    { name = "networkx", specifier = ">=3.4,<4" },
     { name = "numpy", specifier = ">=2,<3" },
     { name = "onnx", marker = "extra == 'local-export'", specifier = ">=1.18,<2" },
     { name = "onnxruntime", marker = "extra == 'local-export'", specifier = ">=1.20.1,<2" },

@@ -28,8 +28,8 @@
     const labels={matched:'已核验：本地与 Neo4j 一致',mismatch:'数据不一致：需要重新同步',unavailable:'无法核验远端，不代表已同步'};
     let message=labels[v.state]+'\n项目：'+document.getElementById('project').selectedOptions[0].textContent+'\n数据库：'+result.database;
     if(v.local)message+='\n\n项目 / 本地 → Neo4j\n实体：'+v.local.entities+' → '+v.remote.entities+'\n关系：'+v.local.relations+' → '+v.remote.relations+'\n记录版本：'+v.local.versions+' → '+v.remote.versions+'\n本体：'+v.local.ontologies+' → '+v.remote.ontologies;
-    if(v.checked_at)message+='\n核验时间：'+new Date(v.checked_at).toLocaleString();
-    if(result.last_sync)message+='\n上次同步：'+new Date(result.last_sync.synced_at).toLocaleString();
+    if(v.checked_at)message+='\n核验时间：'+window.DisplayTime.format(v.checked_at);
+    if(result.last_sync)message+='\n上次同步：'+window.DisplayTime.format(result.last_sync.synced_at);
     return message;
   }
   panel.querySelectorAll('button').forEach(button => {

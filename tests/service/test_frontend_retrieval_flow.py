@@ -1147,27 +1147,33 @@ def test_entity_and_relation_hits_open_selected_hop_neighborhoods_without_unrequ
 
 
 @pytest.mark.usefixtures('keyword_index_ready')
-def test_scope_application_preserves_qa_and_isolates_project_pages(workbench):
+def test_scope_application_preserves_qa_and_shares_retrieval_scope(workbench):
     page = workbench.page
+    page.route('**/applicability-values', lambda route: route.fulfill(json=dict(platforms=['美团', '淘宝'])))
     page.click('[data-tab="search"]')
     page.click('#scope-toggle')
-    page.fill('#query-platforms','美团')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='美团', exact=True).check()
     assert page.evaluate('scope().applicability || null') is None
     page.click('#apply-scope')
     assert page.evaluate('scope().applicability.platforms.values') == ['美团']
     assert '平台：美团' in page.locator('#applied-scope-chips').inner_text()
     page.click('[data-tab="qa"]')
-    assert page.evaluate('scope().applicability || null') is None
+    assert page.evaluate('scope().applicability.platforms.values') == ['美团']
     page.fill('#qa-query','退款')
     _select_keyword_qa(page)
     page.click('#qa')
     page.wait_for_function("() => document.querySelector('#qa-transcript .qa-turn-assistant')?.dataset.state === 'done'")
     count=page.locator('#qa-transcript .qa-turn').count()
-    page.click('#scope-toggle');page.fill('#query-platforms','淘宝');page.click('#apply-scope')
+    page.click('#scope-toggle')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='美团', exact=True).uncheck()
+    page.get_by_role('checkbox', name='淘宝', exact=True).check()
+    page.click('#apply-scope')
     assert page.locator('#qa-transcript .qa-turn').count() == count
     assert '仅影响下一次提问' in page.locator('#qa-summary').inner_text()
     page.click('[data-tab="search"]')
-    assert page.evaluate('scope().applicability.platforms.values') == ['美团']
+    assert page.evaluate('scope().applicability.platforms.values') == ['淘宝']
     assert workbench.errors == []
 
 

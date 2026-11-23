@@ -9,10 +9,15 @@ def present_neighborhood(service, reads, project, scope, result, seeds, *, attri
     labels = service.ontology_labels(project)
     service.annotate_structure_pending(project, records)
     records = [public(row) for row in records]
+    families = {}
     for row in records:
-        row['type_label'] = labels.get(row.get('type'), row.get('type') or '')
+        record_type = row.get('type')
+        row['type_label'] = labels.get(record_type, record_type or '')
         if row['kind'] == 'entity':
-            family = service.record_family(project, row)
+            key = row.get('ontology_id') or None, record_type
+            if key not in families:
+                families[key] = service.record_family(project, row)
+            family = families[key]
             row.update(class_label=family.get('label') or row['type_label'],
                 class_parents=family.get('parents') or [], class_ancestors=family.get('ancestors') or [],
                 class_ontology_id=family.get('ontology_id'))

@@ -87,11 +87,10 @@ def try_entity_text_revision(service, project_id, records, *, expected_version,
         if {key: value for key, value in candidate.items() if key != 'text'} != {
                 key: value for key, value in normalized_old.items() if key != 'text'}:
             return _fallback('文字以外的字段发生变化')
-        bound_row = repository.get_ontology(project_id, old['ontology_id'])
-        latest_row = repository.get_ontology(project_id)
+        bound_row, latest_row = session.ontology_rows(old['ontology_id'])
         bound = Ontology(bound_row['turtle'])
         latest = bound if bound_row['id'] == latest_row['id'] else Ontology(latest_row['turtle'])
-        if not _profile(bound) or not _profile(latest):
+        if not _profile(bound) or (latest is not bound and not _profile(latest)):
             return _fallback('本体约束需要完整图校验')
         try:
             bound.resolve(candidate.get('type', ''), bound.classes)
@@ -104,7 +103,7 @@ def try_entity_text_revision(service, project_id, records, *, expected_version,
         snapshot = session.snapshot(candidate, assertion_id, latest_row)
         plan = FormalFactWriter(repository).prepare(
             operation, project_id, [], {candidate['id']: expected_version},
-            {'records': [candidate]}, snapshot=snapshot)
+            {'records': [candidate]}, snapshot=snapshot, _parsed_ontology=latest)
         result = session.execute(plan)
         LOG.info('实体文字修订已通过有界权威读集提交')
     # The session is deliberately outermost: these callbacks see committed data.

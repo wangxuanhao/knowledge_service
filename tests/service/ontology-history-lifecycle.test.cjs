@@ -20,7 +20,7 @@ function fixture() {
   const all = node => [node,...node.children.flatMap(all)];
   const root = element('root');
   const requests=[];
-  const context={current:'p',window:{OntologyModel:{S:{}}},console,
+  const context={current:'p',window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),OntologyModel:{S:{}}},console,
     document:{createElement:element,getElementById:id=>id==='tab-ontology-model'?root:null,body:root},
     endpoint:suffix=>'/'+context.current+suffix,
     api:async url=>{ if (!url.endsWith('/ontologies')) return {};

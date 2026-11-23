@@ -32,7 +32,9 @@
   const helpers={pool,retryLabels,failureCsv,assertSessionSettings,queueLease};
   if(typeof module!=='undefined')module.exports=helpers;
   if(typeof window==='undefined')return;
-  const states={draft:'待上传',uploading:'上传中',staged:'已上传',pending:'排队',queued:'排队',running:'处理中',parsing:'解析',parse:'解析',ocr:'图像识别',asr:'语音转写',chunking:'切片',extracting:'抽取',extraction:'抽取',merging:'融合',validating:'校验',committing:'写入',commit:'写入',completed:'完成',completed_with_errors:'部分失败',retry_wait:'等待自动重试',needs_attention:'需要处理',interrupted:'已中断',paused:'已暂停',skipped:'已跳过',cancelled:'已取消'};
+  const states={draft:'待上传',uploading:'上传中',staged:'已上传',pending:'排队',queued:'排队',running:'处理中',parsing:'解析',parse:'解析',ocr:'图像识别',asr:'语音转写',chunking:'生成切片',reusing_chunks:'复用已解析切片',extracting:'抽取',extraction:'抽取',merging:'融合',validating:'校验',committing:'写入',commit:'写入',completed:'完成',completed_with_errors:'部分失败',retry_wait:'等待自动重试',needs_attention:'需要处理',failed:'失败',interrupted:'已中断',paused:'已暂停',skipped:'已跳过',cancelled:'已取消'};
+  const runtimeStates={pending:'排队中',queued:'排队中',completed:'已完成'};
+  const modeLabels={documents:'仅文档检索',discovery:'开放发现',ontology:'使用项目本体'};
   const pauseReasons={llm_timeout:'多个文件遇到模型超时，检查模型连接后继续。',llm_rate_limited:'模型持续限流，稍后检查连接并继续。',llm_unavailable:'模型服务暂时不可用，检查服务后继续。',llm_auth_failed:'模型认证失败，请修正服务配置后继续。',llm_model_not_found:'配置的模型不存在，请修正配置后继续。'};
   const root=document.getElementById('ingest-batches');
   let capabilities=null,capabilityError=null,capabilityRead=null;
@@ -48,7 +50,7 @@
   };
   const jobsVisible=()=>pageVisible('tab-runtime')&&pageVisible('tab-jobs');
   const listVisible=()=>batchesVisible()||jobsVisible();
-  const pollingStates=new Set(['uploading','queued','running','parsing','parse','chunking','extracting','extraction','merging','validating','committing','commit','retry_wait']);
+  const pollingStates=new Set(['uploading','queued','running','parsing','parse','ocr','asr','chunking','reusing_chunks','extracting','extraction','merging','validating','committing','commit','retry_wait']);
   async function request(path,body,headers={},signal){
     const multipart=typeof FormData!=='undefined'&&body instanceof FormData;
     const response=await fetch(path,{method:body===undefined?'GET':'POST',headers:{...(!multipart&&body!==undefined?{'Content-Type':'application/json'}:{}),...headers},body:body===undefined?undefined:multipart?body:JSON.stringify(body),...(signal?{signal}:{})});
@@ -70,6 +72,31 @@
   // Preserve the awaitable controller-ready contract without a hidden fetch.
   const ready=Promise.resolve();
   function button(text,action){const b=node('button',text,'secondary');b.type='button';b.onclick=async()=>{b.disabled=true;try{await action();}catch(e){status(e.message,true);}finally{b.disabled=b.dataset.inactive==='true';}};return b;}
+  function batchProgress(batch){
+    const counts=batch.counts||batch.summary||{};
+    const total=Number(batch.total??batch.total_items??Object.values(counts).reduce((sum,n)=>sum+Number(n||0),0));
+    const finished=['completed','succeeded','needs_attention','failed','interrupted','cancelled','skipped']
+      .reduce((sum,state)=>sum+Number(counts[state]||0),0);
+    return {counts,total,finished:Math.min(total,finished)};
+  }
+  function renderCounts(host,counts){
+    host.replaceChildren();
+    for(const [state,count] of Object.entries(counts)){
+      if(!count)continue;
+      const chip=node('span',(states[state]||state)+' '+count,'batch-count');
+      chip.dataset.status=state;host.append(chip);
+    }
+    host.hidden=!host.children.length;
+  }
+  function openBatch(project,batch,trigger){
+    if(project!==currentProject())return;
+    if(!batchesVisible()){
+      if(window.LibraryWorkspace?.openBatch)return window.LibraryWorkspace.openBatch({projectId:project,batchId:batch.id,trigger});
+      if(window.LibraryWorkspace)window.LibraryWorkspace.open('batches');
+      else window.KnowledgeTabs?.open('ingest');
+    }
+    monitor(project,batch);
+  }
   function createOverview(project,batch){
     const key=project+':'+batch.id,card=node('section','','ingest-batch-card');
     const overview=node('div','','batch-overview'),identity=node('div','','batch-identity');
@@ -80,8 +107,7 @@
       if(project!==currentProject())return;
       const control=mounted.get(key);
       if(overviews.get(key)===view&&control?.expanded&&batchesVisible()){control.collapse();return;}
-      if(!batchesVisible()){if(window.LibraryWorkspace)window.LibraryWorkspace.open('batches');else window.KnowledgeTabs?.open('ingest');}
-      monitor(project,batch);
+      return openBatch(project,batch,toggle);
     });
     toggle.classList.add('batch-toggle');toggle.setAttribute('aria-expanded','false');toggle.setAttribute('aria-controls',detail.id);
     progress.setAttribute('aria-label','本批已结束文件数');
@@ -90,16 +116,14 @@
     function update(value){
       batch=value;
       heading.textContent='批次 #'+String(batch.id).slice(0,8);heading.setAttribute('title',batch.id);
-      const date=batch.created_at?new Date(batch.created_at):null;
-      created.textContent=date&&Number.isFinite(date.getTime())?'创建于 '+date.toLocaleString('zh-CN',{hour12:false}):'创建时间未提供';
-      badge.textContent=states[batch.status]||batch.status;badge.dataset.status=batch.status;
-      const values=batch.counts||batch.summary||{},total=Number(batch.total??batch.total_items??Object.values(values).reduce((sum,n)=>sum+Number(n||0),0));
-      const finished=['completed','succeeded','needs_attention','failed','interrupted','cancelled','skipped'].reduce((sum,status)=>sum+Number(values[status]||0),0);
-      counts.replaceChildren();
-      for(const [state,n] of Object.entries(values)){if(!n)continue;const chip=node('span',(states[state]||state)+' '+n,'batch-count');chip.dataset.status=state;counts.append(chip);}
-      counts.hidden=!counts.children.length;
-      progress.max=Math.max(1,total);progress.value=Math.min(total,finished);progress.hidden=!total;
-      progressLabel.textContent='总文件 '+total+' · 已结束 '+Math.min(total,finished)+' / '+total;
+      const time=window.DisplayTime.format(batch.created_at,'');
+      const timestamp=time?'创建于 '+time:'';
+      created.textContent=[modeLabels[batch.settings?.extraction_mode],timestamp].filter(Boolean).join(' · ');
+      badge.textContent=states[batch.status]||batch.status||'正在读取';badge.dataset.status=batch.status||'';
+      const values=batchProgress(batch);
+      renderCounts(counts,values.counts);
+      progress.max=Math.max(1,values.total);progress.value=values.finished;progress.hidden=!values.total;
+      progressLabel.textContent='总文件 '+values.total+' · 已结束 '+values.finished+' / '+values.total;
     }
     const view={card,detail,toggle,update};update(batch);return view;
   }
@@ -108,19 +132,21 @@
     if(!view){view=createOverview(project,batch);overviews.set(key,view);}else view.update(batch);
     return view;
   }
-  function monitor(project,batch){
-    const key=project+':'+batch.id;if(mounted.has(key)){const control=mounted.get(key);control.show();return control;}
-    const view=batchOverview(project,batch),{card,detail,toggle}=view;card.dataset.batchId=batch.id;
+  function monitor(project,batch,{itemId=null}={}){
+    const key=project+':'+batch.id;if(mounted.has(key)){const control=mounted.get(key);control.show(itemId);return control;}
+    const view=overviews.get(key)||batchOverview(project,batch),{card,detail,toggle}=view;card.dataset.batchId=batch.id;
     const parallel=node('p','','subtle'),error=node('p','','batch-error');error.setAttribute('role','status');
     const fileHeading=node('h4','本批文件'),fileToolbar=node('div','','batch-files-toolbar');
     const actions=node('div','','batch-actions'),filter=node('select');filter.setAttribute('aria-label','筛选文件状态');
     for(const [value,label] of [['','全部文件'],['needs_attention','需要处理'],['retry_wait','等待重试'],['completed','完成'],['interrupted','中断']]){const o=node('option',label);o.value=value;filter.append(o);}
     const rows=node('div','','batch-items'),pages=node('div','','batch-actions');
-    let cursor='',nextCursor=null,timer=null,inFlight=null,generation=0,active=false,expanded=false,allFailures=[];
+    const fileActions=node('div','','batch-file-toolbar-actions'),operations=node('div','','batch-operations');
+    let focusedItem=null,cursor='',nextCursor=null,timer=null,inFlight=null,generation=0,active=false,expanded=false,allFailures=[];
     const url=base(project)+'/'+encodeURIComponent(batch.id);
-    fileToolbar.append(fileHeading,filter);
-    detail.append(node('h4','批次操作','batch-controls-heading'),parallel,error,actions,fileToolbar,rows,pages);
-    if(![...(listHost?.children||[])].includes(card))listHost?.prepend(card);
+    const showAll=button('查看本批全部文件',()=>control.show(null));
+    fileActions.append(filter,showAll,button('刷新进度',()=>reload()));fileToolbar.append(fileHeading,fileActions);
+    operations.append(node('h4','批次操作','batch-controls-heading'),parallel,actions);
+    detail.append(error,fileToolbar,rows,pages,operations);
     function requireWriter(){if(project!==currentProject())throw Error('项目已变化，请重新打开当前项目批次');if(!window.Auth?.isAdmin?.())throw Error('只有管理员可以更改处理批次');}
     async function action(name,body={}){requireWriter();await request(url+'/'+name,body);await reload();}
     const start=button('开始处理',()=>action('start')),pause=button('暂停',()=>action('pause')),resume=button('继续',()=>action('resume'));
@@ -149,8 +175,6 @@
         const signal=read.controller?.signal;
         const detail=await request(url,undefined,{},signal);
         if(!accepts())return;
-        const list=await request(url+'/items?limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):''),undefined,{},signal);
-        if(!accepts())return;
         batch=detail;
         view.update(batch);
         card.dataset.status=batch.status;
@@ -160,7 +184,12 @@
         const failures=(counts.needs_attention||0)+(counts.interrupted||0);
         const pending=['draft','uploading','staged','pending','queued','retry_wait'].some(s=>counts[s]>0);
         for(const [b,enabled] of [[start,['draft','uploading','queued'].includes(batch.status)],[pause,batch.status==='running'],[resume,batch.status==='paused'],[retry,failures>0],[cancel,pending],[download,counts.needs_attention>0]]){b.dataset.inactive=String(!enabled);b.disabled=!enabled;}
+        const query=focusedItem?'limit=1&item_id='+encodeURIComponent(focusedItem):
+          'limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+        const list=await request(url+'/items?'+query,undefined,{},signal);
+        if(!accepts())return;
         error.textContent=batch.status==='paused'?(pauseReasons[batch.paused_reason]||batch.paused_reason||''):'';rows.replaceChildren();
+        if(!list.items?.length)rows.append(node('p',focusedItem?'本批次中未找到该文件。':'当前筛选没有文件。','subtle'));
         for(const item of list.items||[]){
           const row=node('article','','batch-item');row.dataset.status=item.status;
           row.append(node('strong',item.original_name),node('span',states[item.status]||item.status));
@@ -169,14 +198,25 @@
             row.append(node('p','当前阶段：'+(states[item.stage]||item.stage)+percent,'batch-file-stage'));
           }
           const rowActions=node('div','','batch-item-actions');
-          if(item.source_version_id)rowActions.append(button('查看原文与 OCR',()=>{window.WorkspaceDrawers?.close({restoreFocus:false});return window.SourceReader?.open({projectId:project,versionId:item.source_version_id});}));
           if(item.error_code){const diagnostics=node('details','','batch-item-details');diagnostics.open=true;
-            diagnostics.append(node('summary','错误与重试'),node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+new Date(item.next_retry_at).toLocaleString():'')));
+            diagnostics.append(node('summary','错误与重试'),node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+window.DisplayTime.format(item.next_retry_at):'')));
             const tools=node('div','','batch-actions admin-only');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>{requireWriter();return request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(reload);}));diagnostics.append(tools);row.append(diagnostics);
           }
           const documentId=item.document_id||item.result?.document?.id||item.result?.document_id;
+          const hasDocument=Boolean(documentId&&item.source_version_id&&window.selectSource);
+          if(hasDocument){
+            rowActions.append(button('查看资料',async()=>{
+              if(project!==currentProject())return;
+              if(!pageVisible('tab-sources'))await window.KnowledgeNavigation.open('sources',{projectId:project});
+              if(project===currentProject()&&pageVisible('tab-sources'))await window.selectSource(documentId);
+            }));
+          }
+          if(item.source_version_id)rowActions.append(button(hasDocument?'查看解析':'查看原文与解析',()=>{
+            window.WorkspaceDrawers?.close({restoreFocus:false});
+            return window.SourceReader?.open({projectId:project,versionId:item.source_version_id,...(hasDocument?{location:{tab:'parsed'}}:{})});
+          }));
           if(item.status==='completed'&&documentId){
-            rowActions.append(button('查看抽取结果',()=>{window.WorkspaceDrawers?.close({restoreFocus:false});return window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id});}));
+            if(batch.settings?.extraction_mode!=='documents')rowActions.append(button('查看本次抽取结果',()=>{window.WorkspaceDrawers?.close({restoreFocus:false});return window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id});}));
             if(batch.settings?.extraction_mode==='discovery'){
               const structure=button('核对候选与完善结构',async()=>{
                 requireWriter();window.WorkspaceDrawers?.close({restoreFocus:false});
@@ -201,12 +241,17 @@
     function suspend(){active=false;abortRead();}
     function hide(){suspend();card.hidden=true;}
     const control={card,refresh,get expanded(){return expanded;},
-      show(){for(const other of mounted.values())if(other!==control)other.collapse();
+      show(itemId){for(const other of mounted.values())if(other!==control)other.collapse();
+        if(focusedItem!==itemId){
+          focusedItem=itemId;cursor='';filter.value='';abortRead();error.textContent='';rows.replaceChildren(node('p','正在读取文件进度…','subtle'));pages.replaceChildren();
+        }
+        fileHeading.textContent=focusedItem?'资料处理进度':'本批文件';showAll.hidden=!focusedItem;filter.hidden=Boolean(focusedItem);
+        if(![...listHost.children].includes(card))listHost.prepend(card);
         expanded=true;active=batchesVisible()&&project===currentProject();detail.hidden=false;toggle.textContent='收起文件';toggle.setAttribute('aria-expanded','true');return refresh();},
       collapse(){suspend();expanded=false;detail.hidden=true;toggle.textContent='查看批次详情';toggle.setAttribute('aria-expanded','false');},
       resume(){card.hidden=false;if(expanded&&!active){active=true;void refresh();}},hide,
       stop(){hide();card.remove();mounted.delete(key);overviews.delete(key);}};
-    mounted.set(key,control);control.show();return control;
+    mounted.set(key,control);control.show(itemId);return control;
   }
   async function submit(project,documents,settings){
     const queue=window.DocumentUploadQueue,lease=queueLease(queue,project,currentProject);
@@ -240,10 +285,34 @@
     if(!listVisible())invalidateList();
   }
   function summaryCard(project,batch){
-    return createOverview(project,batch).card;
+    const {counts,total,finished}=batchProgress(batch);
+    const card=node('article','','runtime-task');
+    const header=node('header','','runtime-task-header'),identity=node('div','','runtime-task-identity');
+    const title=node('h4',modeLabels[batch.settings?.extraction_mode]||'文档处理批次','runtime-task-title');
+    const timestamp=window.DisplayTime.format(batch.created_at,'');
+    const meta=node('p',['批次 #'+String(batch.id).slice(0,8),timestamp].filter(Boolean).join(' · '),'runtime-task-meta');
+    meta.title=batch.id;
+    const badge=node('span',runtimeStates[batch.status]||states[batch.status]||batch.status||'正在读取','runtime-task-status');
+    badge.dataset.status=batch.status||'';
+    identity.append(title,meta);header.append(identity,badge);
+    const progressRow=node('div','','runtime-task-progress'),progress=node('progress');
+    progress.setAttribute('aria-label','本批已结束文件数');
+    progress.max=Math.max(total,1);progress.value=finished;progress.hidden=!total;
+    progressRow.append(progress,node('span',total?`已结束 ${finished} / ${total} 个文件`:'暂无文件'));
+    const fileCounts=node('div','','batch-counts');
+    renderCounts(fileCounts,counts);
+    const actions=node('div','','runtime-task-actions');
+    const details=button('查看批次详情',()=>openBatch(project,batch,details));
+    actions.append(details);
+    card.append(header,progressRow,fileCounts,actions);
+    return card;
   }
   function loadRecent(){
-    const project=currentProject();if(!project||!listVisible())return Promise.resolve();
+    const project=currentProject();if(!listVisible())return Promise.resolve();
+    if(!project){
+      if(jobsVisible())document.getElementById('ingest-batch-tasks')?.replaceChildren(node('p','请先选择项目。','runtime-task-message'));
+      return Promise.resolve();
+    }
     if(listRead?.project===project)return listRead.promise;
     const read={project,generation:listGeneration,controller:typeof AbortController==='function'?new AbortController():null};
     const accepts=()=>listRead===read&&read.generation===listGeneration&&project===currentProject()&&listVisible();
@@ -251,17 +320,32 @@
     read.promise=(async()=>{try{
       const result=await request(base(project)+'?limit=20',undefined,{},read.controller?.signal);if(!accepts())return;
       listError.hidden=true;listError.replaceChildren();
-      const tasks=document.getElementById('ingest-batch-tasks');if(jobsVisible())tasks?.replaceChildren();
-      const cards=[];
-      for(const batch of result.items||result.batches||[]){
-        if(batchesVisible()){const view=batchOverview(project,batch);view.card.hidden=false;cards.push(view.card);}
-        if(jobsVisible())tasks?.append(summaryCard(project,batch));
+      const batches=result.items||result.batches||[];
+      if(jobsVisible()){
+        document.getElementById('ingest-batch-tasks')?.replaceChildren(
+          ...(batches.length?batches.map(batch=>summaryCard(project,batch)):[node('p','当前项目暂无文档批次。','runtime-task-message')]));
       }
+      const cards=[];
       if(batchesVisible()){
-        for(const control of mounted.values())if(control.expanded&&!cards.includes(control.card))cards.unshift(control.card);
+        for(const batch of batches){
+          const view=batchOverview(project,batch);view.card.hidden=false;cards.push(view.card);
+        }
+        for(const control of mounted.values())if(control.expanded){
+          const index=cards.indexOf(control.card);if(index>=0)cards.splice(index,1);
+          cards.unshift(control.card);
+        }
         listHost.replaceChildren(...(cards.length?cards:[listEmpty]));
       }
-    }catch(e){if(accepts()&&e.name!=='AbortError'&&root){listError.hidden=false;listError.replaceChildren(node('span','批次列表读取失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接。':e.message)),button('重新加载',loadRecent));}}
+    }catch(e){
+      if(!accepts()||e.name==='AbortError')return;
+      const message='批次列表读取失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接。':e.message);
+      if(batchesVisible()&&root){listError.hidden=false;listError.replaceChildren(node('span',message),button('重新加载',loadRecent));}
+      if(jobsVisible()){
+        const error=node('p',message,'runtime-task-message error');
+        error.setAttribute('role','alert');
+        document.getElementById('ingest-batch-tasks')?.replaceChildren(error);
+      }
+    }
     finally{if(listRead===read)listRead=null;}})();return read.promise;
   }
   function projectChanged(){const project=currentProject();if(project===mountedProject)return;mountedProject=project;

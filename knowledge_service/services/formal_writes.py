@@ -49,12 +49,13 @@ def _published_identity_policy(ontology, class_iri):
 
 
 class _Planner:
-    def __init__(self, snapshot, operation, assertions, expected, policy, *, publication_ontology=None):
+    def __init__(self, snapshot, operation, assertions, expected, policy, *, ontology,
+                 publication_ontology=None):
         # Repository snapshots are detached. Treat corpus rows as read-only;
         # changed records/assertions are copied before replacing their entries.
         self.snapshot = snapshot
         self.publication_ontology = publication_ontology
-        self.ontology = Ontology(snapshot['ontology']['turtle']) if snapshot.get('ontology') else None
+        self.ontology = ontology
         self.operation = operation
         self.expected = expected
         self.policy = copy.deepcopy(policy)
@@ -870,7 +871,8 @@ class FormalFactWriter:
         }
 
     def prepare(self, operation, project_id, assertions, expected, policy,
-                recorded_at=None, operation_context=None, *, snapshot=None, publication_ontology=None):
+                recorded_at=None, operation_context=None, *, snapshot=None, publication_ontology=None,
+                _parsed_ontology=None):
         if publication_ontology is not None and operation != 'adopt_discovery':
             raise ValueError('仅草案摄取计划可绑定待发布本体')
         if operation not in FORMAL_OPERATIONS:
@@ -886,7 +888,11 @@ class FormalFactWriter:
         elif snapshot.get('project_id') != project_id:
             raise ValueError('正式写入快照与项目不一致')
         ontology_row = snapshot.get('ontology')
-        ontology = Ontology(ontology_row['turtle']) if ontology_row else None
+        # A transaction-owned revision can pass the ontology it just parsed
+        # from this same snapshot. Other callers parse their detached input.
+        ontology = _parsed_ontology
+        if ontology is None and ontology_row:
+            ontology = Ontology(ontology_row['turtle'])
         frozen_policy = copy.deepcopy(policy)
         snapshot_records = {row['id']: row for row in snapshot['records']}
         identity_pool = {row['id']: row for row in snapshot['records']
@@ -950,7 +956,7 @@ class FormalFactWriter:
                 cross_source.append([source_id, target_id])
         planner = _Planner(
             snapshot, operation, assertions, expected, frozen_policy,
-            publication_ontology=publication_ontology)
+            ontology=ontology, publication_ontology=publication_ontology)
         actions, result_refs, assertion_result_ids = planner.build()
         cross_source.extend(planner.identity_gate_bindings)
         if cross_source:

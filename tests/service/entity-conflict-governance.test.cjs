@@ -31,7 +31,7 @@ test('batch merge refreshes data while preserving visible per-group results and 
     source_contexts:[{document_id:'doc',document_version_id:'doc-v1',document_title:'来源文档',valid_from:'2025-01-01T00:00:00Z',valid_until:null,quote:'原文',assertion_id:'support'}]},
     {id:'b',text:'甲'}]};
   const context={current:'p',endpoint:s=>'/p'+s,document:{createElement:element},
-    window:{Auth:{isAdmin:()=>true},SourceReader:{open:args=>opened.push(args)},KnowledgeChanges:{notify:async detail=>notices.push(detail)}},
+    window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),Auth:{isAdmin:()=>true},SourceReader:{open:args=>opened.push(args)},KnowledgeChanges:{notify:async detail=>notices.push(detail)}},
     api:async url=>url.endsWith('/resolution-reviews')?{reviews:[]}:
       url.endsWith('/scan')?{groups:[group],next_cursor:null}:
       url.endsWith('/preview')?{...group,preview_fingerprint:'a'.repeat(64),keep_id:'a',attribute_conflicts:[],affected_records:{relations:0,attributes:0}}:
@@ -43,7 +43,7 @@ test('batch merge refreshes data while preserving visible per-group results and 
   await nodes.find(n=>n.textContent==='预览本组影响').listeners.click();
   const source=nodes.find(n=>n.textContent==='查看冻结原文');assert.ok(source);
   source.listeners.click();assert.equal(opened[0].versionId,'doc-v1');
-  assert.ok(nodes.some(n=>String(n.textContent).includes('来源有效期 2025-01-01T00:00:00Z')));
+  assert.ok(nodes.some(n=>String(n.textContent).includes('来源有效期 2025年01月01日 08:00:00')));
   const ack=nodes.find(n=>n.type==='checkbox'),choose=nodes.findLast(n=>n.type==='checkbox');
   choose.checked=true;choose.listeners.change();ack.checked=true;ack.listeners.change();
   await nodes.find(n=>n.textContent==='确认选中的已预览组').listeners.click();

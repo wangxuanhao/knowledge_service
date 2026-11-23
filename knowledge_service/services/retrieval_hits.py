@@ -6,20 +6,32 @@ from ..domain.entity_identity import source_qualified
 
 
 def qualified_hits(repository, project, scope, rows, hits):
-    by_version={row['version_id']:row for row in rows}
-    ids=list(dict.fromkeys(row['id'] for row in rows))
-    if hasattr(repository,'_db') and ids:
+    by_version = {row['version_id']: row for row in rows}
+    candidates = []
+    context_ids = set()
+    for hit in hits:
+        row = by_version.get(hit.get('version_id'))
+        if row is None or row['id'] != hit.get('record_id'):
+            continue
+        candidates.append((hit, row))
+        if hit.get('support_context_id'):
+            context_ids.add(row['id'])
+
+    # Only a candidate carrying an exact source-context key can use support.
+    # Context-free candidates are still subject to the source requirement below.
+    supports = {}
+    if context_ids and hasattr(repository, '_db'):
         from ..repository.projection_contexts import ProjectionContexts
-        supports=ProjectionContexts(repository).collect(project,rows,known_at=scope.get('known_at'))
-    else:
-        supports=(repository.current_source_contexts(project,ids,known_at=scope.get('known_at'))
-                  if hasattr(repository,'current_source_contexts') and ids else {})
+        relevant_rows = [row for row in rows if row['id'] in context_ids]
+        supports = ProjectionContexts(repository).collect(project, relevant_rows, known_at=scope.get('known_at'))
+    elif context_ids and hasattr(repository, 'current_source_contexts'):
+        ids = list(dict.fromkeys(row['id'] for row in rows if row['id'] in context_ids))
+        supports = repository.current_source_contexts(project, ids, known_at=scope.get('known_at'))
     predicate=build_scope_predicate(scope.get('applicability'),scope.get('valid_at'),scope.get('include_unknown',True))
     platform_modes={'all_only':'all','unknown_only':'unknown','specific_only':'specific'}
     result=[];seen=set()
-    for hit in hits:
-        row=by_version.get(hit.get('version_id'))
-        if row is None or row['id']!=hit.get('record_id') or row['id'] in seen:continue
+    for hit, row in candidates:
+        if row['id'] in seen:continue
         context_id=hit.get('support_context_id')
         support=None
         if context_id:

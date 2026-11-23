@@ -1,6 +1,7 @@
 /* Account-owned server conversations. Local storage contains selection IDs only. */
 (function(root) {
   'use strict';
+  const displayTime=typeof module==='object'&&module.exports?require('./display-time.js'):root.DisplayTime;
   const copy=value=>JSON.parse(JSON.stringify(value));
   const failure=(message,status)=>Object.assign(new Error(message),{status});
   function createClient(options={}) {
@@ -258,11 +259,14 @@
     let controller,settleDialog=null,searchTimer=null;
     const view=options.window||root;
     const width=()=>options.viewportWidth??view.innerWidth??1200;
-    function historyOpen(open){workspace.dataset.historyOpen=String(open);toggle?.setAttribute('aria-expanded',String(open));if(backdrop)backdrop.hidden=!open||width()>1100;}
+    function closeActions(){list.querySelector?.('.qa-session-actions:popover-open')?.hidePopover();}
+    function historyOpen(open){closeActions();workspace.dataset.historyOpen=String(open);toggle?.setAttribute('aria-expanded',String(open));if(backdrop)backdrop.hidden=!open||width()>1100;}
     historyOpen(width()>1100);
     function listen(element,event,callback){element?.addEventListener(event,callback);}
     let wasDesktop=width()>1100;
-    if(view.addEventListener)listen(view,'resize',()=>{const desktop=width()>1100;if(desktop!==wasDesktop){wasDesktop=desktop;historyOpen(desktop);}});
+    if(view.addEventListener)listen(view,'resize',()=>{closeActions();const desktop=width()>1100;if(desktop!==wasDesktop){wasDesktop=desktop;historyOpen(desktop);}});
+    listen(list,'scroll',closeActions);
+    listen(document,'workspace:page-changed',closeActions);
     function run(operation){Promise.resolve().then(operation).catch(error=>{const message=error.message||'会话操作失败';options.onError?.(message);if(status&&!controller.state.conflict&&!controller.state.canRetry&&!controller.state.loginRequired)status.textContent=message;});}
     function closeNarrow(){if(width()<=1100)historyOpen(false);}
     function showDialog({title,text,action='确认',rename=false,value='',trigger}) {
@@ -319,24 +323,36 @@
         select.disabled=state.loading;
         const title=document.createElement('span');title.className='qa-session-title';title.textContent=row.title||'新会话';
         const info=document.createElement('small');
-        let updated='';if(row.updated_at){const date=new Date(row.updated_at);if(!Number.isNaN(date.getTime()))updated=date.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});}
+        const updated=displayTime.format(row.updated_at,'');
         info.textContent=(updated?updated+' · ':'')+(Number(row.message_count)||0)+' 条消息';
         select.append(title,info);listen(select,'click',()=>run(async()=>{await controller.switchTo(row.id);closeNarrow();}));
-        const actions=document.createElement('details');actions.className='qa-session-actions';
-        const menu=document.createElement('summary');menu.textContent='更多操作';menu.setAttribute('aria-label','更多操作：'+(row.title||'新会话'));
+        const actions=document.createElement('div');actions.className='qa-session-actions';
+        actions.id='qa-session-actions-'+row.id;actions.setAttribute('popover','auto');
+        actions.setAttribute('role','group');actions.setAttribute('aria-label','会话操作');
+        const menu=document.createElement('button');menu.type='button';menu.className='qa-session-more';menu.textContent='⋯';menu.disabled=state.loading;
+        menu.setAttribute('aria-label','更多操作：'+(row.title||'新会话'));menu.setAttribute('popovertarget',actions.id);
+        listen(actions,'beforetoggle',event=>{
+          if(event.newState!=='open')return;
+          const anchor=menu.getBoundingClientRect(),rail=byId('qa-conversations').getBoundingClientRect();
+          const space=8,panelWidth=136,viewportWidth=document.documentElement.clientWidth;
+          const right=Math.max(rail.right,anchor.right)+space;
+          const left=right+panelWidth<=viewportWidth-space?right:anchor.left-panelWidth-space;
+          actions.style.left=Math.max(space,left)+'px';
+          actions.style.top=Math.max(space,Math.min(anchor.top,view.innerHeight-90))+'px';
+        });
         const rename=document.createElement('button');rename.type='button';rename.textContent='重命名';rename.disabled=state.loading;
         listen(rename,'click',()=>{
-          actions.open=false;
-          const result=showDialog({title:'重命名会话',text:'为这段问答设置一个便于查找的名称。',action:'保存名称',rename:true,value:row.title||'',trigger:rename});
+          actions.hidePopover();
+          const result=showDialog({title:'重命名会话',text:'为这段问答设置一个便于查找的名称。',action:'保存名称',rename:true,value:row.title||'',trigger:menu});
           run(async()=>{const answer=await result;if(answer.confirmed)await controller.rename(row.id,answer.value);});
         });
         const remove=document.createElement('button');remove.type='button';remove.textContent='删除';remove.disabled=state.loading;
         listen(remove,'click',()=>{
-          actions.open=false;
-          const result=showDialog({title:'删除会话',text:'仅删除“'+(row.title||'新会话')+'”及其问答记录，来源文档保持不变。此操作无法撤销。',action:'删除会话',trigger:remove});
+          actions.hidePopover();
+          const result=showDialog({title:'删除会话',text:'仅删除“'+(row.title||'新会话')+'”及其问答记录，来源文档保持不变。此操作无法撤销。',action:'删除会话',trigger:menu});
           run(async()=>{if((await result).confirmed)await controller.remove(row.id);});
         });
-        actions.append(menu,rename,remove);item.append(select,actions);list.append(item);
+        actions.append(rename,remove);item.append(select,menu,actions);list.append(item);
       }
       if(status){
         status.replaceChildren();

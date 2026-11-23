@@ -68,7 +68,7 @@ function setup(fetch,{narrow=false,qa=false}={}){
   }
   const media={matches:narrow,listeners:[],addEventListener(type,fn){if(type==='change')this.listeners.push(fn);},
     change(matches){this.matches=matches;this.listeners.forEach(fn=>fn({matches}));}};
-  const window={document:doc,fetch,AbortController,innerWidth:narrow?500:1200,matchMedia:()=>media,
+  const window={DisplayTime:require('../../knowledge_service/web/display-time.js'),document:doc,fetch,AbortController,innerWidth:narrow?500:1200,matchMedia:()=>media,
     listeners:{},addEventListener(type,fn){(this.listeners[type]??=[]).push(fn);},
     resize(){(this.listeners.resize||[]).forEach(fn=>fn());}};
   const context={window,document:doc,fetch,AbortController,console,current:'p'};
@@ -92,7 +92,7 @@ test('frozen document and occurrence show their own business dates and readable 
   const {drawer,doc}=setup(async()=>({ok:true,json:async()=>data}));await drawer.open({projectId:'p',answerId:'a',citation:'E1'});
   const cards=flatten(doc.getElementById('provenance-chain')).filter(node=>node.className==='provenance-node');
   for(const card of cards.slice(1)){
-    assert.match(card.textContent,/2020-01-01/);assert.match(card.textContent,/2025-01-01/);assert.match(card.textContent,/发布日期推定/);
+    assert.match(card.textContent,/2020年01月01日/);assert.match(card.textContent,/2025年01月01日/);assert.match(card.textContent,/发布日期推定/);
   }
 });
 

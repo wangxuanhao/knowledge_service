@@ -162,21 +162,28 @@ def classify(service, project, row, request):
             occurrences.append({'document': version, 'chunk': row.get('version_id'),
                                 'assertion': None, 'status': temporal(governance[version], request['valid_at'])[0]})
     elif row.get('kind') in {'entity', 'relation', 'attribute'}:
-        mappings=([{'assertion_id':context['assertion_id'],'assertion_event_id':context['id'],
-                    'record_id':context.get('support_fact_id') or row['id']} for context in contexts]
-                  if contexts is not None else repo.list_record_version_assertions(project, record_version_id=row['version_id']))
+        if contexts is not None:
+            mappings = [{'assertion_id': context['assertion_id'], 'assertion_event_id': context['id'],
+                         'record_id': context.get('support_fact_id') or row['id']} for context in contexts]
+        else:
+            key = ('mappings', row['version_id'])
+            if key not in source_cache:
+                source_cache[key] = repo.list_record_version_assertions(project, record_version_id=row['version_id'])
+            mappings = source_cache[key]
         for mapping in mappings:
             if mapping.get('created_at', request['known_at']) > request['known_at']:
                 continue
-            assertion = repo.get_assertion(project, mapping['assertion_id'])
+            assertion_id = mapping['assertion_id']
+            assertion_key = ('assertion', assertion_id)
+            if assertion_key not in source_cache:
+                source_cache[assertion_key] = repo.get_assertion(project, assertion_id)
+            assertion = source_cache[assertion_key]
             if assertion.get('created_at', request['known_at']) > request['known_at']:
                 continue
-            assertion_id = mapping['assertion_id']
-            if ('events', assertion_id) not in source_cache:
-                source_cache[('events', assertion_id)] = repo.list_assertion_events(project, assertion_id)
             decision_key = ('latest_decision', assertion_id, request['known_at'])
             if decision_key not in source_cache:
-                source_cache[decision_key] = max((item for item in source_cache[('events', assertion_id)]
+                events = repo.list_assertion_events(project, assertion_id)
+                source_cache[decision_key] = max((item for item in events
                     if item.get('created_at', request['known_at']) <= request['known_at']),
                     key=lambda item: item.get('decision_version', 0), default=None)
             event = source_cache[decision_key]
@@ -192,13 +199,19 @@ def classify(service, project, row, request):
             if not doc:
                 continue
             chunk_id = assertion.get('chunk_id')
-            if chunk_id and ('history', chunk_id) not in source_cache:
-                source_cache[('history', chunk_id)] = repo.history(project, chunk_id)
-            chunks = [chunk for chunk in source_cache.get(('history', chunk_id), [])
-                      if chunk.get('kind') == 'chunk' and
-                      (chunk.get('metadata') or {}).get('source_version_id') == version
-                      and chunk.get('source_id') == doc['id']
-                       and visible(chunk, source_request, source_artifact=True)] if assertion.get('chunk_id') else []
+            if not chunk_id:
+                continue
+            chunk_key = ('source_chunks', chunk_id, doc['id'], version)
+            if chunk_key not in source_cache:
+                history_key = ('history', chunk_id)
+                if history_key not in source_cache:
+                    source_cache[history_key] = repo.history(project, chunk_id)
+                source_cache[chunk_key] = [
+                    chunk for chunk in source_cache[history_key] if chunk.get('kind') == 'chunk'
+                    and chunk.get('source_id') == doc['id']
+                    and (chunk.get('metadata') or {}).get('source_version_id') == version]
+            chunks = [chunk for chunk in source_cache[chunk_key]
+                      if visible(chunk, source_request, source_artifact=True)]
             if len(chunks) != 1:
                 continue
             states = {temporal(item, request['valid_at'])[0] for item in (governance[version], chunks[0])}
@@ -279,23 +292,83 @@ def reference_candidates(service, project, request):
     return grouped, ['参考检索先在数据库匹配关键词，再有界读取最多 501 条候选；复杂 metadata 筛选与相关性排序前仍可能截断，并非全库历史穷尽检索。']
 
 
-def _prefetch_chunk_sources(repository, project, rows, request):
+def _prefetch_chunk_sources(repository, project, rows, request, *, assertion_versions=()):
     """Batch exact source text and governance versions, never whole histories."""
-    sources = {(row.get('metadata') or {}).get('source_version_id')
-               for row in rows if row.get('kind') == 'chunk'} - {None, ''}
+    versions = {(row.get('metadata') or {}).get('source_version_id')
+                for row in rows if row.get('kind') == 'chunk'}
+    cache = request['_source_read_cache']
+    sources = {version for version in versions.union(assertion_versions)
+               if version and ('version', version) not in cache}
     if not sources:
         return
-    cache = request['_source_read_cache']
     docs = repository.records_by_version_ids(project, sorted(sources))
     by_version = {row['version_id']: row for row in docs}
     for version in sources:
         cache[('version', version)] = by_version.get(version)
-    ids = {doc['id'] for doc in docs if doc.get('kind') == 'document'}
+    ids = {doc['id'] for doc in docs if doc.get('kind') == 'document'
+           and ('history', doc['id']) not in cache}
+    if not ids:
+        return
     governance = repository.records_at_knowledge_time(project, sorted(ids), request['known_at'])
     for record_id in ids:
         cache[('history', record_id)] = []
     for doc in governance:
         cache[('history', doc['id'])].append(doc)
+
+
+def _prefetch_evidence_sources(repository, project, rows, request):
+    """Load source identifiers and artifacts for this request's frozen facts."""
+    from ..repository.core import Repository
+    from ..repository.qa_evidence_reads import QaEvidenceReads
+
+    if not isinstance(repository, Repository):
+        _prefetch_chunk_sources(repository, project, rows, request)
+        return
+    if not rows:
+        return
+
+    cache = request['_source_read_cache']
+    known_at = request['known_at']
+    versions, assertion_ids = set(), set()
+    for row in rows:
+        if source_qualified(row):
+            assertion_ids.update(context['assertion_id']
+                                 for context in cache.get(('identity_contexts', row['id']), []))
+        elif row.get('kind') in {'entity', 'relation', 'attribute'} and row.get('version_id'):
+            versions.add(row['version_id'])
+
+    with repository.independent_read_view() as reader:
+        reads = QaEvidenceReads(reader)
+        missing_versions = {version for version in versions if ('mappings', version) not in cache}
+        cache.update({('mappings', version): [] for version in missing_versions})
+        for mapping in reads.mappings(project, missing_versions, known_at):
+            cache[('mappings', mapping['record_version_id'])].append(mapping)
+        for version in versions:
+            assertion_ids.update(item['assertion_id'] for item in cache[('mappings', version)])
+
+        missing_assertions = {key for key in assertion_ids
+                              if ('latest_decision', key, known_at) not in cache}
+        document_versions, chunk_sources = set(), set()
+        for assertion in reads.assertions_at(project, missing_assertions, known_at):
+            key = assertion['id']
+            cache[('assertion', key)] = assertion
+            cache[('latest_decision', key, known_at)] = ({
+                'id': assertion['event_id'], 'to_status': assertion['to_status'],
+                'canonical_record_id': assertion['canonical_record_id'],
+            } if assertion['event_id'] is not None else None)
+            version, document_id, chunk_id = (
+                assertion['document_version_id'], assertion['document_id'], assertion['chunk_id'])
+            if assertion['to_status'] == 'accepted' and version:
+                document_versions.add(version)
+                if document_id and chunk_id:
+                    chunk_sources.add((chunk_id, document_id, version))
+
+        _prefetch_chunk_sources(reader, project, rows, request,
+                               assertion_versions=document_versions)
+        missing_chunks = {key for key in chunk_sources if ('source_chunks', *key) not in cache}
+        cache.update({('source_chunks', *key): [] for key in missing_chunks})
+        for key, chunk in reads.source_chunks(project, missing_chunks, known_at):
+            cache[('source_chunks', *key)].append(chunk)
 
 
 def apply_validity(service, project, context, request):
@@ -343,6 +416,8 @@ def apply_validity(service, project, context, request):
                     continue
             if visible(row, row_scope(row, request)):
                 anchors[(row.get('id'), row.get('version_id'), row.get('query_platform'), row.get('source_scope'))] = row
+    if strict_time:
+        _prefetch_evidence_sources(service.repository, project, list(anchors.values()), request)
     authorizations = context.get('_source_context_authorizations') or {}
 
     def qualification_request(row):
@@ -389,7 +464,11 @@ def apply_validity(service, project, context, request):
             warnings.extend(notes)
         except (AttributeError, NotImplementedError):
             warnings.append('参考检索不可用，无法据此判断是否存在历史或未来规则。')
-    _prefetch_chunk_sources(service.repository, project, [*direct, *extra], request)
+    evidence = [*direct, *extra]
+    if strict_time:
+        evidence.extend(row for container in [context, *context.get('platform_groups', [])]
+                        for key in public_row_arrays for row in container.get(key, []))
+    _prefetch_evidence_sources(service.repository, project, evidence, request)
     direct_keys = {(row.get('version_id') or row['id'], row.get('query_platform')) for row in direct}
     seen, classified = set(), []
     for row in [*direct, *extra]:

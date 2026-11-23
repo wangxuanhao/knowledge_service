@@ -262,7 +262,7 @@ def test_native_applicability_migration_backfills_all_history_idempotently(tmp_p
 
     from knowledge_service.repository.migrate import Migration
     migration_path = (Path(__file__).resolve().parents[2] / 'knowledge_service' /
-                      'repository' / 'migrations' /
+                      'repository' / 'migrations' / 'legacy' /
                       '0014_backfill_native_applicability.sql')
     execution = Migration(14, 'backfill_native_applicability', migration_path).execution()
     # Run through the first pass, then emulate an old application write in the

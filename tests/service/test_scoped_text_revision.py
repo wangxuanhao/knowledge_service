@@ -112,6 +112,29 @@ def test_stale_text_revision_rejects_before_corpus_read_or_time_reservation(
     assert repository.get_record(project, 'person')['version_id'] == original['version_id']
 
 
+def test_text_revision_loads_only_transactional_ontology_inputs(tmp_path, monkeypatch):
+    repository, service, project, _ = _system(tmp_path)
+    original = service.write(project, [{
+        'id': 'person', 'kind': 'entity', 'type': 'Person', 'text': 'before',
+    }])[0]
+    # The write has already warmed the response annotation cache.
+    parsed = []
+    initialize = Ontology.__init__
+
+    def track_parse(ontology, turtle):
+        parsed.append(turtle)
+        initialize(ontology, turtle)
+
+    with monkeypatch.context() as guard:
+        guard.setattr(repository, 'get_ontology', _no_corpus)
+        guard.setattr(Ontology, '__init__', track_parse)
+        changed = service.write(project, [_changed(original, text='after')], revision=True,
+                                expected_version=original['version'])[0]
+
+    assert changed['text'] == 'after'
+    assert parsed == [ONTOLOGY]
+
+
 def test_label_shacl_revision_keeps_full_validation(tmp_path, monkeypatch):
     turtle = ONTOLOGY + (
         ' @prefix sh: <http://www.w3.org/ns/shacl#> . '
