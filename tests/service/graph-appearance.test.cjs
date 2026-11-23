@@ -66,6 +66,16 @@ test('full renderer RGB colors exactly encode the same local graph type color',(
   }
 });
 
+test('entity categories stay distinct as more types arrive without recoloring the first batch',()=>{
+  const {subject,palette}=appearance();
+  const types=['属性值','entity:属性值',...Array.from({length:40},(_,i)=>`urn:Category:${i}`)];
+  const firstBatch=types.slice(0,8).map(type=>subject.colorFor({type}));
+  const colors=types.map(type=>Array.from(subject.rgbFor({type}),channel=>channel.toString(16).padStart(2,'0')).join(''));
+  assert.equal(new Set(colors).size,types.length,'each canonical entity type needs its own color');
+  assert.ok(!colors.includes(palette.attribute.slice(1))&&!colors.includes(palette.unknown.slice(1)));
+  assert.deepEqual(types.slice(0,8).map(type=>subject.colorFor({type})),firstBatch);
+});
+
 test('legend category identity cannot collapse equal translated names or real attribute-named types',()=>{
   const {subject}=appearance();
   const a={type:'urn:Merchant',type_label:'共同类型'},b={type:'urn:Rule',type_label:'共同类型'};

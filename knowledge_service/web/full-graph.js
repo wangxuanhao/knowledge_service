@@ -197,20 +197,22 @@
       this.invalidateViewCache();this.viewProgram=null;this.viewTexture=null;this.viewLocations=null;this.viewCacheDisabled=false;this.viewCacheError=0;
       this.strokeProgram=null;this.strokeBuffer=null;
       const shader=(type,source)=>{const s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error('GPU 着色器编译失败：'+gl.getShaderInfoLog(s));return s;};
-      const vertexSource='attribute vec2 a_position;uniform vec2 u_center;uniform vec2 u_scale;uniform float u_size;void main(){gl_Position=vec4((a_position-u_center)*u_scale,0.,1.);gl_PointSize=u_size;}';
+      const vertexSource='attribute vec2 a_position;attribute vec3 a_typeColor;uniform vec2 u_center;uniform vec2 u_scale;uniform float u_size;varying mediump vec3 v_typeColor;void main(){gl_Position=vec4((a_position-u_center)*u_scale,0.,1.);gl_PointSize=u_size;v_typeColor=a_typeColor;}';
+      const pointColor='uniform vec4 u_color;uniform bool u_vertexColor;varying mediump vec3 v_typeColor;vec3 pointColor(){return u_vertexColor?v_typeColor:u_color.rgb;}';
       const vertex=shader(gl.VERTEX_SHADER,vertexSource);
-      const fragment=shader(gl.FRAGMENT_SHADER,'precision mediump float;uniform vec4 u_color;uniform bool u_point;void main(){if(u_point&&distance(gl_PointCoord,vec2(.5))>.5)discard;gl_FragColor=u_color;}');
+      const fragment=shader(gl.FRAGMENT_SHADER,'precision mediump float;'+pointColor+'uniform bool u_point;void main(){if(u_point&&distance(gl_PointCoord,vec2(.5))>.5)discard;gl_FragColor=vec4(pointColor(),u_color.a);}');
       this.program=gl.createProgram();gl.attachShader(this.program,vertex);gl.attachShader(this.program,fragment);gl.linkProgram(this.program);gl.deleteShader(vertex);gl.deleteShader(fragment);if(!gl.getProgramParameter(this.program,gl.LINK_STATUS))throw new Error('GPU 绘制程序创建失败');
-      gl.useProgram(this.program);this.locations={position:gl.getAttribLocation(this.program,'a_position')};for(const name of ['center','scale','size','color','point'])this.locations[name]=gl.getUniformLocation(this.program,'u_'+name);
+      gl.useProgram(this.program);this.locations={position:gl.getAttribLocation(this.program,'a_position'),typeColor:gl.getAttribLocation(this.program,'a_typeColor')};for(const name of ['center','scale','size','color','point','vertexColor'])this.locations[name]=gl.getUniformLocation(this.program,'u_'+name);
       // Outlines are limited to sparse graphs; dense points and large-session
-      // relations keep the simple shader, with no per-vertex color interpolation.
+      // relations keep the simpler coverage calculation.
       // Work in physical pixels so the transition stays one pixel wide at any
       // DPR. The sprite has a transparent margin instead of clipping the curve.
-      const pv=shader(gl.VERTEX_SHADER,vertexSource),pf=shader(gl.FRAGMENT_SHADER,'precision mediump float;uniform vec4 u_color;uniform highp float u_size;uniform float u_outline;uniform bool u_ring;uniform vec3 u_outlineColor;void main(){float radius=length((gl_PointCoord-vec2(.5))*u_size),outer=(u_size-2.)*.5;float coverage=1.-smoothstep(outer-.5,outer+.5,radius);vec3 color=u_color.rgb;if(u_ring){float inner=outer*.72;coverage*=smoothstep(inner-.5,inner+.5,radius);}else if(u_outline>0.){color=mix(color,u_outlineColor,smoothstep(outer-u_outline-.5,outer-u_outline+.5,radius));}if(coverage<=0.)discard;gl_FragColor=vec4(color,u_color.a*coverage);}');
+      const pv=shader(gl.VERTEX_SHADER,vertexSource),pf=shader(gl.FRAGMENT_SHADER,'precision mediump float;'+pointColor+'uniform highp float u_size;uniform float u_outline;uniform bool u_ring;uniform vec3 u_outlineColor;void main(){float radius=length((gl_PointCoord-vec2(.5))*u_size),outer=(u_size-2.)*.5;float coverage=1.-smoothstep(outer-.5,outer+.5,radius);vec3 color=pointColor();if(u_ring){float inner=outer*.72;coverage*=smoothstep(inner-.5,inner+.5,radius);}else if(u_outline>0.){color=mix(color,u_outlineColor,smoothstep(outer-u_outline-.5,outer-u_outline+.5,radius));}if(coverage<=0.)discard;gl_FragColor=vec4(color,u_color.a*coverage);}');
       this.pointProgram=gl.createProgram();gl.attachShader(this.pointProgram,pv);gl.attachShader(this.pointProgram,pf);gl.linkProgram(this.pointProgram);gl.deleteShader(pv);gl.deleteShader(pf);if(!gl.getProgramParameter(this.pointProgram,gl.LINK_STATUS))throw new Error('实体轮廓绘制程序创建失败');
-      this.pointLocations={position:gl.getAttribLocation(this.pointProgram,'a_position')};for(const name of ['center','scale','size','color','ring','outline','outlineColor'])this.pointLocations[name]=gl.getUniformLocation(this.pointProgram,'u_'+name);
+      this.pointLocations={position:gl.getAttribLocation(this.pointProgram,'a_position'),typeColor:gl.getAttribLocation(this.pointProgram,'a_typeColor')};for(const name of ['center','scale','size','color','ring','outline','outlineColor','vertexColor'])this.pointLocations[name]=gl.getUniformLocation(this.pointProgram,'u_'+name);
       gl.useProgram(this.pointProgram);gl.uniform3f(this.pointLocations.outlineColor,...theme.outline);
       this.nodeBuffer=gl.createBuffer();this.groupedNodeBuffer=gl.createBuffer();this.edgeBuffer=gl.createBuffer();this.nodeRanges=[];this.syncedDataset=null;gl.enableVertexAttribArray(this.locations.position);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      this.nodeColorBuffer=null;this.useNodeColorBuffer=false;
       // Render every relation into one cached world-space layer. Camera
       // motion transforms that complete layer instead of overdrawing millions
       // of long transparent segments on each frame. Entity points remain live.
@@ -292,7 +294,7 @@
         // with native typed-array operations, never regrouped record by record.
         for(let i=first;i<d.nodeCount;i++){
           const color=nodeRGB(d.records[i]),size=this.nodeSizes?.[i]||16,colorKey=(color[0]<<16)|(color[1]<<8)|color[2],key=this.smallSession?colorKey+':'+size:colorKey;let group=this.nodeGroups.get(key);
-          if(!group){group={positions:new Float32Array(32),count:0,size,color:Array.from(color,value=>value/255)};this.nodeGroups.set(key,group);}
+          if(!group){group={positions:new Float32Array(32),count:0,size,rgb:color,color:Array.from(color,value=>value/255)};this.nodeGroups.set(key,group);}
           if(group.count*2===group.positions.length){const grown=new Float32Array(group.positions.length*2);grown.set(group.positions);group.positions=grown;}
           group.positions[group.count*2]=positions[i*2];group.positions[group.count*2+1]=positions[i*2+1];group.count++;
           const bounds=this.nodeBounds,x=positions[i*2],y=positions[i*2+1];bounds.minX=Math.min(bounds.minX,x);bounds.maxX=Math.max(bounds.maxX,x);bounds.minY=Math.min(bounds.minY,y);bounds.maxY=Math.max(bounds.maxY,y);
@@ -300,6 +302,18 @@
         const groupedPositions=new Float32Array(d.nodeCount*2);this.nodeRanges=[];let offset=0;
         for(const group of this.nodeGroups.values()){group.first=offset;groupedPositions.set(group.positions.subarray(0,group.count*2),offset*2);this.nodeRanges.push({first:offset,count:group.count,color:group.color,size:group.size});offset+=group.count;}
         gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.bufferData(gl.ARRAY_BUFFER,groupedPositions,gl.STATIC_DRAW);
+        // Keep a single draw for many types. Small sessions keep per-group
+        // sizes, with at most 200 nodes. RGB follows the grouped position order.
+        this.useNodeColorBuffer=!this.smallSession&&this.nodeGroups.size>18;
+        if(this.useNodeColorBuffer){
+          const colors=new Uint8Array(d.nodeCount*3);
+          for(const group of this.nodeGroups.values()){
+            const end=(group.first+group.count)*3;
+            for(let i=group.first*3;i<end;i+=3)colors.set(group.rgb,i);
+          }
+          this.nodeColorBuffer??=gl.createBuffer();
+          gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeColorBuffer);gl.bufferData(gl.ARRAY_BUFFER,colors,gl.STATIC_DRAW);
+        }
       }
       if(replace||layoutChanged||this.syncedEdges!==d.edgeCount){gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.bufferData(gl.ARRAY_BUFFER,d.edgePositions(positions),gl.STATIC_DRAW);if(this.smallSession)this.syncStrokes(positions);if(layoutChanged)this.cachedDataset=null;this.buildEdgeCache();}
       this.syncedDataset=d;this.syncedNodes=d.nodeCount;this.syncedEdges=d.edgeCount;this.requestDraw();
@@ -459,7 +473,11 @@
       const sparse=this.displayDataset.nodeCount<=800,p=sparse?this.pointLocations:l;
       gl.useProgram(sparse?this.pointProgram:this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(p.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1f(p.size,size*this.dpr+(sparse?2:0));
       if(sparse){gl.uniform1i(p.ring,false);gl.uniform1f(p.outline,size>=5?this.dpr:0);}else gl.uniform1i(l.point,true);
-      for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,smallNodeSize(range.size,this.camera.scale)*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? tokens.nodeOpacity : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
+      if(this.useNodeColorBuffer){
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeColorBuffer);gl.enableVertexAttribArray(p.typeColor);gl.vertexAttribPointer(p.typeColor,3,gl.UNSIGNED_BYTE,true,0,0);
+        gl.uniform1i(p.vertexColor,true);gl.uniform4f(p.color,0,0,0,1);gl.drawArrays(gl.POINTS,0,this.displayDataset.nodeCount);
+        gl.uniform1i(p.vertexColor,false);gl.disableVertexAttribArray(p.typeColor);
+      }else for(const range of this.nodeRanges){if(this.smallSession)gl.uniform1f(p.size,smallNodeSize(range.size,this.camera.scale)*this.dpr+2);gl.uniform4f(p.color,...range.color,focus ? .12 : this.smallSession ? tokens.nodeOpacity : 1);gl.drawArrays(gl.POINTS,range.first,range.count);}
       if(focus){gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);for(const i of focus){gl.uniform1f(p.size,this.nodeScreenSize(i)*this.dpr+2);gl.uniform4f(p.color,...Array.from(nodeRGB(this.displayDataset.records[i]),v=>v/255),1);gl.drawArrays(gl.POINTS,i,1);}}
       if(active>=0&&active<this.displayDataset.nodeCount){const ring=this.pointLocations;gl.useProgram(this.pointProgram);gl.disableVertexAttribArray(p.position);gl.enableVertexAttribArray(ring.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.vertexAttribPointer(ring.position,2,gl.FLOAT,false,0,0);gl.uniform2f(ring.center,this.camera.x,this.camera.y);gl.uniform2f(ring.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1i(ring.ring,true);gl.uniform1f(ring.outline,0);gl.uniform1f(ring.size,((this.smallSession?this.nodeScreenSize(active):size)+8)*this.dpr+2);gl.uniform4f(ring.color,...theme.selected,1);gl.drawArrays(gl.POINTS,active,1);}
       if(this.viewStableFrames++>0)this.captureView();this.finishFrame(started);
@@ -571,7 +589,7 @@
       this.requestDraw();return true;
     }
     stats(){return {loaded_entities:this.dataset.nodeCount,loaded_relations:this.dataset.edgeCount,drawn_entities:this.drawnNodes||0,drawn_relations:this.drawnEdges||0,relation_layer:'complete-world-cache',cached_relations:this.cachedRelations||0,node_layer:this.usedViewCache?'complete-view-cache':'live-color-groups',cached_entities:this.viewSnapshot?.nodes||0,view_cache_error:this.viewCacheError||0,layout:this.smallSession?'small-relations-v1':'stable-id-v1',canonical_layout:'stable-id-v1',last_pick_ms:this.lastPickMs||0,gpu:this.gl.getParameter(this.gl.RENDERER),context_lost:!!this.lost};}
-    destroy(){if(this.destroyed)return;this.destroyed=true;this.hoverPreview?.clear();this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
+    destroy(){if(this.destroyed)return;this.destroyed=true;this.hoverPreview?.clear();this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);if(this.nodeColorBuffer)this.gl.deleteBuffer(this.nodeColorBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
   }
   async function request(url,body,signal){
     const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});

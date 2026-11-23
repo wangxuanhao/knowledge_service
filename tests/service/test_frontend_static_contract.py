@@ -274,12 +274,13 @@ def test_type_color_comes_from_one_palette_module():
     assert 'GraphPalette.colorFor(n.type)' in workspace, '降级入口也必须使用规范类型 ID'
 
 
-def test_same_type_same_color_across_pages_palette_is_deterministic():
-    """颜色由类型名哈希决定，与顺序无关；同屏重色由 colorMap 兜底。"""
+def test_full_and_local_graph_use_shared_color_assignment():
+    """全量图节点和筛选圆点与局部图共用 GraphAppearance。"""
     palette = read('graph-palette.js')
-    assert 'Math.imul' in palette, '用 FNV-1a 之类的稳定哈希，别用随环境变的算法'
-    assert 'PALETTE[hash(key) % PALETTE.length]' in palette
-    assert "if (used.has(color))" in palette, '缺少撞色挪位'
+    assert 'function entityColorFor(' in palette
+    assert 'palette?.entityColorFor(type)' in read('graph-appearance.js')
+    assert 'root.GraphAppearance.rgbFor(record)' in read('full-graph.js')
+    assert 'window.GraphAppearance?.colorFor({type})' in read('full-graph-view.js')
 
 
 def test_graph_layout_drag_preserves_pan_zoom_and_details():

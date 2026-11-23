@@ -138,7 +138,7 @@ function bufferGL(){
   });
   for(const name of ['enable','blendFunc','blendFuncSeparate','bindTexture','texImage2D','texParameteri','bindFramebuffer','framebufferTexture2D','viewport','clearColor','clear','uniform1i','uniform1f','uniform2f','uniform3f','uniform4f','activeTexture','generateMipmap','deleteTexture','deleteFramebuffer','deleteProgram'])gl[name]=()=>{};
   gl.uniform4f=(location,...values)=>uniforms.set(location,values);
-  gl.uniform1f=(location,value)=>uniforms.set(location,value);
+  gl.uniform1i=gl.uniform1f=(location,value)=>uniforms.set(location,value);
   gl.uniform2f=(location,...values)=>uniforms.set(location,values);gl.deleteTexture=texture=>deletedTextures.push(texture);
   return {gl,buffers,uploads,subUploads,draws,deleted,copies,deletedTextures};
 }
@@ -442,13 +442,26 @@ test('bounded uniform-color groups preserve canonical colors through append and 
 test('dense palette groups stay bounded and selection retains original record indices',()=>{
   const {renderer,buffers,draws}=bufferScene(),{appearance}=load(true),types=['','KS_ATTRIBUTE_VALUE',...Array.from({length:128},(_,i)=>'Type'+i)];
   renderer.dataset.addNodes(Array.from({length:1200},(_,i)=>({id:'node'+i,type:types[i%types.length]})),new Float32Array(Array.from({length:2400},(_,i)=>i/2400)));
-  renderer.sync();renderer.draw();assertGroupedNodes(renderer,buffers,draws,appearance);
-  assert.ok(draws.filter(row=>row.mode===renderer.gl.POINTS).every(row=>row.program===renderer.program),'dense normal points use the simple program');
+  renderer.sync();renderer.draw();
+  const points=draws.filter(row=>row.mode===renderer.gl.POINTS);
+  assert.equal(points.length,1,'large type sets need one draw for normal points');
+  const [normal]=points;
+  assert.equal(normal.count,renderer.dataset.nodeCount);
+  assert.equal(normal.program,renderer.program,'dense normal points use the simple program');
+  assert.equal(normal.uniforms.get('u_vertexColor'),true);
+  const color=normal.attributes.get(renderer.locations.typeColor);
+  assert.equal(color.normalized,true);
+  assert.equal(color.type,renderer.gl.UNSIGNED_BYTE);
+  const positions=buffers.get(normal.attributes.get(renderer.locations.position).buffer),colors=buffers.get(color.buffer);
+  const expected=new Map(renderer.dataset.records.map((record,i)=>[renderer.dataset.positions[i*2],appearance.rgbFor(record)]));
+  assert.equal(new Set(renderer.dataset.records.map(record=>Array.from(appearance.rgbFor(record)).join(','))).size,types.length);
+  for(let i=0;i<normal.count;i++)assert.deepEqual(Array.from(colors.slice(i*3,i*3+3)),Array.from(expected.get(positions[i*2])));
   renderer.dataset.records=new Proxy(renderer.dataset.records,{get(target,key,receiver){if(/^\d+$/.test(String(key)))throw new Error('camera frames cannot read per-node styles');return Reflect.get(target,key,receiver);}});
   draws.length=0;renderer.selected=1199;renderer.draw();
   const ring=draws.filter(row=>row.mode===renderer.gl.POINTS).at(-1);
   assert.equal(ring.first,1199);assert.equal(ring.count,1);assert.equal(ring.program,renderer.pointProgram);
   assert.equal(ring.attributes.get(renderer.pointLocations.position).buffer,renderer.nodeBuffer);
+  assert.equal(ring.attributes.size,1,'the selection ring uses its uniform color');
 });
 
 test('line and cached relation draws do not read beyond grouped entity positions',()=>{

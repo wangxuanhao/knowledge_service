@@ -10,7 +10,7 @@
     const palette=root.GraphPalette;
     if(attribute(record))return palette?.attribute||'#8c7b68';
     const type=record?.type||'';
-    return palette?.colorFor(type==='属性值'?'entity:'+type:type)||'#0e7c7b';
+    return palette?.entityColorFor(type)||'#0e7c7b';
   }
   function rgbFor(record){
     const hex=colorFor(record);
