@@ -156,7 +156,9 @@ class Communities:
         with self.repo.independent_read_view() as reader:
             return self._status(CommunityStore(reader), project, scope)
 
-    def list(self, project, scope, *, keyword, anchor, limit, offset):
+    def list(self, project, scope, *, keyword, anchor, limit, offset, mode='keyword'):
+        if mode == 'semantic' and keyword:
+            return self._semantic_list(project, scope, keyword, anchor, limit, offset)
         with self.repo.independent_read_view() as reader:
             store = CommunityStore(reader)
             status = self._status(store, project, scope)
@@ -165,6 +167,31 @@ class Communities:
             rows, total = store.list(project, scope_key(scope), keyword=keyword, anchor=anchor,
                                      limit=limit, offset=offset)
         return {'communities': rows, 'total': total, 'status': status}
+
+    def _semantic_list(self, project, scope, query, anchor, limit, offset):
+        key = scope_key(scope)
+        with self.repo.independent_read_view() as reader:
+            store = CommunityStore(reader)
+            status = self._status(store, project, scope)
+            if not status['browseable'] or status['vector_index']['state'] != 'ready':
+                raise CommunitySnapshotStale('当前范围的报告向量未就绪，请在社区索引中构建或更新。')
+            snapshot = store.scope(project, key)['vector_snapshot']
+            manifest = report_manifest(vector_reports(store.ready_reports(project, key)))
+            candidates = store.member_communities(project, key, anchor) if anchor else None
+
+        scores = self._semantic_matches(project, key, status['revision'], json.loads(snapshot),
+                                        manifest, query, candidates=candidates)
+        ids = list(scores)[offset:offset + limit]
+        with self.repo.independent_read_view() as reader:
+            store = CommunityStore(reader)
+            latest = self._status(store, project, scope)
+            row = store.scope(project, key)
+            if (not latest['browseable'] or latest['revision'] != status['revision']
+                    or latest['vector_index']['state'] != 'ready' or row['vector_snapshot'] != snapshot):
+                raise CommunitySnapshotStale('检索期间社区报告或向量已更新，请重新检索。')
+            rows = store.summaries(project, key, ids)
+        return {'communities': [{**rows[ident], 'semantic_score': scores[ident]} for ident in ids],
+                'total': len(scores), 'status': latest}
 
     def detail(self, project, scope, community_id, *, limit, offset, expected_revision=None):
         with self.repo.independent_read_view() as reader:
@@ -355,22 +382,26 @@ class Communities:
             outcomes[report['status']] += 1
         return {'revision': live, 'reports_ready': outcomes['ready'], 'reports_failed': outcomes['failed']}
 
-    def _semantic_matches(self, project, key, revision_id, snapshot, manifest, question):
+    def _semantic_matches(self, project, key, revision_id, snapshot, manifest, question, *, candidates=None):
         encoder, vectors = self._vectors()
         if vectors is None or snapshot.get('model') != encoder.identity:
             raise CommunitySnapshotStale('社区向量索引与当前编码模型不一致，请更新报告向量。')
         if snapshot.get('manifest_digest') != digest(manifest):
             raise CommunitySnapshotStale('社区报告已更新，请更新报告向量。')
+        expected = manifest if candidates is None else {
+            ident: fingerprint for ident, fingerprint in manifest.items() if ident in candidates}
+        if not expected:
+            return {}
         try:
             hits = vectors.search(project, key, revision_id, encoder.identity,
                                   cached_query_vector(encoder, question), _QUESTION_COMMUNITY_LIMIT,
-                                  expected=manifest)
+                                  expected=expected)
         except Exception as exc:
             raise CommunitySnapshotStale('社区语义检索失败：' + redact(exc)[:300]) from exc
-        if manifest and not hits:
+        if not hits:
             raise CommunitySnapshotStale('Milvus 中缺少当前社区向量，请更新报告向量。')
         return {hit['id']: hit['score'] for hit in hits
-                if manifest.get(hit['id']) == hit['fingerprint'] and hit['score'] >= .35}
+                if expected.get(hit['id']) == hit['fingerprint'] and hit['score'] >= .35}
 
     def _advanced_ask(self, project, scope, question, *, mode, level, generate, expected_revision):
         key = scope_key(scope)
@@ -438,7 +469,7 @@ class Communities:
         return result
 
     def ask(self, project, scope, community_ids, question, *, generate, expected_revision=None,
-            mode='keyword', level=None):
+            mode='keyword', level=None, match_only=False):
         if mode != 'keyword':
             return self._advanced_ask(project, scope, question, mode=mode, level=level,
                                       generate=generate, expected_revision=expected_revision)
@@ -457,9 +488,13 @@ class Communities:
                             store.candidates(project, key, terms, limit=_QUESTION_COMMUNITY_LIMIT))
             retrieval = 'selected' if selected else 'keyword'
             if not ids:
+                if match_only:
+                    result = _empty_answer(status, 0, '当前范围没有与问题匹配的社区报告。')
+                    result['coverage']['retrieval'] = 'keyword'
+                    return result
                 retrieval = 'representative'
                 ids = store.representative_communities(project, key, limit=_QUESTION_COMMUNITY_LIMIT)
-            details = store.answer_details(project, key, ids)
+            details = store.answer_details(project, key, ids, keyword_terms=terms if retrieval == 'keyword' else ())
         communities = []
         evidence_by_id = {}
         relevant_reports = []

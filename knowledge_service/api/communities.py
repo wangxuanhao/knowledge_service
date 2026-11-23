@@ -40,6 +40,7 @@ class CommunityRequest(BaseModel):
 
 class CommunityList(CommunityRequest):
     keyword: str = Field(default='', max_length=400)
+    mode: Literal['keyword', 'semantic'] = 'keyword'
     anchor: str = Field(default='', max_length=200)
     limit: int = Field(default=30, ge=1, le=100)
     offset: int = Field(default=0, ge=0)
@@ -62,6 +63,7 @@ class CommunityAsk(CommunityRequest):
     community_ids: list[Identifier] = Field(default_factory=list, max_length=32)
     expected_revision: Identifier | None = None
     generate: bool = False
+    match_only: bool = False
     mode: Literal['keyword', 'semantic', 'global'] = 'keyword'
     level: int | None = Field(default=None, ge=0)
 
@@ -81,8 +83,12 @@ router = APIRouter(prefix='/api/projects/{project_id}/communities', tags=['commu
 
 @router.post('')
 def list_communities(project_id: str, body: CommunityList, request: Request):
-    return request.app.state.communities.list(project_id, body.scope_data(), keyword=body.keyword.strip(),
-                                              anchor=body.anchor.strip(), limit=body.limit, offset=body.offset)
+    try:
+        return request.app.state.communities.list(project_id, body.scope_data(), keyword=body.keyword.strip(),
+                                                  anchor=body.anchor.strip(), limit=body.limit, offset=body.offset,
+                                                  mode=body.mode)
+    except CommunitySnapshotStale as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post('/status')
@@ -114,7 +120,8 @@ def ask_communities(project_id: str, body: CommunityAsk, request: Request):
     try:
         return request.app.state.communities.ask(
             project_id, body.scope_data(), body.community_ids, body.question,
-            generate=body.generate, expected_revision=body.expected_revision, mode=body.mode, level=body.level)
+            generate=body.generate, expected_revision=body.expected_revision, mode=body.mode, level=body.level,
+            match_only=body.match_only)
     except CommunitySnapshotStale as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 

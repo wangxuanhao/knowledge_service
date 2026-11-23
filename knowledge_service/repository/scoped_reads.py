@@ -677,10 +677,11 @@ class ScopedReads:
             selected = source_scope(scope, row)
             key = _json(selected.get('filters'))
             groups.setdefault(key, (selected, []))[1].append(row)
-        sources, neighbors, seen = [], [], set()
+        sources, neighbors, seen, headings = [], [], set(), {}
         for selected, selected_hits in groups.values():
             result = self._source_context(project, selected, selected_hits,
                                           radius=radius, max_total=max_total)
+            headings.update(result.get('_document_headings', {}))
             for row in result['source_chunks']:
                 if row['version_id'] not in seen and len(sources) < 200:
                     sources.append(row)
@@ -689,7 +690,10 @@ class ScopedReads:
                 if row['version_id'] not in seen and len(neighbors) < max_total:
                     neighbors.append(row)
                     seen.add(row['version_id'])
-        return {'source_chunks': sources, 'context_chunks': neighbors}
+        result = {'source_chunks': sources, 'context_chunks': neighbors}
+        if headings:
+            result['_document_headings'] = headings
+        return result
 
     def _source_context(self, project, scope, hits, *, radius=1, max_total=12):
         """Batch source anchors and same-document-revision nearest neighbors."""
@@ -742,11 +746,16 @@ class ScopedReads:
         # The source authority must still qualify; frozen old source text alone
         # cannot authorize a withdrawn or out-of-scope document.
         document_ids = {row.get('source_id') for row in anchors} - {None, ''}
-        documents = {row['id'] for row in self.by_ids(project, scope, sorted(document_ids), kinds=['document'])}
+        documents = {row['id']: row for row in self.by_ids(project, scope, sorted(document_ids), kinds=['document'])}
         anchors = [row for row in anchors if row.get('source_id') in documents
                    and (row.get('metadata') or {}).get('source_version_id')]
+        headings = {}
+        for hit in hits:
+            if hit.get('kind') == 'chunk' and hit.get('version_id') and hit.get('source_id') in documents:
+                metadata = documents[hit['source_id']].get('metadata') or {}
+                headings[hit['version_id']] = {key: metadata.get(key) for key in ('title', 'source_file')}
         if not anchors:
-            return {'source_chunks': [], 'context_chunks': []}
+            return {'source_chunks': [], 'context_chunks': [], '_document_headings': headings}
         direct_versions = {row.get('version_id') for row in hits}
         source_chunks = [{**row, '_source_anchor_versions': sorted(anchor_versions.get(row['version_id'], set()))}
                          for row in anchors if row['version_id'] not in direct_versions]
@@ -788,4 +797,4 @@ class ScopedReads:
                 seen.add(row['version_id'])
             if len(context) >= max_total:
                 break
-        return {'source_chunks': source_chunks, 'context_chunks': context}
+        return {'source_chunks': source_chunks, 'context_chunks': context, '_document_headings': headings}

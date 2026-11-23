@@ -269,6 +269,35 @@ def test_keyboard_result_activation_moves_focus_into_visible_detail_panel(redesi
     assert errors == []
 
 
+def test_opening_search_result_keeps_graph_header_and_panel_geometry_stable(redesign_page):
+    page, errors = redesign_page
+    _open(page, 768)
+    nodes, edge = _graph(page)
+    hit = {**nodes[0], 'text': '一条很长的知识记录标题' * 20}
+    page.route('**/records/page', lambda route: route.fulfill(json={'records': [hit], 'total': 1}))
+    page.route('**/search', lambda route: route.fulfill(json={
+        'active_mode': 'keyword', 'candidate_count': 1, 'hits': [hit],
+        'source_chunks': [], 'context_chunks': []}))
+    page.select_option('#search-mode', 'keyword')
+    page.fill('#query', '布局')
+    page.click('#search')
+    action = page.locator('#hits [data-graph-view="local"]')
+    action.wait_for()
+    pending = []
+    page.route('**/graph-neighborhood', lambda route: pending.append(route))
+    page.evaluate('() => GraphWorkspaceLayout.settled()')
+    before = _bounds(page, '#graph-stage')
+    action.click()
+    page.wait_for_function("() => GraphWorkspaceLayout.snapshot().state === 'loading'")
+    page.evaluate('() => GraphWorkspaceLayout.settled()')
+    assert abs(_bounds(page, '#graph-stage')['y'] - before['y']) <= 1
+    pending.pop().fulfill(json={'records': [hit, nodes[1], edge], 'truncated': False})
+    page.wait_for_function("() => GraphWorkspaceLayout.snapshot().panel === 'detail'")
+    page.evaluate('() => GraphWorkspaceLayout.settled()')
+    assert abs(_bounds(page, '#graph-stage')['y'] - before['y']) <= 1
+    assert errors == []
+
+
 @pytest.mark.parametrize('width', [320, 390, 768, 1440])
 def test_search_mode_keeps_full_label_and_native_arrow_space(redesign_page, width):
     page, errors = redesign_page

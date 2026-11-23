@@ -97,7 +97,9 @@ def _seed(repository, project_id):
             continue
         assertion = repository.create_assertion(project_id, {
             'id': f"{project_id}:fixture:{row['id']}", 'kind': row['kind'],
-            'payload': {'text': row['text']}, 'document_id': document['id'],
+            'payload': {'text': row['text'], 'valid_from': row['valid_from'],
+                        'metadata': {'applicability': row['metadata']['applicability']}},
+            'document_id': document['id'],
             'document_version_id': document['version_id'], 'chunk_id': chunk['id'],
             'quote': chunk['text'], 'start_char': start, 'end_char': start + len(chunk['text']),
         })
@@ -230,10 +232,10 @@ def _select_keyword_qa(page):
 
 def _expand_qa_evidence(page, index=0):
     toggle = page.locator('#qa-transcript .qa-evidence-toggle').nth(index)
-    assert toggle.get_attribute('aria-expanded') == 'false'
     panel = page.locator('#' + toggle.get_attribute('aria-controls'))
-    assert panel.is_hidden()
-    toggle.click()
+    if toggle.get_attribute('aria-expanded') == 'false':
+        assert panel.is_hidden()
+        toggle.click()
     assert toggle.get_attribute('aria-expanded') == 'true'
     assert panel.is_visible()
     return panel
@@ -1457,12 +1459,18 @@ def test_knowledge_chat_streams_evidence_deltas_and_done(workbench):
     assert turns.count() == 2
     assert turns.nth(0).get_attribute('data-role') == 'user'
     assert '退款' in turns.nth(0).inner_text()
-    answer = turns.nth(1).locator('.qa-answer').inner_text()
-    assert '退款需要原始凭证' in answer
-    assert '退款需要原始凭证' in (page.locator('#qa-live').text_content() or '')
+    result = turns.nth(1)
+    assert result.get_attribute('data-result') == 'evidence'
+    excerpt = result.locator('.qa-evidence-excerpt').filter(has_text='退款需要原始凭证')
+    assert excerpt.is_visible()
+    full_text = result.locator('.qa-full-transcript .qa-answer')
+    assert full_text.is_hidden()
+    assert page.locator('#qa-live').text_content() == '检索完成。'
     assert not page.locator('#qa-hero').is_visible()
     assert page.locator('#qa').is_enabled()
     assert page.evaluate("() => document.activeElement.id") == 'qa-query'
+    result.locator('.qa-full-transcript > summary').click()
+    assert '退款需要原始凭证' in full_text.inner_text()
 
 
 EVIDENCE_EVENT = (
@@ -1587,9 +1595,9 @@ def test_knowledge_chat_evidence_disclosure_and_cross_menu_navigation(workbench)
     assert page.locator('[data-tab="search"]').get_attribute('class') == 'active'
     assert page.evaluate("() => document.activeElement.id") == 'graph-heading'
 
-    # The fixed citation also exposes its historical source action.
+    # The card citation opens the historical source drawer.
     page.click('[data-tab="qa"]')
-    assert panel.get_by_text('查看冻结原文', exact=True).count() >= 1
+    assert panel.locator('.qa-evidence-item-header .provenance-citation').count() >= 1
 
 
 @pytest.mark.usefixtures('keyword_index_ready')
@@ -1701,7 +1709,7 @@ def test_chunk_evidence_opens_the_exact_frozen_source(workbench):
     if not chunk.is_visible():
         panel.locator('.qa-evidence-more').click()
     assert chunk.is_visible()
-    source_button = chunk.get_by_text('查看冻结原文', exact=True)
+    source_button = chunk.locator('.qa-evidence-item-header .provenance-citation')
     assert source_button.count() == 1
     updated = repo.put_record(workbench.project, {
         'id': 'd', 'kind': 'document', 'text': '更新后的原文不得替换已冻结内容',
@@ -1722,7 +1730,8 @@ def test_chunk_evidence_opens_the_exact_frozen_source(workbench):
     assert documents[0]['document_id'] == 'd'
     assert documents[0]['version_id'] == document['version_id']
     assert documents[0]['version'] == 1
-    page.locator('#provenance-chain').get_by_role('button', name='查看历史原文', exact=True).click()
+    assert page.locator('#provenance-audit').get_attribute('open') is None
+    page.locator('#provenance-overview').get_by_role('button', name='查看历史原文', exact=True).click()
     assert page.locator('#source-evidence-dialog').is_visible()
     assert page.locator('#source-evidence-title').inner_text() == '退款规则'
     assert '来源版本 1' in page.locator('#source-evidence-note').inner_text()
@@ -1849,12 +1858,15 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
     _expand_qa_evidence(page)
-    citation = page.locator('.qa-evidence-item > button.provenance-citation')
+    citation = page.locator('.qa-evidence-item-header > button.provenance-citation')
     assert citation.count() == 1
-    assert page.get_by_text('查看冻结原文', exact=True).count() == 1
+    assert page.locator('.qa-evidence-item .provenance-citation').count() == 1
     assert page.locator('.qa-turn-assistant').get_attribute('data-state') == 'streaming'
     citation.click()
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
+    audit = page.locator('#provenance-audit')
+    assert audit.get_attribute('open') is None
+    audit.locator('summary').click()
     assert 'running' in page.locator('#provenance-chain').inner_text()
     assert len(seen) == 1 and '/answers/answer-running/evidence/E1/provenance' in seen[0]
     assert page.locator('[data-tab="qa"]').get_attribute('class') == 'active'
@@ -1901,7 +1913,7 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
     page.wait_for_function("document.querySelectorAll('.qa-answer button').length === 1")
     assert page.locator('.qa-answer').inner_text() == literal
     _expand_qa_evidence(page)
-    assert page.locator('.qa-evidence-item > button.provenance-citation').count() == 1
+    assert page.locator('.qa-evidence-item-header > button.provenance-citation').count() == 1
     page.locator('.qa-answer button').click()
     page.wait_for_function("document.querySelector('#provenance-drawer').dataset.state === 'ready'")
     assert len(seen) == 2
@@ -1969,7 +1981,7 @@ def test_knowledge_chat_provenance_clear_aborts_and_ignores_stale_response(workb
     page.click('#qa')
     _emit(page, 'evidence', _provenance_evidence())
     _expand_qa_evidence(page)
-    page.locator('.qa-evidence-item > button.provenance-citation').click()
+    page.locator('.qa-evidence-item-header > button.provenance-citation').click()
     assert page.evaluate('window.__provenanceSignal.aborted') is False
     cleared = _clear_conversation(page, workbench.project, keyboard=True)
     assert page.evaluate('window.__provenanceSignal.aborted')

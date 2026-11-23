@@ -35,6 +35,19 @@ test('history summary strips arbitrary objects and preserves only typed immutabl
   assert.deepEqual(sanitizeEvidenceSummary({citation:'E1\n'}),{});
 });
 
+test('history summary preserves safe ranking metadata without query text',()=>{
+  const {sanitizeEvidenceSummary}=exportsForTest();
+  const retrieval_match={mode:'hybrid',strategy:'fusion',channels:['keyword','semantic','private','keyword'],
+    fields:['title','title','query text'],indexed_fields:['body','identifier',{}],score:0,rrf_score:0.016,
+    supplemental:false,query:'private query',tokens:['secret']};
+  assert.deepEqual(sanitizeEvidenceSummary({citation:'E1',retrieval_match}),{citation:'E1',retrieval_match:{
+    mode:'hybrid',strategy:'fusion',channels:['keyword','semantic'],fields:['title'],indexed_fields:['body','identifier'],
+    score:0,rrf_score:0.016,supplemental:false}});
+  assert.deepEqual(sanitizeEvidenceSummary({retrieval_match:{mode:'keyword',strategy:null,channels:[],score:Infinity,rrf_score:'0.5'}}),
+    {retrieval_match:{mode:'keyword',strategy:null,channels:[]}});
+  assert.deepEqual(sanitizeEvidenceSummary({retrieval_match:{mode:'private query'}}),{});
+});
+
 // A tiny DOM surface exercises the actual event/render code without a browser dependency.
 class Element{
   constructor(tag,doc){this.tagName=tag.toUpperCase();this.ownerDocument=doc;this.children=[];this.attrs={};this.dataset={};this.hidden=false;this.listeners={};this._text='';this.isConnected=true;}
@@ -84,6 +97,24 @@ function payload(answer='a') {return {subject:{answer_id:answer,citation:'E1'},n
   edges:[{source_ref:'r',target_ref:'o',relation:'sourced-from'},{source_ref:'o',target_ref:'d',relation:'sourced-from'}],integrity:{complete:false,warnings:[{code:'missing',node_ref:'d',message:'历史缺口'}]}};}
 function deferred(){let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};}
 
+test('citation opens on the frozen quote, with audit fields and raw JSON collapsed',async()=>{
+  const data=payload();const {drawer,doc,window}=setup(async()=>({ok:true,json:async()=>data}));
+  await drawer.open({projectId:'p',answerId:'a',citation:'E1'});
+  const overview=doc.getElementById('provenance-overview');
+  const audit=doc.getElementById('provenance-audit');
+  assert.equal(audit.open,false);
+  assert.equal(audit.contains(doc.getElementById('provenance-chain')),true);
+  assert.equal(audit.contains(doc.getElementById('provenance-api')),true);
+  assert.match(overview.textContent,/doc.*版本 1/);
+  assert.equal(flatten(overview).find(node=>node.tagName==='BLOCKQUOTE').textContent,'<img>');
+  assert.doesNotMatch(overview.textContent,/sourced-from|<script>|before|after/);
+  let opened;window.openFrozenSourceEvidence=value=>opened=value;
+  flatten(overview).find(node=>node.textContent==='查看历史原文').dispatch('click');
+  assert.equal(opened.highlight,'<img>');
+  assert.equal(opened.version_id,'dv1');
+  assert.equal(doc.getElementById('provenance-guide').textContent,'[E1] 是这条回答的引用编号。');
+});
+
 test('frozen document and occurrence show their own business dates and readable time source',async()=>{
   const data=payload();
   for(const node of data.nodes.filter(node=>['source_occurrence','document_version'].includes(node.type))){
@@ -104,8 +135,7 @@ test('drawer is initially hidden, accessible and renders fixed fields, branches,
   await drawer.open({projectId:'p',answerId:'a',citation:'E1',trigger});
   assert.equal(root.hidden,false);
   const nodes=flatten(root),tabs=nodes.filter(n=>n.getAttribute('role')==='tab');
-    // 页签文案改成了人话（用户反馈"看不懂证据链"）；断言的是"两个页签：链路 + 原始数据"，不是旧词
-  assert.deepEqual(tabs.map(n=>n.textContent),['这条引用从哪来','原始接口数据（开发排查用）']);
+  assert.deepEqual(tabs.map(n=>n.textContent),['证据链','原始接口数据']);
   assert.equal(doc.getElementById('provenance-status').getAttribute('aria-live'),'polite');
   const chain=doc.getElementById('provenance-chain');
   assert.ok(chain.textContent.includes('<script>literal</script>'));
@@ -114,7 +144,7 @@ test('drawer is initially hidden, accessible and renders fixed fields, branches,
   assert.equal(doc.getElementById('provenance-raw').textContent,JSON.stringify(data,null,2));
   assert.equal(root.dataset.state,'partial');
   let excerpt,record;window.openFrozenSourceEvidence=x=>excerpt=x;window.openRecordHistory=x=>record=x;
-  nodes.find(n=>n.textContent==='查看历史原文').dispatch('click');assert.equal(excerpt.highlight,'<img>');
+  flatten(chain).find(n=>n.textContent==='查看历史原文').dispatch('click');assert.equal(excerpt.highlight,'<img>');
   nodes.find(n=>n.textContent==='版本历史').dispatch('click');assert.equal(record,'record');
   tabs[1].dispatch('click');assert.equal(chain.hidden,true);
   root.dispatch('keydown',{key:'Escape'});assert.equal(root.hidden,true);assert.equal(doc.activeElement,trigger);
@@ -176,6 +206,7 @@ test('narrow drawer mounts below answers and layout changes retain focus, tabs a
   assert.equal(doc.activeElement,focused);assert.equal(signal.aborted,false);
   request.resolve({ok:true,json:async()=>payload()});await pending;
   assert.equal(root.dataset.state,'partial');
+  doc.getElementById('provenance-audit').open=true;
   const apiTab=doc.getElementById('provenance-tab-1');apiTab.dispatch('click');apiTab.focus();
   media.change(false);
   assert.equal(doc.activeElement,apiTab);assert.equal(apiTab.getAttribute('aria-selected'),'true');

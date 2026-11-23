@@ -36,7 +36,7 @@
   function settled(){return resize();}
 
   function showPanel(kind){
-    if(!panel||!panes.has(kind))return;
+    if(!panel||!panes.has(kind)||activePanel===kind)return;
     if(!activePanel)returnFocus=document.activeElement;
     const hiding=panes.get(activePanel);
     const moveFocus=hiding!==panes.get(kind)&&hiding?.contains(document.activeElement);
@@ -76,7 +76,7 @@
     if(!surface)return;
     surface.dataset.state=String(kind||'idle');
     const message=typeof detail==='string'?detail:detail?.message||'';
-    status.textContent=message;status.hidden=!message;resize();
+    status.textContent=message;status.title=message;status.hidden=!message;resize();
   }
 
   function install(){

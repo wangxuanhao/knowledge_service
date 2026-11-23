@@ -8,7 +8,7 @@ def enrich_source_context(repository, project, scope, result):
     from ..repository.scoped_reads import ScopedReads
     reader = ScopedReads(repository)
     sources, neighbors = [], []
-    authorizations = {}
+    authorizations, headings = {}, {}
     groups = result.get('platform_groups') or [result]
     for group in groups:
         group_scope = dict(scope)
@@ -21,6 +21,8 @@ def enrich_source_context(repository, project, scope, result):
                 'platforms': {'mode': 'specific', 'values': [platform]}}
         hit_rows = group.get('hits', [])
         context = reader.source_context(project, group_scope, hit_rows)
+        headings.update({(version, platform, mode): value
+                         for version, value in context.get('_document_headings', {}).items()})
         anchors = {row['version_id']: row for row in hit_rows if row.get('version_id')}
         for key in ('source_chunks', 'context_chunks'):
             group[key] = []
@@ -44,4 +46,5 @@ def enrich_source_context(repository, project, scope, result):
     result['source_chunks'] = sources
     result['context_chunks'] = neighbors
     result['_source_context_authorizations'] = authorizations
+    return headings
     return result

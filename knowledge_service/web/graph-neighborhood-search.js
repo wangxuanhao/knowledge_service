@@ -160,6 +160,31 @@
     node.addEventListener('click', action);
     return node;
   }
+  function seedMatchDetails(row, query, semantic) {
+    const {rankBadges, appendText} = root.SourceMatchView;
+    const mode = semantic ? 'semantic' : 'keyword';
+    const details = element('span', '', 'neighborhood-lookup-match');
+    for (const text of rankBadges({mode, score:row.score})) {
+      details.append(element('span', text));
+    }
+    if (semantic) {
+      details.append(element('span', '匹配实体向量'));
+    } else {
+      const hasQuery = value => String(value ?? '').toLowerCase().includes(query.toLowerCase());
+      const aliases = Array.isArray(row.metadata?.aliases) ? row.metadata.aliases : [];
+      const fields = [['命中实体名称', row.text], ['命中实体 ID', row.id],
+        ['命中实体别名', aliases.find(hasQuery)]];
+      for (const [label, value] of fields) {
+        if (!hasQuery(value)) continue;
+        const field = element('span');
+        const excerpt = element('span', ' · ');
+        appendText(excerpt, value, query, true);
+        field.append(element('span', label), excerpt);
+        details.append(field);
+      }
+    }
+    return details;
+  }
 
   function withoutDisplayFilters(scope) {
     const { entity_type, predicate, ...applied } = scope;
@@ -185,9 +210,6 @@
       <details data-ns="settings" open>
         <summary>设置检索起点与范围</summary>
         <form data-ns="lookup">
-          <label class="neighborhood-lookup-mode">起点查找方式
-            <select data-ns="lookup-mode" aria-describedby="neighborhood-lookup-hint"><option value="keyword">关键词</option><option value="semantic">语义向量</option></select>
-          </label>
           <p id="neighborhood-lookup-hint" data-ns="lookup-hint" class="subtle" hidden></p>
           <div class="neighborhood-lookup-field">
             <label for="neighborhood-query">定位起点实体</label>
@@ -201,7 +223,7 @@
           </div>
         </form>
         <form data-ns="start">
-          <p data-ns="seed" class="neighborhood-seed">请选择起点实体</p>
+          <p data-ns="seed" class="neighborhood-seed" role="status">从图上选择起点，或在顶部搜索实体。</p>
           <div class="neighborhood-settings-grid">
             <label>遍历方向<select data-ns="direction"><option value="both">双向</option><option value="forward">沿关系箭头</option><option value="backward">逆关系箭头</option></select></label>
             <label>最大跳数<input data-ns="hops" type="number" min="0" max="10" step="1" value="2" required></label>
@@ -234,7 +256,7 @@
     layout.registerPanel('neighborhood', '邻域检索', pane);
     const part = name => pane.querySelector(`[data-ns="${name}"]`);
     const lookupField = part('query'), choices = part('choices'), lookupStatus = part('lookup-status');
-    const lookupMode = part('lookup-mode'), lookupHint = part('lookup-hint');
+    const lookupMode = byId('neighborhood-search-mode'), lookupHint = part('lookup-hint');
     const filterField = part('filter-field'), filterValue = part('filter-value'), attributeValue = part('attribute-value');
     const filterControl = () => filterField.value === 'attribute_value' ? attributeValue : filterValue;
     const relationTypes = part('types'), matchList = part('matches');
@@ -256,11 +278,12 @@
     function isOpen() { return layout.snapshot().panel === 'neighborhood'; }
 
     function openPanel() {
+      const wasOpen = isOpen();
       syncLookupMode();
       refreshRelationshipTypes();
       render(session.snapshot());
       layout.showPanel('neighborhood');
-      if (visibleStage && !narrow.matches) drawMap(visibleStage);
+      if (!wasOpen && visibleStage && !narrow.matches) drawMap(visibleStage);
     }
 
     function catalog(id) {
@@ -296,7 +319,8 @@
       seed = row ? { id: row.id, label: row.text || row.label || row.id, version_id: row.version_id, version: row.version } : null;
       seedScope = seed && scope ? withoutDisplayFilters(scope) : null;
       const range = seedScope && JSON.stringify(seedScope) !== JSON.stringify(readContext().scope) ? ' · 沿用实体详情范围' : '';
-      part('seed').textContent = seed ? `起点 · ${seed.label}${range}` : '请选择起点实体';
+      part('seed').textContent = seed ? `起点 · ${seed.label}${range}` : '从图上选择起点，或在顶部搜索实体。';
+      part('seed').classList.toggle('is-selected', Boolean(seed));
       part('seed').title = seed?.id || '';
       part('run').disabled = !seed || session.snapshot().pending;
     }
@@ -310,6 +334,23 @@
       else openPanel();
       part('settings').open = true;
       part('direction').focus({ preventScroll: true });
+    }
+
+    function pickFromGraph(row, scope) {
+      const panel = layout.snapshot().panel;
+      const neighborhoodMode = root.RetrievalWorkspace?.mode === 'neighborhood';
+      if (panel !== 'neighborhood' && !(panel === 'closed' && neighborhoodMode)) return false;
+      part('settings').open = true;
+      if (row.kind !== 'entity') {
+        lookupStatus.textContent = '点击图上的实体节点来设置起点。';
+        return true;
+      }
+      clearLookup();
+      chooseSeed(row, scope);
+      lookupField.value = seed.label;
+      if (neighborhoodMode) byId('query').value = seed.label;
+      if (panel === 'closed') layout.showPanel('neighborhood');
+      return true;
     }
 
     function searchForEntity(text) {
@@ -341,6 +382,9 @@
       if (historical) lookupMode.value = 'keyword';
       const semantic = lookupMode.value === 'semantic';
       lookupField.placeholder = semantic ? '描述想找的实体' : '实体名称或 ID';
+      if (root.RetrievalWorkspace?.mode === 'neighborhood') {
+        byId('query').placeholder = semantic ? '描述想找的实体，定位邻域起点' : '输入实体名称或 ID，查找邻域起点';
+      }
       lookupHint.textContent = historical ? '历史时点使用关键词查找起点。' : '可用自然语言查找实体。选定起点后，按图谱关系展开。';
       lookupHint.hidden = !historical && !semantic;
       return semantic;
@@ -385,6 +429,7 @@
             part('direction').focus({ preventScroll: true });
           });
           option.append(element('small', [row.type_label || labelOf(row.type), row.id].filter(Boolean).join(' · ')));
+          option.append(seedMatchDetails(row, query, semantic));
           item.append(option); choices.append(item);
         }
         choices.hidden = !choices.childElementCount;
@@ -691,7 +736,7 @@
     updateFilterInput();
     syncLookupMode();
     render(session.snapshot());
-    root.NeighborhoodSearch = Object.freeze({ open: openPanel, openForEntity, searchForEntity });
+    root.NeighborhoodSearch = Object.freeze({ open: openPanel, openForEntity, searchForEntity, pickFromGraph });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', install, { once: true });

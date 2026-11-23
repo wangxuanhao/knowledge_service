@@ -274,6 +274,8 @@ def test_common_evidence_never_populates_unknown_scope_group():
     assert [item['id'] for item in groups[0]['evidence_rows']] == ['common']
     assert groups[1]['evidence_rows'] == []
     assert [item['id'] for item in groups[2]['evidence_rows']] == ['common']
+    assert any(warning.startswith('平台范围待确认：') for warning in result['coverage_warnings'])
+    assert not any(warning.startswith('None：') for warning in result['coverage_warnings'])
 
 
 @pytest.mark.parametrize('include_references', [False, True])

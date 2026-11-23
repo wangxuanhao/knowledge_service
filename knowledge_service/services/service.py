@@ -866,7 +866,20 @@ class KnowledgeService:
         # Both native and degraded retrieval backfill exact authority sources.
         # The reader batches only hit anchors and same-source-version neighbors.
         from .retrieval_context import enrich_source_context
-        enrich_source_context(self.repository, project_id, scope, result)
+        headings = enrich_source_context(self.repository, project_id, scope, result) or {}
+        from ..domain.search_match import record_retrieval_match
+        strategy = (result.get('retrieval_policy') or {}).get('hybrid_strategy')
+        for group in [result, *result['platform_groups']]:
+            for row in group['hits']:
+                document = headings.get((row.get('version_id'), row.get('query_platform', group.get('platform')),
+                                         row.get('source_scope', group.get('source_scope'))))
+                row['retrieval_match'] = record_retrieval_match(
+                    row, request['query'], mode=group.get('active_mode'), strategy=strategy,
+                    backend=group.get('_backend'), document=document)
+                if document:
+                    title = document.get('title') or document.get('source_file')
+                    if isinstance(title, str) and title:
+                        row['search_source_title'] = title[:300]
         # The same published index and scoped seeds explain every delivery path.
         if request.get('ontology_expansion'):
             diagnostic = result.setdefault('ontology_expansion', {})

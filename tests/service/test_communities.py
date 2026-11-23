@@ -105,7 +105,13 @@ def test_community_routes_limit_scope_and_refresh_only_for_qualified_changes(tmp
         assert answer.status_code == 200, answer.text
         assert not answer.json()['generated']
         assert answer.json()['evidence'][0]['record_id'] == 'meituan'
+        assert 'keyword_match' not in answer.json()['communities'][0]
         assert len(calls) == 1
+        keyword_answer = client.post(url + '/ask', json={
+            'scope': scope, 'question': 'Does PAIRED appear here?', 'match_only': True,
+        }).json()
+        assert keyword_answer['coverage']['retrieval'] == 'keyword'
+        assert keyword_answer['communities'][0]['keyword_match'] == matched['communities'][0]['keyword_match']
 
         put_entity(repo, project, 'taobao2', platform='淘宝')
         app.state.community_refresh.refresh()
@@ -234,10 +240,18 @@ def test_community_reports_retry_in_place_and_cite_frozen_sources(tmp_path, monk
         state = wait_status(client, url, scope, lambda state: state['state'] == 'ready')
         assert state['revision'] == listing['status']['revision']
         assert client.post(url + '/ask', json={'mode': 'semantic', 'question': '有哪些主题？'}).status_code == 409
+        browse_query = {'mode': 'semantic', 'keyword': '没有字面匹配的描述'}
+        assert client.post(url, json=browse_query).status_code == 409
         assert client.post(url + '/build', json={'vectorize': True}).status_code == 200
         vector_status = wait_status(client, url, scope, lambda state: state['vector_index']['state'] == 'ready')
         assert vector_status['vector_index']['indexed'] == 1
         assert vector_status['revision'] == state['revision']
+        recalled = client.post(url, json=browse_query)
+        assert recalled.status_code == 200, recalled.text
+        assert recalled.json()['total'] == 1
+        assert recalled.json()['communities'][0]['id'] == community['id']
+        assert recalled.json()['communities'][0]['semantic_score'] == .9
+        assert client.post(url, json={**browse_query, 'anchor': 'absent'}).json()['total'] == 0
         semantic = client.post(url + '/ask', json={'mode': 'semantic', 'question': '有哪些主题？'}).json()
         assert semantic['communities'][0]['semantic_score'] == .9
         assert semantic['coverage']['reports_with_eligible_evidence'] == 1
@@ -272,6 +286,14 @@ def test_community_reports_retry_in_place_and_cite_frozen_sources(tmp_path, monk
         assert broad['coverage']['retrieval'] == 'representative'
         assert broad['coverage']['matched_communities'] == 0
         assert broad['coverage']['included_communities'] == 1
+        assert 'keyword_match' not in broad['communities'][0]
+        matched_only = client.post(url + '/ask', json={
+            'question': '项目有哪些主要主题？', 'generate': True, 'match_only': True,
+        })
+        assert matched_only.status_code == 200, matched_only.text
+        empty = matched_only.json()
+        assert empty['communities'] == empty['evidence'] == []
+        assert not empty['generated'] and empty['generation_error'] is None
 
         vectors.fail_next = True
         put_entity(repo, project, 'newly-isolated')

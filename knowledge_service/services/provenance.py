@@ -11,6 +11,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 from ..core.time import normalize_time
+from ..domain.search_match import sanitize_retrieval_match
 from .qa_policy import DOCUMENT, original_quote_allowed
 
 
@@ -191,6 +192,8 @@ class ProvenanceService:
             score = item.get('score')
             audit = {'rank': rank, 'score': score if type(score) in (int, float) and math.isfinite(score) else None,
                      'channel': _text(item.get('channel') or item.get('kind')), 'selected': True}
+            if match := sanitize_retrieval_match(item.get('retrieval_match')):
+                audit['retrieval_match'] = match
             audit.update({key: _public_json(item[key]) for key in _TEMPORAL_FIELDS
                           if key in item and key != 'source_eligibility'})
             if item.get('kind')=='attribute':
@@ -411,7 +414,9 @@ class ProvenanceService:
                           'attribute_conflicts':request.get('attribute_conflicts',[]),
                           'requested_mode': request['requested_mode'], 'active_modes': request['active_modes'],
                           **{key: offered['payload'][key] for key in _TEMPORAL_FIELDS if key in offered['payload']},
-                          **{key: offered['payload'][key] for key in ('rank', 'score', 'selected')}},
+                          **{key: offered['payload'][key] for key in ('rank', 'score', 'selected')},
+                          **({'retrieval_match': offered['payload']['retrieval_match']}
+                             if 'retrieval_match' in offered['payload'] else {})},
             'nodes': sorted(nodes, key=lambda node: (_NODE_ORDER[node['type']], node['ref'])),
             'edges': [{key: edge[key] for key in ('source_ref', 'relation', 'target_ref', 'ordinal', 'payload')}
                       for edge in sorted(graph_edges, key=lambda edge: (edge['ordinal'], edge['source_ref'], edge['target_ref']))],

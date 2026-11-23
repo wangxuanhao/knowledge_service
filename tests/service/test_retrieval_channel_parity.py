@@ -219,7 +219,8 @@ def test_native_and_historical_reads_get_the_same_versioned_source_context(tmp_p
     from knowledge_service.services.service import KnowledgeService
     repo = Repository(tmp_path / 'source-context.sqlite')
     project = repo.create_project('来源补取')['id']
-    document = repo.put_record(project, {'id': 'doc', 'kind': 'document', 'text': '来源'})
+    document = repo.put_record(project, {'id': 'doc', 'kind': 'document', 'text': '来源',
+                                        'metadata': {'title': '退款规则', 'source_file': 'rules.md'}})
     rows = repo.put_batch(project, [
         {'id': 'anchor', 'kind': 'chunk', 'source_id': 'doc', 'text': '退款',
          'metadata': {'source_version_id': document['version_id'], 'start_char': 0}},
@@ -243,6 +244,10 @@ def test_native_and_historical_reads_get_the_same_versioned_source_context(tmp_p
     request = {'query': '退款', 'retrieval_mode': 'keyword', 'k_entities': 1, 'k_chunks': 0,
                'k_relations': 0, 'kinds': ['entity']}
     native = service.search(project, request)
+    chunk_search = service.search(project, {**request, 'kinds': ['chunk'], 'k_chunks': 1})
+    assert chunk_search['hits'][0]['search_source_title'] == '退款规则'
+    assert chunk_search['hits'][0]['retrieval_match']['fields'] == ['body', 'title']
+    assert 'retrieval_match' not in native['source_chunks'][0]
     monkeypatch.setattr(repo.projections, 'search_index', _unbuilt_index)
     with pytest.raises(RuntimeError, match='not_built'):
         service.search(project, request)

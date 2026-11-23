@@ -72,11 +72,15 @@
         return;}
     }
     if(page==='qa'){
-      const heading=query('.qa-page-heading');
+      const active=tab.dataset?.communityActive==='questions'?'#community-questions':'#qa-page';
+      const heading=query(active+' > .qa-page-heading')||query('.qa-page-heading');
       if(heading){heading.append(panel);return;}
     }
     tab.prepend(panel);
   }
+  document.addEventListener('community:question-view-changed',()=>{
+    if(context.page==='qa'){details.open=false;placePanel('qa');}
+  });
   function restore(){
     const page=context.page,allowed=context.isContentPage(page);
     panel.classList.toggle('hidden',!allowed);details.open=false;

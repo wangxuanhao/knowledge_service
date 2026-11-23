@@ -29,3 +29,11 @@ test('社区范围严格匹配已应用范围，无法映射时保留显式提�
   assert.equal(communityScope({ontology_ids:['release-1']}), null);
   assert.equal(communityScope({ontology_scope:'unknown'}), null);
 });
+
+test('自动问答无需社区选择，有报告向量时优先语义', () => {
+  const {questionMode} = require(join(web, 'community-workspace.js'));
+  assert.equal(questionMode('auto', 0, true), 'semantic');
+  assert.equal(questionMode('auto', 0, false), 'keyword');
+  assert.equal(questionMode('auto', 2, true), 'keyword');
+  assert.equal(questionMode('global', 2, true), 'global');
+});

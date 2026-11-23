@@ -1,7 +1,7 @@
 /* Restricted answer formatting: source text never becomes HTML or a URL. */
 (() => {
   function inline(text) {
-    const parts=[], pattern=/\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([EURF][1-9][0-9]*)\]/g;
+    const parts=[], pattern=/\*\*([^*\n]+)\*\*|`([^`\n]+)`|\[([EURF][1-9][0-9]*|E-[a-z0-9]+)\]/gi;
     let cursor=0, match;
     while((match=pattern.exec(String(text)))) {
       if(match.index>cursor)parts.push({type:'text',text:text.slice(cursor,match.index)});
@@ -32,6 +32,39 @@
         list.append(node);
       }else{list=null;container.append(node);}
     }
+  }
+  function sourceTitle(value) {
+    const title=String(value||'').trim();
+    const markdown=title.match(/^(.*)\.(?:md|markdown)$/i);
+    if(!markdown)return title;
+    const name=markdown[1];
+    const path=name.match(/^业务规则_[^_]+_[^_]+_(.+)$/);
+    return path?.[1]||name;
+  }
+  function evidencePreview(text) {
+    const lines=blocks(text),body=lines.filter(line=>line.tag!=='h3');
+    const preview=(body.length?body:lines).map(line=>inline(line.text).map(token=>token.text).join(''))
+      .join(' ').replace(/\s+/g,' ').trim();
+    return text?.length===240&&preview&&!/[。！？.!?…]$/.test(preview)?preview+'…':preview;
+  }
+  function distinctSourceQuote(sourceQuote, evidenceText) {
+    const quote=evidencePreview(String(sourceQuote||'').slice(0,240));
+    const comparable=quote.replace(/…$/,'');
+    const excerpt=evidencePreview(evidenceText).replace(/…$/,'');
+    return comparable&&!excerpt.startsWith(comparable)?quote:'';
+  }
+  function isEvidenceTranscript(payload) {
+    if(payload.mode!=='evidence_only'||payload.error||!payload.answer_id||!Array.isArray(payload.evidence))return false;
+    let text=String(payload.text||'').trimStart();
+    const label=payload.answer_label&&payload.answer_label+'。';
+    if(label&&text.startsWith(label+'\n\n'))text=text.slice(label.length+2);
+    const match=text.match(/^\[(E[1-9][0-9]*)\][ \t]+/);
+    if(!match)return false;
+    const row=payload.evidence.find(item=>item?.citation===match[1]);
+    const excerpt=String(row?.text_preview||row?.text||'').trimStart().slice(0,96);
+    const original=text.slice(match[0].length).trimStart();
+    return !!excerpt&&(original.startsWith(excerpt)||
+      original.startsWith(excerpt.replace(/\[([A-Z][0-9]+)\]/g,'［$1］')));
   }
   const duration=value=>Number(value)>=1000?(Number(value)/1000).toFixed(2)+' s':Math.round(Number(value))+' ms';
   function expansionSummary(expansion) {
@@ -90,14 +123,16 @@
     }
     return {direct,supplemental};
   }
-  function status(payload={}) {
+  function status(payload={},showTimings=true) {
     const state=payload.generation||{},times=payload.timings_ms||{};
     let text=state.called?(payload.mode==='evidence_only'?'模型已调用 · 仅展示依据':'模型回答'):'仅展示依据';
     if(payload.answer_purpose==='document_explanation')text+=' · '+(payload.answer_label||'按文档说明，有效性待核对');
     if(state.requested&&!state.called)text+=' · 未调用模型：'+(state.skip_reason==='no_eligible_evidence'?'暂无确认有效的依据':'未找到回答依据');
-    if(Number.isFinite(times.total))text+=' · 总耗时 '+duration(times.total);
-    for(const [key,label] of [['retrieval','检索'],['eligibility','有效性检查'],['freeze','证据保存'],['llm','模型']])
-      if(Number.isFinite(times[key]))text+=' · '+label+' '+duration(times[key]);
+    if(showTimings){
+      if(Number.isFinite(times.total))text+=' · 总耗时 '+duration(times.total);
+      for(const [key,label] of [['retrieval','检索'],['eligibility','有效性检查'],['freeze','证据保存'],['llm','模型']])
+        if(Number.isFinite(times[key]))text+=' · '+label+' '+duration(times[key]);
+    }
     const expansion=expansionSummary(payload.ontology_expansion);
     if(expansion)text+=' · '+expansion;
     return text;
@@ -105,7 +140,16 @@
   function annotate(turn,payload) {
     let note=turn.querySelector('.qa-answer-status');
     if(!note){note=document.createElement('p');note.className='qa-answer-status';turn.prepend(note);}
-    note.textContent=payload.generation||payload.timings_ms||payload.ontology_expansion?status(payload):'历史回答';
+    note.textContent=payload.generation||payload.timings_ms||payload.ontology_expansion?status(payload,false):'历史回答';
+    if(payload.timings_ms)note.title=status(payload);
+    const panel=turn.querySelector('.qa-evidence-panel'),answer=turn.querySelector('.qa-answer');
+    if(!panel||!answer||!isEvidenceTranscript(payload))return;
+    if(panel.hidden)turn.querySelector('.qa-evidence-toggle')?.onclick();
+    const full=document.createElement('details');full.className='qa-full-transcript';
+    const label=document.createElement('summary');label.textContent='完整命中片段';
+    full.append(label,answer);turn.append(full);turn.dataset.result='evidence';
+    if(payload.generation?.requested===false)note.textContent='检索结果';
   }
-  window.QaPresentation={inline,blocks,render,expansionSummary,isExpansionRow,partitionExpansion,status,annotate};
+  window.QaPresentation={inline,blocks,render,sourceTitle,evidencePreview,distinctSourceQuote,isEvidenceTranscript,
+    expansionSummary,isExpansionRow,partitionExpansion,status,annotate};
 })();

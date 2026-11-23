@@ -94,6 +94,47 @@ test('validated final answer replaces unsafe streamed draft and history',async()
   assert.equal(env.history()[1].text,'没有已确认有效的依据。');
 });
 
+test('QA separates effective evidence counts from retrieval limits and keeps one source action',async()=>{
+  const env=setup();
+  vm.runInContext(fs.readFileSync(path.join(web,'qa-presentation.js'),'utf8'),env.context);
+  env.submit();await settle();
+  const sameTime='2026-11-23T10:05:51Z';
+  const metadata={applicability:{platforms:{mode:'specific',values:['美团']}}};
+  env.emit('evidence',{answer_id:'a',as_of:sameTime,known_at:sameTime,
+    evidence:[{citation:'E1',kind:'chunk',text:'# 规则\n\n完整命中片段。',query_platform:'美团',
+      validity_status:'effective',provenance_ref:'answer:a#E1',metadata,
+      sources:[{title:'规则.md',version:2,quote:'完整命中片段。'},
+        {title:'补充资料.md',version:1,quote:'另一处适用例外。'}]}],
+    platform_groups:[{source_scope:'unknown',evidence_count:0},
+      {source_scope:'specific',platform:'美团',evidence_count:2},
+      {source_scope:'specific',platform:'淘宝',evidence_count:0}],
+    coverage_warnings:['参考检索先在数据库匹配关键词，再有界读取最多 501 条候选。',
+      '上下文仅补充已检索到的相邻片段，条件或例外可能不完整。',
+      'None：未检索到该时点确认有效的依据，不能据此断言不存在规则。']});await settle();
+  const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
+  const article=panel.querySelector('.qa-evidence-item');
+  assert.equal(article.querySelectorAll('.provenance-citation').length,1);
+  const inspection=article.querySelector('.qa-evidence-item-details');
+  assert.doesNotMatch(inspection.textContent,/完整命中片段/);
+  assert.match(inspection.textContent,/另一处适用例外/);
+  const otherSource=inspection.querySelector('.qa-source-item');
+  assert.equal(otherSource.hidden,true);
+  inspection.querySelector('.qa-source-more').dispatch('click');
+  assert.equal(otherSource.hidden,false);
+  const detail=panel.querySelector('.qa-evidence-details');
+  assert.equal(detail.children[0].textContent,'本次检索范围');
+  assert.match(detail.querySelector('.qa-time-context').textContent,/规则判断时点/);
+  assert.doesNotMatch(detail.querySelector('.qa-time-context').textContent,/知识记录截止/);
+  const groups=detail.querySelector('.qa-reasoning-block');
+  assert.match(groups.textContent,/美团.*2 条有效依据/);
+  assert.match(groups.textContent,/淘宝.*未找到确认有效的依据/);
+  assert.doesNotMatch(groups.textContent,/undefined|范围待确认/);
+  const limits=detail.querySelector('.qa-retrieval-limits');
+  assert.equal(limits.tagName,'DETAILS');
+  assert.ok(!limits.open);
+  assert.match(limits.textContent,/501 条候选/);
+});
+
 test('QA submits the shared historical business time and explicit reference visibility',async()=>{
   const env=setup(),scope={valid_at:'2024-01-01T00:30:00.000Z',known_at:null,include_unknown:false};
   env.context.scope=()=>scope;env.get('qa-include-references').checked=false;
@@ -136,9 +177,9 @@ test('changed QA assets and accessible temporal controls have current cache vers
   const html=fs.readFileSync(path.join(web,'index.html'),'utf8');
   assert.match(html,/<script\b[^>]*\bsrc="\/assets\/workbench\.js\?v=[\w.-]+"/);
   assert.ok(html.includes('/assets/workbench.css?v=split-previews-20261110-1'));
-  assert.ok(html.includes('/assets/qa-presentation.js?v=ontology-sections-20261027-2'));
-  assert.ok(html.includes('/assets/provenance-drawer.js?v=display-time-20261123-1'));
-  assert.ok(html.includes('/assets/qa-page.css?v=workflow-ux-20261102-2'));
+  assert.ok(html.includes('/assets/qa-presentation.js?v=qa-source-and-scope-20261123-1'));
+  assert.ok(html.includes('/assets/provenance-drawer.js?v=retrieval-match-20261123-1'));
+  assert.ok(html.includes('/assets/qa-page.css?v=retrieval-match-20261123-1'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.doesNotMatch(html,/id="qa-as-of"/);assert.match(html,/id="scope-valid-at"[^>]*type="datetime-local"/);
 });
@@ -160,7 +201,7 @@ test('zero effective platform evidence describes the gap and governance dates su
   env.emit('evidence',{answer_id:'g',evidence:[],platform_groups:[{platform:'平台甲',source_scope:'specific',evidence_rows:[]}],uncertain_references:[row]});
   env.emit('done',{answer:'原文说明'});env.streams.at(-1).close();await settle();
   const panel=env.get('qa-transcript').querySelector('.qa-evidence-panel');
-  assert.match(panel.textContent,/未检索到本次时点确认有效的依据/);
+  assert.match(panel.textContent,/未找到确认有效的依据/);
   assert.match(panel.textContent,/有效期核对：版本 governed-v3/);assert.match(panel.textContent,/失效（不含）：2025年01月01日/);
   assert.match(panel.textContent,/未维护生效时间/);assert.match(panel.textContent,/发布日期推定/);
   const governance=env.history()[1].uncertain_references[0].source_eligibility[0];

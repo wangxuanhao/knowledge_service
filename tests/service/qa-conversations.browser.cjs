@@ -139,6 +139,39 @@ test('QA shows the shared scope and submits choices from project dropdowns',asyn
   }finally{await env.close();}
 });
 
+test('evidence-only chat opens concise source cards and preserves the full text across reloads',async()=>{
+  const env=await fixture();
+  try{
+    const page=await env.page();
+    const article='# 一**、 城市生活指南**\n\n### 1、 指南介绍\n\n平台根据**城市特色**筛选热门主题。';
+    const answer='[E1] '+article;
+    const evidence={citation:'E1',kind:'chunk',query_platform:'美团',source_scope:'specific',text:article,
+      provenance_ref:'answer:city#E1',sources:[{title:'业务规则_大众点评_大众点评基础规则_城市生活指南.md',version:2}]};
+    await page.route('**/qa/stream',route=>route.fulfill({contentType:'text/event-stream; charset=utf-8',
+      body:[['evidence',{answer_id:'city',evidence:[evidence],requested_mode:'hybrid',active_modes:['hybrid'],degraded:false,_backend:'milvus'}],
+        ['delta',{text:answer+'\n\n'}],['done',{answer_id:'city',mode:'evidence_only',answer,generation:{requested:false,called:false}}]]
+        .map(([event,data])=>'event: '+event+'\ndata: '+JSON.stringify(data)+'\n\n').join('')}));
+    await page.fill('#qa-query','城市');
+    await page.click('#qa');
+    await page.waitForSelector('.qa-turn-assistant[data-state="done"]');
+    const panel=page.locator('.qa-evidence-panel');
+    assert.equal(await panel.isVisible(),true);
+    assert.equal(await panel.locator('.qa-evidence-source-title').innerText(),'城市生活指南');
+    assert.equal(await panel.locator('.qa-evidence-excerpt').innerText(),'平台根据城市特色筛选热门主题。');
+    const copy=page.locator('.qa-full-transcript');
+    assert.equal(await copy.locator('.qa-answer').isVisible(),false);
+    await copy.locator('summary').click();
+    assert.match(await copy.locator('.qa-answer').innerText(),/平台根据城市特色筛选热门主题/);
+    await page.waitForFunction(()=>document.querySelector('.qa-session-select[aria-current="true"] small')?.textContent.includes('2 条消息'));
+    await page.reload({waitUntil:'load'});
+    await page.click('[data-tab="qa"]');
+    await page.waitForSelector('.qa-turn-assistant[data-result="evidence"]');
+    assert.equal(await panel.isVisible(),true);
+    assert.equal(await copy.locator('.qa-answer').isVisible(),false);
+    assert.deepEqual(env.errors,[]);
+  }finally{await env.close();}
+});
+
 test('server conversations create, switch, rename, restore, delete and stay inside the mobile viewport',async()=>{
   const env=await fixture();
   try{
@@ -228,7 +261,8 @@ test('server conversations create, switch, rename, restore, delete and stay insi
     await appMenu.click();assert.equal(await other.locator('body>aside nav').isVisible(),true);
     assert.equal(await other.getByRole('button',{name:'资料库',exact:true}).isVisible(),true);
     await appMenu.click();assert.equal(await other.locator('body>aside nav').isVisible(),false);
-    assert.ok(await other.locator('#qa-page').evaluate(node=>node.getBoundingClientRect().top<100),'mobile chat should use a compact project header');
+    const top=await other.locator('#qa-page').evaluate(node=>node.getBoundingClientRect().top);
+    assert.ok(top<100,'mobile chat should use a compact project header, got '+top);
     await other.click('#qa-sessions-toggle');
     assert.equal(await other.locator('#qa-sessions-backdrop').isVisible(),true);
     await other.click('#qa-sessions-close');

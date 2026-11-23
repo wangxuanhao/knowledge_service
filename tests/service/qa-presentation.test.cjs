@@ -17,6 +17,34 @@ test('answer formatting recognizes headings, lists, emphasis and citations witho
   assert.equal(p.inline('**没有闭合')[0].type,'text');
   assert.ok(!tokens.some(t=>t.type==='html'||t.type==='link'));
 });
+test('frozen source previews read like text and imported titles retain their document name',()=>{
+  const p=api();
+  const raw='# 一**、 城市生活指南**\n\n### 1、 城市旅行指南介绍\n\n城市旅行指南依据**城市特色**筛选热门主题。';
+  assert.equal(p.evidencePreview(raw),'城市旅行指南依据城市特色筛选热门主题。');
+  assert.equal(p.evidencePreview('### **适用条件**'),'适用条件');
+  assert.equal(p.sourceTitle('业务规则_大众点评_大众点评基础规则_大众点评城市生活指南.md'),'大众点评城市生活指南');
+  assert.equal(p.sourceTitle('项目_补充说明.md'),'项目_补充说明');
+});
+
+test('source detail omits a repeated search excerpt and keeps additional clause text',()=>{
+  const p=api();
+  const excerpt='第一条 交易适用范围。第二条 商户须保留凭证。';
+  assert.equal(p.distinctSourceQuote('# 交易规则\n\n第一条 **交易适用范围**。',excerpt),'');
+  assert.equal(p.distinctSourceQuote(excerpt,excerpt),'');
+  assert.equal(p.distinctSourceQuote('第三条 线下订单例外。',excerpt),'第三条 线下订单例外。');
+});
+
+test('evidence-only presentation distinguishes verbatim source output from an authored answer',()=>{
+  const p=api(),text='# 城市指南\n\n适用于指定城市。';
+  const payload={mode:'evidence_only',answer_id:'a',text:'[E1] '+text,evidence:[{citation:'E1',text_preview:text}]};
+  assert.equal(p.isEvidenceTranscript(payload),true);
+  assert.equal(p.isEvidenceTranscript({...payload,mode:'llm'}),false);
+  assert.equal(p.isEvidenceTranscript({...payload,text:'[E1] 是有关城市指南的整理结论。'}),false);
+  assert.equal(p.isEvidenceTranscript({...payload,error:'中断'}),false);
+  assert.equal(p.isEvidenceTranscript({...payload,answer_id:null}),false);
+  assert.equal(p.isEvidenceTranscript({...payload,answer_label:'按文档说明，有效性待核对',
+    text:'按文档说明，有效性待核对。\n\n[E1] '+text}),true);
+});
 test('generation status explains an enabled but skipped model and reports numeric milliseconds',()=>{
   const p=api();
   assert.match(p.status({generation:{requested:true,called:false,skip_reason:'no_eligible_evidence'},timings_ms:{total:877,retrieval:605}}),/未调用模型.*有效/);

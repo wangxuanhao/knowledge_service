@@ -88,7 +88,7 @@ def test_provenance_drawer_safe_accessible_contract():
     js = read('provenance-drawer.js')
     for marker in ('ProvenanceDrawer', 'AbortController', 'aria-labelledby', 'aria-live',
                    'Escape', 'focus()', 'onProjectChange', 'createElement', 'textContent',
-                   '证据链', 'API 数据'):
+                   '证据链', '原始接口数据'):
         assert marker in js, marker
     assert '缺少答案标识，无法定位已冻结的证据链' in read('workbench.js')
     assert 'renderLegacyNote' not in js
@@ -232,18 +232,11 @@ def test_qa_relationship_paths_use_accurate_user_facing_terms():
 
 
 def test_provenance_guide_is_outside_the_cleared_panel():
-    """证据溯源的"这一页怎么看"必须挂在常驻容器里。
-
-    它以前是 chain 的第一个子节点，而 open()/render() 会 replaceChildren() 清空 chain，
-    于是"读取中/读取失败"时说明一起被清掉，用户看到的是空抽屉（反馈：看不懂 E1/E2）。
-    """
+    """载入成功或失败时保留引用编号，原文先于折叠的审核记录。"""
     js = read('provenance-drawer.js')
-    assert 'guideHost' in js and 'ensureGuide' in js
-    assert 'chain.replaceChildren(explainBlock())' not in js, '说明块又回到会被清空的容器里了'
-    assert 'ensureGuide();chain.replaceChildren();' in js, 'render() 必须先保说明、再清卡片'
-    for marker in ('E1 / E2', '给 LLM 的提示'):
-        assert marker in js, marker
-    # 标签名要能自解释，不能再叫"证据链 / API 数据"
+    assert 'root.append(header,guideHost,status,overview,audit)' in js
+    assert '是这条回答的引用编号' in js
+    assert 'audit.open=false' in js
     assert '原始接口数据' in js
 
 
@@ -569,7 +562,7 @@ def test_version_management_offers_view_and_go_back():
     assert '查看这一版' in panel
     assert '回到这一版' in panel
     # 回退不能悄悄改写历史：文案要自己说清它是"再发一版"
-    assert '不改写历史' in panel
+    assert '历史版本原样保留' in panel
 
 
 def test_revert_is_an_explicit_source_kind_with_acknowledgement():

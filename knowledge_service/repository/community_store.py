@@ -16,34 +16,51 @@ _KEYWORD_MATCH = """
         'field', field, 'source_title', source_title,
         'before', (CASE WHEN match_start > 25 THEN '…' ELSE '' END)
                   || substring(value FROM greatest(1, match_start - 24) FOR least(24, match_start - 1)),
-        'term', substring(value FROM match_start FOR char_length(candidate.needle)),
-        'after', substring(value FROM match_start + char_length(candidate.needle) FOR 42)
-                 || (CASE WHEN char_length(value) >= match_start + char_length(candidate.needle) + 42
+        'term', substring(value FROM match_start FOR char_length(needle)),
+        'after', substring(value FROM match_start + char_length(needle) FOR 42)
+                 || (CASE WHEN char_length(value) >= match_start + char_length(needle) + 42
                           THEN '…' ELSE '' END)
     ) AS keyword_match
     FROM (
-        SELECT fields.*, strpos(lower(value), candidate.needle) AS match_start
+        SELECT fields.*, matched.*
         FROM (
             SELECT * FROM (VALUES
-                (1, 0::bigint, 0, 'report_title', candidate.report->>'title', NULL::text),
+                (1, 0::bigint, 0, 'report_title',
+                    CASE WHEN NOT candidate.answer_search THEN candidate.report->>'title' END, NULL::text),
                 (2, 0::bigint, 0, 'report_summary', candidate.report->>'summary', NULL::text),
                 (3, 0::bigint, 0, 'community_title', candidate.title, NULL::text)
             ) AS headline(priority, ordinal, part, field, value, source_title)
             UNION ALL
-            SELECT 4, ordinal, part, 'entity', field_value, NULL::text
+            SELECT 4, ordinal, part, field, field_value, NULL::text
             FROM jsonb_array_elements(candidate.content->'members') WITH ORDINALITY AS items(item, ordinal)
-            CROSS JOIN LATERAL (VALUES (1, item->>'text'), (2, item->>'aliases')) AS member_fields(part, field_value)
+            CROSS JOIN LATERAL (VALUES
+                (1, 'entity', item->>'text'), (2, 'entity_alias', item->>'aliases'),
+                (3, 'entity_id', CASE WHEN candidate.answer_search THEN item->>'id' END),
+                (4, 'entity_type', CASE WHEN candidate.answer_search THEN item->>'type' END)
+            ) AS member_fields(part, field, field_value)
             UNION ALL
-            SELECT 5, ordinal, 0, 'relationship', item->>'text', NULL::text
+            SELECT 5, ordinal, part, field, field_value, NULL::text
             FROM jsonb_array_elements(candidate.content->'relationships') WITH ORDINALITY AS items(item, ordinal)
+            CROSS JOIN LATERAL (VALUES
+                (1, 'relationship', item->>'text'),
+                (2, 'relationship_id', CASE WHEN candidate.answer_search THEN item->>'id' END),
+                (3, 'relationship_type', CASE WHEN candidate.answer_search THEN item->>'type' END)
+            ) AS relation_fields(part, field, field_value)
             UNION ALL
-            SELECT 6, ordinal, 0, 'evidence', item->>'quote', item->>'title'
+            SELECT 6, ordinal, 0, CASE WHEN item->>'kind' = 'document' THEN 'evidence' ELSE 'graph_evidence' END,
+                item->>'quote', item->>'title'
             FROM jsonb_array_elements(candidate.content->'evidence') WITH ORDINALITY AS sources(item, ordinal)
-            WHERE item->>'kind' = 'document'
+            WHERE item->>'kind' = 'document' OR candidate.answer_search
         ) AS fields
+        CROSS JOIN LATERAL (
+            SELECT needle, term_order, strpos(lower(value), needle) AS match_start
+            FROM unnest(candidate.needles) WITH ORDINALITY AS terms(needle, term_order)
+            WHERE needle <> '' AND strpos(lower(value), needle) > 0
+            ORDER BY term_order
+            LIMIT 1
+        ) AS matched
     ) AS located
-    WHERE match_start > 0
-    ORDER BY priority, ordinal, part
+    ORDER BY term_order, priority, ordinal, part
     LIMIT 1
 """
 
@@ -94,6 +111,13 @@ class CommunityStore:
               AND (?::int IS NULL OR level=?)
             ORDER BY level, member_count DESC, id""", (project, scope_key, level, level)).fetchall()
         return [{'id': row['id'], 'report': json.loads(row['report'])} for row in rows]
+
+    def member_communities(self, project, scope_key, member_id):
+        rows = self.repo._db.execute("""
+            SELECT id FROM knowledge_communities
+            WHERE project_id=? AND scope_key=? AND member_ids @> ARRAY[?::text]
+            """, (project, scope_key, member_id)).fetchall()
+        return {row['id'] for row in rows}
 
     def job(self, scope):
         if not scope or not scope['job_id']:
@@ -213,7 +237,8 @@ class CommunityStore:
             row = self.repo._db.execute(f"""
                 WITH keyword_query AS (SELECT ?::text AS needle),
                 candidates AS (
-                    SELECT * FROM knowledge_communities CROSS JOIN keyword_query
+                    SELECT knowledge_communities.*, ARRAY[needle] AS needles, FALSE AS answer_search
+                    FROM knowledge_communities CROSS JOIN keyword_query
                     WHERE {where} AND greatest(strpos(search_text, needle),
                         strpos(lower(report->>'summary'), needle), strpos(lower(report->>'title'), needle)) > 0
                 ), matched AS MATERIALIZED (
@@ -247,6 +272,15 @@ class CommunityStore:
         return {**data, 'content': json.loads(data['content']), 'report': json.loads(data['report']),
                 'children': [dict(row) for row in children]}
 
+    def summaries(self, project, scope_key, ids):
+        if not ids:
+            return {}
+        rows = self.repo._db.execute(f"""
+            SELECT {_SUMMARY} FROM knowledge_communities
+            WHERE project_id=? AND scope_key=? AND id=ANY(?::text[])
+            """, (project, scope_key, ids)).fetchall()
+        return {row['id']: dict(row) for row in rows}
+
     def candidates(self, project, scope_key, terms, *, limit):
         if not terms:
             return [], 0
@@ -263,7 +297,7 @@ class CommunityStore:
             (terms, project, scope_key, limit)).fetchall()
         return [row['id'] for row in rows], rows[0]['matching_count'] if rows else 0
 
-    def answer_details(self, project, scope_key, ids, *, cited_only=False):
+    def answer_details(self, project, scope_key, ids, *, cited_only=False, keyword_terms=()):
         if not ids:
             return []
         evidence = "content->'evidence'"
@@ -273,12 +307,30 @@ class CommunityStore:
                            WHERE source->>'id' IN (
                                SELECT jsonb_array_elements_text(finding->'citations')
                                FROM jsonb_array_elements(report->'findings') AS findings(finding)))"""
+        params = [project, scope_key, ids]
+        keyword_field = keyword_join = ''
+        if keyword_terms:
+            keyword_field = ', match.keyword_match::text AS keyword_match'
+            keyword_join = f"""
+                LEFT JOIN LATERAL (
+                    SELECT located.keyword_match
+                    FROM (SELECT c.content, c.report, c.title, ?::text[] AS needles, TRUE AS answer_search) AS candidate
+                    CROSS JOIN LATERAL ({_KEYWORD_MATCH}) AS located
+                ) AS match ON TRUE
+            """
+            params.insert(0, list(keyword_terms))
         rows = self.repo._db.execute(f"""
-            SELECT {_SUMMARY}, ({evidence})::text AS evidence, report::text
-            FROM knowledge_communities WHERE project_id=? AND scope_key=? AND id=ANY(?::text[])
-            """, (project, scope_key, ids)).fetchall()
+            SELECT {_SUMMARY}, ({evidence})::text AS evidence, report::text{keyword_field}
+            FROM knowledge_communities c {keyword_join}
+            WHERE project_id=? AND scope_key=? AND id=ANY(?::text[])
+            """, params).fetchall()
         by_id = {row['id']: {**dict(row), 'evidence': json.loads(row['evidence']),
                              'report': json.loads(row['report'])} for row in rows}
+        if keyword_terms:
+            for row in by_id.values():
+                match = row.pop('keyword_match')
+                if match is not None:
+                    row['keyword_match'] = json.loads(match)
         return [by_id[ident] for ident in ids]
 
     def representative_communities(self, project, scope_key, *, limit):

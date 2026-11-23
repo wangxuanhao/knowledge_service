@@ -74,12 +74,6 @@ body main #tab-search #graph-workspace-surface[data-panel="neighborhood"] #graph
 }
 
 #graph-panel-neighborhood label { min-width: 0; margin: 0; font-size: 12px; }
-#graph-panel-neighborhood .neighborhood-lookup-mode {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-}
 #graph-panel-neighborhood .neighborhood-settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -87,8 +81,32 @@ body main #tab-search #graph-workspace-surface[data-panel="neighborhood"] #graph
 }
 
 #graph-panel-neighborhood .neighborhood-settings-grid label { display: grid; gap: 3px; }
-#graph-panel-neighborhood .neighborhood-seed { font-size: 13px; font-weight: 600; }
-#graph-panel-neighborhood .neighborhood-types { margin: 0; }
+#graph-panel-neighborhood .neighborhood-seed {
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--ui-surface-2);
+  color: var(--ui-ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+#graph-panel-neighborhood .neighborhood-seed.is-selected { color: var(--ui-ink); font-weight: 600; }
+#graph-panel-neighborhood .neighborhood-types { margin: 0; padding: 0 8px; }
+#graph-panel-neighborhood .neighborhood-types > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+}
+#graph-panel-neighborhood .neighborhood-types > summary::-webkit-details-marker { display: none; }
+#graph-panel-neighborhood .neighborhood-types > summary::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: solid currentColor;
+  border-width: 1px 1px 0 0;
+  transform: rotate(45deg);
+}
+#graph-panel-neighborhood .neighborhood-types[open] > summary::before { transform: rotate(135deg); }
 #graph-panel-neighborhood .neighborhood-types > div { max-height: 152px; margin-top: 4px; overflow: auto; }
 #graph-panel-neighborhood .neighborhood-types label {
   display: flex;
@@ -139,6 +157,19 @@ body main #tab-search #graph-workspace-surface[data-panel="neighborhood"] #graph
 }
 
 #graph-panel-neighborhood :is(.neighborhood-choices, .neighborhood-matches) small { color: var(--ui-muted); }
+#graph-panel-neighborhood .neighborhood-lookup-match {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  color: var(--ui-accent-strong);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+#graph-panel-neighborhood .neighborhood-lookup-match mark {
+  border-radius: 3px;
+  background: var(--ui-warn-dim);
+  color: var(--ui-ink);
+}
 #graph-panel-neighborhood .neighborhood-match[aria-pressed="true"] {
   border-color: var(--ui-accent);
   background: var(--ui-accent-dim);

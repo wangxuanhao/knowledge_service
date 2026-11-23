@@ -14,7 +14,11 @@
     }
     return null;
   }
-  if (typeof module === 'object' && module.exports) module.exports = {communityScope};
+  function questionMode(mode, selectedCount, vectorsReady) {
+    if (mode !== 'auto') return mode;
+    return selectedCount || !vectorsReady ? 'keyword' : 'semantic';
+  }
+  if (typeof module === 'object' && module.exports) module.exports = {communityScope, questionMode};
   if (typeof window === 'undefined') return;
 
   const get = id => document.getElementById(id);
@@ -44,14 +48,15 @@
   };
   const activeBuild = value => ['queued','building'].includes(value?.state) ||
     ['queued','running'].includes(value?.job?.status);
-  const reportLabel = value => ({pending:'报告待生成', ready:'报告可用', failed:'报告生成失败',
+  const reportLabel = value => ({pending:'报告待生成', ready:'报告已生成', failed:'报告生成失败',
     building:'正在生成报告'})[value] || '报告待生成';
   const titleOf = community => community.report_title || community.title || '社区';
   const freshView = () => ({
-    override:null, anchor:null, keyword:'', trail:[], offset:0, request:0, selected:new Map(),
-    revision:null, staleSelection:false,
+    override:null, anchor:null, keyword:'', mode:'keyword', trail:[], offset:0, request:0, selected:new Map(),
+    revision:null, staleSelection:false, vectorsReady:false,
   });
   let browse = freshView(), ask = freshView(), buildRequest = 0, buildTimer, buildScope;
+  let supportsMatchOnly = true;
 
   function make(tag, content, className) {
     const element = document.createElement(tag);
@@ -77,6 +82,25 @@
   function request(id, suffix, data, options) {
     return api('/api/projects/' + encodeURIComponent(id) + '/communities' + suffix,data,'POST',
       {timeoutMs:data.generate ? (data.mode === 'global' ? 600000 : 180000) : 30000,...options});
+  }
+  async function askQuestion(id, body, isCurrent) {
+    if (!body.match_only || supportsMatchOnly) {
+      try {
+        return await request(id,'/ask',body);
+      } catch (error) {
+        if (!body.match_only || error.status !== 422 || !error.message.includes('"match_only"')) throw error;
+        supportsMatchOnly = false;
+      }
+    }
+    if (!isCurrent()) return;
+    const {match_only, ...legacy} = body;
+    const preview = await request(id,'/ask',{...legacy,generate:false});
+    if (preview.coverage?.retrieval === 'representative') {
+      return {answer:'当前范围没有与问题匹配的社区报告。',communities:[],evidence:[],generated:false};
+    }
+    if (!legacy.generate || !preview.communities?.length || !preview.evidence?.length || !isCurrent()) return preview;
+    return request(id,'/ask',{...legacy,community_ids:preview.communities.map(community => community.id),
+      expected_revision:preview.status?.revision || legacy.expected_revision});
   }
   function note(element, text, error = false) {
     element.textContent = text;
@@ -113,19 +137,20 @@
     if (progress) element.append(make('span',progress));
     if (error) element.append(make('span',error));
   }
-  function searchForKeyword(text) {
+  function searchForQuery(text, mode = 'keyword') {
     browse.keyword = text.trim().slice(0,400);
+    browse.mode = mode;
     browse.trail = [];
     browse.offset = 0;
     loadBrowse();
   }
-  function setBrowserVisible(visible, text) {
+  function setBrowserVisible(visible, text, mode = 'keyword') {
     browser.hidden = !visible;
     if (!visible) {
       browse.request++;
-    } else if (text !== undefined && text.trim().slice(0,400) !== browse.keyword) {
+    } else if (text !== undefined && (text.trim().slice(0,400) !== browse.keyword || mode !== browse.mode)) {
       browse.anchor = null;
-      searchForKeyword(text);
+      searchForQuery(text,mode);
     } else {
       loadBrowse();
     }
@@ -138,6 +163,7 @@
     }
     if (view === 'questions') loadQuestionCommunities();
     else ask.request++;
+    document.dispatchEvent(new Event('community:question-view-changed'));
   }
   function openEvidence(evidence,id) {
     if (project.value !== id) return;
@@ -148,7 +174,8 @@
         focusText:evidence.quote, matchKind:'keyword',
       });
     }
-    if (evidence.quote) window.openFrozenSourceEvidence?.({title:evidence.title,highlight:evidence.quote});
+    if (evidence.quote) window.openFrozenSourceEvidence?.({title:evidence.title,highlight:evidence.quote,
+      reason:'社区证据保存的原文片段'});
   }
   function evidenceKey(evidence) {
     const version = evidence.source_version_id || evidence.document_version_id;
@@ -175,7 +202,9 @@
       if (!groups.has(groupKey)) {
         const group = make('li');
         const entries = make('ul',null,'community-source-excerpts');
-        group.append(make('p',title,'community-source-title'),entries);
+        const heading = make('p',numbered ? window.QaPresentation?.sourceTitle(title) || title : title,'community-source-title');
+        heading.title = title;
+        group.append(heading,entries);
         list.append(group);
         groups.set(groupKey,entries);
       }
@@ -185,9 +214,10 @@
       if (numbered) row.append(make('span',`[${number}]`,'community-citation-number'));
       const validity = {expired:'历史原文', not_yet_effective:'尚未生效', unknown:'有效性待核对', conflict:'有效性有冲突'};
       if (validity[evidence.validity_status]) row.append(make('span',validity[evidence.validity_status],'subtle'));
-      if (evidence.quote) row.append(make('blockquote',evidence.quote));
+      if (evidence.quote) row.append(make('blockquote',numbered
+        ? window.QaPresentation?.evidencePreview(evidence.quote) || evidence.quote : evidence.quote));
       if (evidence.source_version_id || (evidence.kind !== 'record' && evidence.quote)) {
-        row.append(action('查看原文',() => openEvidence(evidence,id)));
+        row.append(action(evidence.source_version_id ? '查看原文' : '查看引用片段',() => openEvidence(evidence,id)));
       }
       groups.get(groupKey).append(row);
       const ref = {row,number};
@@ -196,7 +226,7 @@
     }
     panel.firstElementChild.textContent = `${label} · ${byKey.size}`;
     panel.append(list);
-    return {panel,byKey,byId};
+    return {panel,byKey,byId,sourceCount:groups.size};
   }
   function citationButton(ref, sources) {
     const button = action(`[${ref.number}]`,() => {
@@ -330,21 +360,25 @@
       pager.append(previous,next);
       rail.append(pager);
     }
-    if ((community.report_status ?? community.report?.status) === 'ready') heading.append(action('就此社区提问',() => {
-      window.KnowledgeTabs?.open('qa');
-      get('community-question-mode').value = 'keyword';
-      const qaRange = ask.override || currentScope('qa');
-      if (JSON.stringify(qaRange) === JSON.stringify(range)) {
-        ask.selected.clear();
-        ask.revision = revision || null;
-        ask.staleSelection = false;
-        ask.selected.set(community.id,titleOf(community));
-        showQuestionView('questions');
-      } else {
-        showQuestionView('questions');
-        note(get('community-ask-status'),'问答范围与此社区不同。请检查问答的已应用范围，再选择社区。');
-      }
-    }));
+    if ((community.report_status ?? community.report?.status) === 'ready') {
+      const askButton = action('就此社区提问',() => {
+        window.KnowledgeTabs?.open('qa');
+        get('community-question-mode').value = 'auto';
+        const qaRange = ask.override || currentScope('qa');
+        if (JSON.stringify(qaRange) === JSON.stringify(range)) {
+          ask.selected.clear();
+          ask.revision = revision || null;
+          ask.staleSelection = false;
+          ask.selected.set(community.id,titleOf(community));
+          showQuestionView('questions');
+        } else {
+          showQuestionView('questions');
+          note(get('community-ask-status'),'问答范围与此社区不同。请检查问答的已应用范围，再选择社区。');
+        }
+      });
+      askButton.classList.add('community-detail-ask');
+      get('community-detail-actions').append(askButton);
+    }
     layout.append(report,rail);
     host.replaceChildren(heading,layout);
     return title;
@@ -352,7 +386,9 @@
   function renderKeywordMatch(match) {
     const labels = {
       report_title:'报告标题', report_summary:'报告摘要', community_title:'社区名称',
-      entity:'成员实体', relationship:'图谱关系', evidence:'原文引句',
+      entity:'成员实体名称', entity_alias:'成员实体别名', entity_id:'成员实体 ID', entity_type:'成员实体类型',
+      relationship:'图谱关系文本', relationship_id:'图谱关系 ID', relationship_type:'图谱关系类型',
+      evidence:'原文引句', graph_evidence:'图谱记录',
     };
     const box = make('div',null,'community-keyword-match');
     box.append(make('span','命中' + (labels[match.field] || '社区内容'),'community-keyword-field'));
@@ -366,14 +402,32 @@
     }
     return box;
   }
+  function renderCommunityMatch(community, mode) {
+    const score = community.semantic_score;
+    const badges = window.SourceMatchView.rankBadges({mode, score});
+    const details = make('div',null,'community-match-details');
+    for (const badge of badges) details.append(make('span',badge,'community-match-score'));
+    if (mode === 'keyword') {
+      if (community.keyword_match?.term) details.append(renderKeywordMatch(community.keyword_match));
+      else details.append(make('span','命中社区索引文本','community-keyword-field'));
+    } else if (mode === 'semantic' && badges.length) {
+      const field = make('span','匹配社区报告向量','community-keyword-field');
+      field.title = '报告标题、摘要和主要发现共同参与向量匹配。';
+      details.append(field);
+    }
+    return details.childElementCount ? details : null;
+  }
   function renderBrowseList(result) {
     const host = get('community-results'), grid = make('div',null,'community-card-grid');
     host.replaceChildren();
     for (const item of result.communities || []) {
       const card = make('article',null,'community-card');
       card.append(make('h3',titleOf(item)),communityMetrics(item));
-      if (item.keyword_match?.term) card.append(renderKeywordMatch(item.keyword_match));
-      else if (item.summary) card.append(make('p',item.summary,'community-card-summary'));
+      const mode = browse.mode === 'semantic' && browse.keyword ? 'semantic' :
+        browse.mode === 'keyword' && item.keyword_match?.term ? 'keyword' : null;
+      const match = mode && renderCommunityMatch(item, mode);
+      if (match) card.append(match);
+      if (mode !== 'keyword' && item.summary) card.append(make('p',item.summary,'community-card-summary'));
       const footer = make('div',null,'community-card-actions');
       footer.append(action('打开社区',() => {
         browse.trail = [{id:item.id,title:titleOf(item),offset:0,revision:result.status?.revision}];
@@ -389,7 +443,8 @@
     }
     if (!grid.children.length && ['ready','partial','sparse'].includes(result.status?.state || result.status)) {
       const sparse = result.status?.counts?.communities === 0;
-      host.append(make('p',browse.anchor ? '该实体在此范围内没有已收录的社区。' :
+      host.append(make('p',browse.mode === 'semantic' && browse.keyword ? '当前范围没有匹配的社区报告，可换一种描述或改用关键词。' :
+        browse.anchor ? '该实体在此范围内没有已收录的社区。' :
         sparse ? '当前范围的正式关系尚未形成可展示的社区。' : '没有符合条件的社区。','community-empty'));
     }
     if (result.status?.state === 'disabled' && window.Auth?.isAdmin?.()) {
@@ -428,41 +483,51 @@
     const host = get('community-results');
     const entry = view.trail.at(-1);
     const path = get('community-browse-path'), trail = get('community-trail');
-    browser.dataset.presentation = entry && id && range ? 'detail' : 'list';
-    path.hidden = !entry;
-    get('community-browse-back').textContent = view.trail.length > 1 ? '返回上一级' : '返回社区列表';
     get('community-anchor').hidden = !view.anchor;
     get('community-anchor-label').textContent = view.anchor?.label || '';
-    trail.hidden = view.trail.length < 2;
-    trail.textContent = view.trail.slice(0,-1).map(item => item.title).join(' / ');
-    host.replaceChildren();
     if (!id || !range) {
+      browser.dataset.presentation = 'list';
+      path.hidden = true;
+      host.replaceChildren();
+      host.removeAttribute('aria-busy');
       note(notice,id ? '' : '请先选择项目。');
       return;
     }
+    host.setAttribute('aria-busy','true');
     note(notice,'正在读取社区…');
     try {
       const data = entry ? await request(id,'/detail',{scope:range,community_id:entry.id,offset:entry.offset || 0,
         expected_revision:entry.revision}) :
-        await request(id,'',{scope:range,keyword:view.keyword,anchor:view.anchor?.id || '',limit:24,offset:view.offset});
+        await request(id,'',{scope:range,keyword:view.keyword,anchor:view.anchor?.id || '',limit:24,offset:view.offset,
+          ...(view.mode === 'semantic' && view.keyword ? {mode:'semantic'} : {})});
       if (view !== browse || ticket !== view.request || id !== project.value) return;
+      browser.dataset.presentation = entry ? 'detail' : 'list';
+      path.hidden = !entry;
+      get('community-detail-actions').replaceChildren();
+      get('community-browse-back').textContent = view.trail.length > 1 ? '返回上一级' : '返回社区列表';
+      trail.hidden = view.trail.length < 2;
+      trail.textContent = view.trail.slice(0,-1).map(item => item.title).join(' / ');
       showStatus(notice,data.status);
       const heading = entry ? renderDetail(data.community || data,range,id) : renderBrowseList(data);
       if (focusResult) (heading || get('query')).focus();
     } catch (error) {
       if (view !== browse || ticket !== view.request || id !== project.value) return;
-      if (error.status === 409 || error.status === 404) {
-        browser.dataset.presentation = 'list';
-        path.hidden = true;
+      browser.dataset.presentation = 'list';
+      path.hidden = true;
+      if (entry && (error.status === 409 || error.status === 404)) {
         host.replaceChildren(action('返回社区列表',() => {view.trail = []; loadBrowse();}));
       } else {
         host.replaceChildren(action('重新加载',() => loadBrowse()));
       }
       note(notice,error.message,true);
+    } finally {
+      if (view === browse && ticket === view.request) host.removeAttribute('aria-busy');
     }
   }
   function renderSelections() {
     const selected = get('community-selected');
+    const canSelect = ['auto','keyword'].includes(get('community-question-mode').value);
+    selected.hidden = !canSelect || (!ask.selected.size && !ask.staleSelection);
     selected.replaceChildren(...[...ask.selected].map(([id,title]) => action(title + ' ×',() => {
       ask.selected.delete(id);
       renderSelections();
@@ -473,23 +538,25 @@
         ask.staleSelection = false;
         loadQuestionCommunities();
       }));
-    } else if (!ask.selected.size) selected.append(make('span','未指定社区，将在当前范围内匹配相关报告。','subtle'));
+    }
   }
   async function loadQuestionCommunities() {
     const id = project.value, view = ask, ticket = ++view.request;
-    const range = appliedRange(view,'qa',get('community-ask-range'),get('community-ask-all'));
+    const scopeSummary = get('community-ask-range');
+    const range = appliedRange(view,'qa',scopeSummary,get('community-ask-all'));
+    scopeSummary.hidden = Boolean(range && !view.override);
     const select = get('community-question-select'), notice = get('community-ask-status');
-    const mode = get('community-question-mode').value;
+    const requestedMode = get('community-question-mode').value;
+    const canSelect = ['auto','keyword'].includes(requestedMode);
     const level = get('community-question-level'), previousLevel = level.value;
     const hint = get('community-question-mode-help');
-    get('community-question-keyword-options').hidden = get('community-selected').hidden = mode !== 'keyword';
-    get('community-question-level-row').hidden = mode !== 'global';
-    hint.hidden = mode === 'keyword';
-    hint.textContent = mode === 'global' ? '按选定层级逐批处理报告，结果会显示实际覆盖与证据缺口。' :
-      '用问题召回语义相关的社区报告，并核对用于综合的原文。';
-    const submit = get('community-question-submit'), generate = get('community-question-generate');
+    const indexStatus = get('community-ask-index-status');
+    get('community-question-keyword-options').hidden = !canSelect;
+    get('community-question-level-row').hidden = requestedMode !== 'global';
+    hint.textContent = '';
+    indexStatus.replaceChildren();
+    const submit = get('community-question-submit');
     submit.disabled = true;
-    generate.disabled = true;
     select.replaceChildren(make('option','选择社区')); select.options[0].value = '';
     renderSelections();
     if (!id || !range) {
@@ -498,11 +565,12 @@
     }
     note(notice,'正在读取可用社区…');
     try {
-      const data = await request(id,'',{scope:range,keyword:mode === 'keyword' ? get('community-question-filter').value.trim() : '',limit:40});
+      const data = await request(id,'',{scope:range,keyword:canSelect ? get('community-question-filter').value.trim() : '',limit:40});
       if (view !== ask || ticket !== view.request || id !== project.value) return;
-      showStatus(notice,data.status);
+      showStatus(indexStatus,data.status);
       if (data.status?.browseable === false || data.status?.stale === true || data.status?.change_pending === true) {
         get('community-answer').replaceChildren();
+        note(notice,messages[stateOf(data.status)] || '当前范围的社区索引暂不可用。');
         return;
       }
       const revision = data.status?.revision || null;
@@ -512,126 +580,163 @@
         get('community-answer').replaceChildren();
       }
       view.revision = revision;
-      if (mode === 'semantic') {
-        submit.disabled = generate.disabled = data.status?.vector_index?.state !== 'ready';
-        if (submit.disabled) note(notice,'社区报告向量未就绪，请在构建与任务的社区索引中更新。');
-        return;
-      }
+      view.vectorsReady = data.status?.vector_index?.state === 'ready';
+      const mode = questionMode(requestedMode,view.selected.size,view.vectorsReady);
+      note(notice,'');
       if (mode === 'global') {
         level.replaceChildren(...(data.status?.levels || []).map(item =>
           new Option(`第 ${item.level + 1} 层 · ${item.reports_ready} / ${item.communities} 份可用报告`,String(item.level))));
         if ([...level.options].some(option => option.value === previousLevel)) level.value = previousLevel;
-        submit.disabled = generate.disabled = !level.options.length;
+        submit.disabled = !level.options.length;
+        hint.textContent = '按选定层级归纳社区报告，结果会显示实际覆盖。';
         return;
       }
-      if (view.staleSelection) {
+      if (canSelect && view.staleSelection) {
         note(notice,'社区已更新，请重新选择社区或明确使用当前范围内全部社区。');
         renderSelections();
       }
-      for (const community of data.communities || []) {
-        if (ask.selected.has(community.id) || community.report_status !== 'ready') continue;
-        const option = make('option',titleOf(community)); option.value = community.id; select.append(option);
+      if (canSelect) {
+        for (const community of data.communities || []) {
+          if (view.selected.has(community.id) || community.report_status !== 'ready') continue;
+          const option = make('option',titleOf(community)); option.value = community.id; select.append(option);
+        }
       }
       const reportCount = data.status?.counts?.reports_ready ?? (data.communities || [])
         .filter(community => community.report_status === 'ready').length;
-      submit.disabled = generate.disabled = reportCount === 0 || view.staleSelection;
+      submit.disabled = (canSelect && view.staleSelection) || (mode === 'semantic' ? !view.vectorsReady : reportCount === 0);
+      hint.textContent = mode === 'semantic' ? '按问题的含义匹配相关社区报告。' :
+        view.selected.size ? '在已选社区的报告和原文中查找依据。' : '按问题中的关键词匹配相关社区报告。';
+      if (mode === 'semantic' && !view.vectorsReady) note(notice,'社区报告向量未就绪，请选择自动匹配或在构建与任务中更新。');
+      if (mode === 'keyword' && reportCount === 0) note(notice,'当前范围没有可用的社区报告。');
     } catch (error) {
       if (view === ask && ticket === view.request && id === project.value) note(notice,error.message,true);
     }
+  }
+  function renderCoverage(coverage, generated, evidenceShown) {
+    if (!coverage) return null;
+    const line = make('div',null,'community-coverage-line');
+    const add = (label, shown, total, detail) => {
+      if (!Number.isFinite(shown) || (total != null && !Number.isFinite(total))) return;
+      const metric = make('span',label + ' ' + shown + (total == null ? '' : '/' + total));
+      if (detail) metric.title = detail;
+      line.append(metric);
+    };
+    if (coverage.mode === 'global') {
+      add('层级',Number.isInteger(coverage.level) ? coverage.level + 1 : null);
+      add('已生成报告',coverage.reports_ready,coverage.target_communities,'该层已生成报告 / 目标社区');
+      add('含原文依据',coverage.reports_with_eligible_evidence);
+      if (generated) add('归纳',coverage.reports_mapped,coverage.target_communities,'纳入归纳的报告 / 目标社区');
+      if (coverage.preview_communities < coverage.included_communities) {
+        add('预览',coverage.preview_communities,coverage.included_communities);
+      }
+    } else if (coverage.complete === false) {
+      const total = coverage.selected_communities || coverage.matched_communities || coverage.scope_communities;
+      const included = generated ? coverage.reports_included : coverage.included_communities;
+      if (total && included < total) {
+        add(generated ? '采用报告' : '展示社区',included,total,
+          generated ? '用于回答的报告 / 本次候选社区' : '显示的社区 / 本次候选社区');
+      }
+    }
+    if (coverage.mode !== 'global' && evidenceShown > 0 && evidenceShown < coverage.evidence_available) {
+      const countDetail = Number.isFinite(coverage.evidence_returned)
+        ? `接口返回 ${coverage.evidence_returned} 条，页面选取并去重后展示 ${evidenceShown} 条，本次候选 ${coverage.evidence_available} 条。`
+        : '页面展示的片段 / 本次候选证据';
+      add('展示证据',evidenceShown,coverage.evidence_available,countDetail);
+    }
+    return line.childElementCount ? line : null;
   }
   function renderQuestionResult(host,result,id) {
     const body = make('div',null,'community-question-result-body');
     const evidence = result.evidence || [];
     const cited = new Set(result.citations || []);
     const used = evidence.filter(item => cited.has(item.id));
-    const sources = evidenceSection('引用与证据',used.length ? used : evidence,id,true);
+    const sourceLabel = !result.generated ? '证据摘录' : used.length ? '回答引用' : '可核对证据';
+    const sources = evidenceSection(sourceLabel,used.length ? used : evidence,id,true);
+    sources.panel.firstElementChild.textContent += ` 条 · ${sources.sourceCount} 个来源`;
     const coverage = result.coverage;
-    if (coverage?.mode === 'global') {
-      body.append(make('p',`第 ${coverage.level + 1} 层 · ${coverage.reports_ready} / ${coverage.target_communities} 份报告可用 · ${coverage.reports_with_eligible_evidence} 份有可用原文` +
-        (result.generated ? ` · 本次归纳 ${coverage.reports_mapped} / ${coverage.target_communities} 份` : ''),'community-empty'));
-      if (coverage.preview_communities < coverage.included_communities) {
-        body.append(make('p',`下方预览 ${coverage.preview_communities} 份报告。`,'community-mode-help'));
-      }
-    }
-    if (coverage?.retrieval === 'representative') {
-      body.append(make('p','关键词未匹配到社区，以下是当前范围里的代表性证据。','community-empty'));
-    }
-    if (coverage?.mode !== 'global' && coverage?.complete === false && result.communities?.length) {
-      const total = coverage.selected_communities || coverage.matched_communities || coverage.scope_communities;
-      const included = result.generated ? coverage.reports_included : coverage.included_communities;
-      if (total && included < total) {
-        const verb = result.generated ? '综合回答使用了' : '显示了';
-        body.append(make('p',`${verb} ${included} / ${total} 个社区的${result.generated ? '报告' : '结果'}。`,'community-empty'));
-      }
-      if (coverage.evidence_returned < coverage.evidence_available) {
-        body.append(make('p',`返回了 ${coverage.evidence_returned} / ${coverage.evidence_available} 条证据。`,'community-empty'));
-      }
-    }
     if (result.answer && (result.generated || !evidence.length)) {
-      const answer = make('article',null,'community-report-card');
+      const answer = make('article',null,'community-answer-reply');
       if (result.generated) answer.append(make('h3','社区回答'));
       if (result.answer_purpose === 'document_explanation') {
         answer.append(make('p','按报告与原文说明，有效性请见引用状态。','community-mode-help'));
       } else if (result.as_of) {
         answer.append(make('p',`业务核验时点 ${window.DisplayTime.format(result.as_of)}`,'community-mode-help'));
       }
-      const content = make('p',null,'community-report-text');
-      for (const part of result.answer.split(/(\[E-[a-z0-9]+\])/gi)) {
+      const content = make('div',null,'qa-answer');
+      window.QaPresentation.render(content,result.answer,part => {
         const reference = sources.byId.get(part.slice(1,-1));
-        content.append(reference ? citationButton(reference,sources) : document.createTextNode(part));
-      }
+        return reference ? citationButton(reference,sources) : null;
+      });
       answer.append(content);
       body.append(answer);
     }
+    if (coverage?.retrieval === 'representative') {
+      body.append(make('p','关键词未匹配到社区，以下是当前范围里的代表性证据。','community-mode-help'));
+    }
+    const metrics = renderCoverage(coverage,result.generated,sources.byKey.size);
+    if (metrics) body.append(metrics);
+    if (sources.byKey.size) {
+      sources.panel.open = !result.generated;
+      body.append(sources.panel);
+    }
     if (result.communities?.length) {
-      body.append(make('h3',coverage?.retrieval === 'representative' ? '代表性社区' : '匹配社区','community-results-heading'));
+      const matches = disclosure((coverage?.retrieval === 'representative' ? '代表性社区' : '社区列表') +
+        ' · ' + result.communities.length + ' 个');
+      matches.open = !result.generated && !sources.byKey.size;
+      const reports = make('div',null,'community-matched-reports');
       for (const community of result.communities) {
-        const report = make('article',null,'community-report-card');
-        report.append(make('h4',titleOf(community)),communityMetrics(community));
-        if (['semantic','global'].includes(coverage?.mode)) {
-          report.append(make('p','报告摘要 · 回答依据以核验后的原文为准','community-mode-help'));
-        }
-        if (Number.isFinite(community.semantic_score)) {
-          report.append(make('p',`语义相似度 ${community.semantic_score.toFixed(2)}`,'community-mode-help'));
+        const report = make('article',null,'community-matched-report');
+        const heading = make('div',null,'community-matched-heading');
+        heading.append(make('h4',titleOf(community)));
+        report.append(heading);
+        if (['keyword','semantic'].includes(coverage?.retrieval)) {
+          const match = renderCommunityMatch(community,coverage.retrieval);
+          if (match) report.append(match);
         }
         showReport(report,community,sources);
-        body.append(report);
+        reports.append(report);
       }
+      matches.append(reports);
+      body.append(matches);
     }
-    if (!sources.byKey.size) {
-      host.replaceChildren(body);
-      return;
-    }
-    const rail = make('section',null,'community-report-rail');
-    rail.append(make('h4','证据来源'),sources.panel);
-    sources.panel.open = !result.generated;
-    const layout = make('div',null,'community-report-layout');
-    layout.append(body,rail);
-    host.replaceChildren(layout);
+    host.replaceChildren(body);
   }
   async function queryReports(generate) {
-    if (!get('community-question-form').reportValidity()) return;
+    const submit = get('community-question-submit');
+    if (submit.disabled || !get('community-question-form').reportValidity()) return;
     const id = project.value, view = ask, ticket = ++view.request;
+    const isCurrent = () => view === ask && ticket === view.request && id === project.value;
     const range = view.override || currentScope('qa');
-    const mode = get('community-question-mode').value, level = get('community-question-level').value;
+    const mode = questionMode(get('community-question-mode').value,view.selected.size,view.vectorsReady);
+    const level = get('community-question-level').value;
     if (!id || !range || (mode === 'keyword' && view.staleSelection) || (mode === 'global' && level === '')) return;
     const notice = get('community-ask-status'), host = get('community-answer');
-    const question = get('community-question-text').value.trim();
+    const input = get('community-question-text'), question = input.value.trim();
     if (!question) {
       note(notice,'请输入问题。',true);
-      get('community-question-text').focus();
+      input.focus();
       return;
     }
-    const buttons = [get('community-question-submit'),get('community-question-generate')];
-    for (const button of buttons) button.disabled = true;
+    const ids = mode === 'keyword' ? [...view.selected.keys()] : [];
+    submit.disabled = true;
+    get('community-ask-filters').open = false;
+    const questionTurn = make('div',null,'qa-turn qa-turn-user');
+    questionTurn.append(make('p',question,'qa-bubble'));
+    const answerTurn = make('div',null,'qa-turn qa-turn-assistant');
+    answerTurn.hidden = true;
+    host.replaceChildren(questionTurn,answerTurn);
+    get('community-qa-scroll').scrollTop = 0;
     note(notice,generate && mode === 'global' ? '正在核对证据并分批归纳所选层级…' :
       generate ? '正在根据社区报告生成答案…' : '正在查找社区报告…');
     try {
-      const result = await request(id,'/ask',{scope:range,community_ids:mode === 'keyword' ? [...view.selected.keys()] : [],
+      const result = await askQuestion(id,{scope:range,community_ids:ids,mode,
         expected_revision:view.revision || undefined,question,generate,
-        ...(mode === 'keyword' ? {} : {mode}),...(mode === 'global' ? {level:Number(level)} : {})});
-      if (view !== ask || ticket !== view.request || id !== project.value) return;
-      renderQuestionResult(host,result,id);
+        ...(mode === 'keyword' && !ids.length ? {match_only:true} : {}),
+        ...(mode === 'global' ? {level:Number(level)} : {})},isCurrent);
+      if (!isCurrent()) return;
+      renderQuestionResult(answerTurn,result,id);
+      answerTurn.hidden = false;
+      if (input.value.trim() === question) input.value = '';
       const matches = result.communities || [];
       const reports = matches.filter(community => (community.report_status ?? community.report?.status) === 'ready');
       note(notice,result.generation_error ? '生成失败 · ' + result.generation_error :
@@ -642,7 +747,7 @@
         matches.length ? `找到 ${matches.length} 个社区，报告尚未生成。` : '当前范围内没有匹配的社区报告。',
       Boolean(result.generation_error));
     } catch (error) {
-      if (view !== ask || ticket !== view.request || id !== project.value) return;
+      if (!isCurrent()) return;
       if (error.status === 409 || error.status === 404) {
         host.replaceChildren();
         if (mode === 'keyword' && view.selected.size) {
@@ -657,8 +762,8 @@
         }
       } else note(notice,error.message,true);
     } finally {
-      if (view === ask && ticket === view.request && id === project.value) {
-        for (const button of buttons) button.disabled = false;
+      if (isCurrent()) {
+        submit.disabled = false;
       }
     }
   }
@@ -745,6 +850,7 @@
     if (scopeKey !== buildScope) {
       buildScope = scopeKey;
       build.textContent = '构建社区';
+      vector.textContent = '构建报告向量';
       retryButton.hidden = true;
       showBuildText('community-build-preview','');
       showBuildText('community-vector-status','');
@@ -769,11 +875,16 @@
       retryButton.hidden = state !== 'failed' && !(state === 'partial' && value.counts?.reports_failed > 0);
       build.disabled = retryButton.disabled = active;
       const vectors = value.vector_index;
-      const vectorLabel = {disabled:'报告向量尚未构建', stale:'报告向量待更新', failed:'报告向量构建失败',
-        unavailable:'报告向量需要语义模型和 Milvus', ready:`报告向量已就绪 · ${vectors?.indexed ?? 0} 份`};
+      const reportsReady = value.counts?.reports_ready ?? 0;
+      const vectorLabel = {
+        disabled:reportsReady ? '报告向量尚未构建。构建后可使用语义匹配。' : '社区报告生成后可构建报告向量。',
+        stale:reportsReady ? '报告向量待更新' : '有可用社区报告后可更新报告向量。',
+        failed:'报告向量构建失败', unavailable:'报告向量需要语义模型和 Milvus',
+        ready:`报告向量已就绪 · ${vectors?.indexed ?? 0} 份`,
+      };
       showBuildText('community-vector-status',vectors ? [vectorLabel[vectors.state],vectors.error].filter(Boolean).join(' · ') : '');
       vector.textContent = vectors?.enabled ? '更新报告向量' : '构建报告向量';
-      vector.disabled = active || !vectors?.available || !value.counts?.reports_ready;
+      vector.disabled = active || !vectors?.available || !reportsReady;
       refresh.disabled = false;
       if (active && buildViewVisible()) {
         buildTimer = setTimeout(() => { if (buildViewVisible()) loadBuild(); },2500);
@@ -835,9 +946,13 @@
     loadQuestionCommunities();
   });
   get('community-question-form').addEventListener('submit',event => {
-    event.preventDefault(); queryReports(false);
+    event.preventDefault(); queryReports(get('community-question-generate').checked);
   });
-  get('community-question-generate').onclick = () => queryReports(true);
+  get('community-question-text').addEventListener('keydown',event => {
+    if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    get('community-question-form').requestSubmit();
+  });
   get('community-build-kind').addEventListener('change',event => {
     get('community-build-platform-row').hidden = event.target.value !== 'platform';
     if (event.target.value === 'platform') loadPlatforms();
@@ -850,7 +965,7 @@
   get('community-build-retry').onclick = () => loadBuild({start:true,retry:true});
   window.RuntimeView?.on('communities',loadBuild);
   function reset() {
-    browse = {...freshView(),keyword:browse.keyword};
+    browse = {...freshView(),keyword:browse.keyword,mode:browse.mode};
     ask = freshView();
     get('community-results').replaceChildren();
     get('community-answer').replaceChildren();
@@ -876,7 +991,7 @@
     if (page === 'qa' && qa.dataset.communityActive === 'questions') loadQuestionCommunities();
   });
   window.CommunityWorkspace = {
-    searchForKeyword, setBrowserVisible,
+    searchForQuery, setBrowserVisible,
     openForEntity(id,label) {
       if (!id) return;
       browse = freshView();

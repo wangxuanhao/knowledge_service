@@ -57,6 +57,31 @@ const row=(citation,channel='milvus',extra={})=>({citation,kind:'chunk',text:'�
   validity_status:'effective',...extra});
 const citations=container=>container.querySelectorAll('.qa-citation').filter(node=>/^\[[ERFU]\d+\]$/.test(node.textContent)).map(node=>node.textContent);
 
+test('evidence opens with platform groups and source titles, with retrieval details folded',()=>{
+  const f=fixture();f.context.render(f.turn,{answer_id:'by-source',as_of:'2026-11-23T08:00:00Z',
+    coverage_warnings:['参考检索有结果上限。','None：未检索到该时点确认有效的依据'],
+    platform_groups:[{platform:'美团',source_scope:'specific',evidence_count:1}],
+    evidence:[row('E1','milvus',{query_platform:'美团',source_scope:'specific',sources:[{title:'城市生活指南',version:2}]}),
+      row('E2','milvus',{source_scope:'all',sources:[{title:'平台通用规则'}]})],
+    historical_references:[row('R1','milvus',{sources:[{title:'旧版指南'}]})]});
+  const panel=f.turn.querySelector('.qa-evidence-panel');
+  assert.equal(panel.querySelector('.qa-evidence-note'),null);
+  const groups=panel.querySelectorAll('.qa-evidence-group');
+  assert.deepEqual(groups.map(group=>group.querySelector('.qa-evidence-group-heading').textContent),['平台：美团 · 1 条','通用规则 · 1 条']);
+  const [first]=groups[0].querySelectorAll('.qa-evidence-item');
+  assert.equal(first.children[0].querySelector('.qa-evidence-source-title').textContent,'城市生活指南');
+  assert.equal(first.children[0].querySelector('.qa-citation').textContent,'[E1]');
+  first.children[0].querySelector('.qa-citation').onclick();
+  assert.equal(f.opened[0].citation,'E1');
+  const reference=panel.querySelector('.qa-reference-section');
+  assert.match(reference.textContent,/历史参考/);
+  assert.equal(reference.querySelector('.qa-evidence-source-title').textContent,'旧版指南');
+  const details=panel.querySelector('.qa-evidence-details');
+  assert.equal(details.tagName,'DETAILS');assert.ok(!details.open);
+  assert.match(details.textContent,/规则判断时点.*参考检索有结果上限/);
+  assert.match(details.textContent,/当前范围：未检索到该时点确认有效的依据/);
+});
+
 test('enabled QA exposes supplemental evidence independently while direct evidence stays collapsed',()=>{
   const f=fixture();f.context.render(f.turn,{answer_id:'answer-frozen',ontology_expansion:ledger,
     evidence:[row('E1'),row('E2','ontology_entity_type')],uncertain_references:[row('U1','ontology_type',{validity_status:'unknown'})]});
@@ -140,4 +165,29 @@ test('production history replay restores expansion ledger, separate references a
   supplement.querySelectorAll('.qa-citation').find(node=>node.textContent==='[U4]').onclick();assert.equal(f.opened[0].answerId,'historical-answer');
   f.context.replay([{...item,ontology_expansion:undefined,evidence:[row('E3')],uncertain_references:[row('U4')]}]);
   assert.equal(f.transcript.querySelector('.qa-ontology-supplement'),null,'unmarked historical rows are never inferred as expansion');
+});
+
+test('QA evidence and history label only cards with per-hit retrieval metadata',()=>{
+  const f=fixture();
+  const calls=[];
+  f.context.window.SourceMatchView={hitLabels:match=>{
+    calls.push(match);return ['关键词命中标题','关键词分数 0.25'];
+  }};
+  const match={mode:'keyword',strategy:null,channels:['keyword'],fields:['title'],indexed_fields:[],score:0.25};
+  const item={kind:'assistant',text:'示例回答',answer_id:'ranked-answer',
+    evidence:[row('E1','milvus',{retrieval_match:match}),row('E2','milvus',{score:0.9})],
+    historical_references:[row('R1','milvus',{score:0.9}),row('R2','milvus',{retrieval_match:match})]};
+  for(const target of [f.turn,f.transcript]){
+    if(target===f.turn)f.context.render(target,item);
+    else f.context.replay([item]);
+    const [ranked,context]=target.querySelectorAll('.qa-evidence-item');
+    const [unrankedRef,rankedRef]=target.querySelectorAll('.qa-reference-item');
+    assert.equal(ranked.querySelector('.qa-retrieval-match').textContent,'关键词命中标题 · 关键词分数 0.25');
+    assert.ok(rankedRef.querySelector('.qa-retrieval-match'));
+    assert.equal(context.querySelector('.qa-retrieval-match'),null);
+    assert.equal(unrankedRef.querySelector('.qa-retrieval-match'),null);
+    rankedRef.querySelector('.qa-citation').onclick();
+  }
+  assert.deepEqual(calls,[match,match,match,match]);
+  assert.deepEqual(f.opened.map(({answerId,citation})=>[answerId,citation]),[['ranked-answer','R2'],['ranked-answer','R2']]);
 });

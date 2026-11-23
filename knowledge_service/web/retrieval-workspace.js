@@ -27,14 +27,19 @@
     get('project')?.addEventListener('change',syncProject);syncProject();
     header.prepend(heading);
 
-    const query=get('query'),searchButton=get('search');
+    const query=get('query'),searchButton=get('search'),communityMode=get('community-search-mode');
     const kindButtons=[...header.querySelectorAll('[data-retrieval-kind]')];
     const layout=window.GraphWorkspaceLayout;
     const queryFields={
       knowledge:[query.getAttribute('aria-label'),query.placeholder],
-      neighborhood:['邻域检索关键词','输入实体名称或 ID，查找邻域起点'],
-      community:['社区检索关键词','输入主题、实体或原文关键词'],
+      neighborhood:['邻域起点查询','输入实体名称或 ID，查找邻域起点'],
+      community:['社区检索查询','输入主题、实体或原文关键词'],
     };
+    function syncCommunityPrompt(){
+      if(page.dataset.retrievalMode==='community')query.placeholder=communityMode.value==='semantic'
+        ? '描述想查找的主题，匹配社区报告' : queryFields.community[1];
+    }
+    communityMode.addEventListener('change',syncCommunityPrompt);
     function select(kind,{reuseQuery=true}={}){
       page.dataset.retrievalMode=kind;
       for(const button of kindButtons){
@@ -46,13 +51,14 @@
       searchButton.disabled=kind==='knowledge'&&searchButton.dataset.knowledgeBusy==='true';
       if(kind!=='knowledge'&&searchOptions)searchOptions.open=false;
       if(kind!=='neighborhood'&&layout?.snapshot().panel==='neighborhood')layout.closePanel();
-      window.CommunityWorkspace?.setBrowserVisible(kind==='community',reuseQuery?query.value:undefined);
+      syncCommunityPrompt();
+      window.CommunityWorkspace?.setBrowserVisible(kind==='community',reuseQuery?query.value:undefined,communityMode.value);
       if(kind==='neighborhood')window.NeighborhoodSearch?.open();
       layout?.resize();
     }
     function routeQuery(){
       const mode=page.dataset.retrievalMode;
-      if(mode==='community')window.CommunityWorkspace?.searchForKeyword(query.value);
+      if(mode==='community')window.CommunityWorkspace?.searchForQuery(query.value,communityMode.value);
       else if(mode==='neighborhood')window.NeighborhoodSearch?.searchForEntity(query.value);
       else return false;
       return true;

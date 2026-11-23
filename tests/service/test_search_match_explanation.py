@@ -52,3 +52,21 @@ def test_fusion_preserves_actual_channels_instead_of_labelling_every_hit_both():
     hits=store.search('p','退款',retrieval_mode='hybrid',query_vector=[1.,0.],index_version=1,catalog=default_catalog())
     channels={hit['record_id']:hit['match_channels'] for hit in hits}
     assert channels=={'both':['keyword','semantic'],'semantic':['semantic'],'keyword':['keyword']}
+
+
+def test_ranked_chunk_explanation_checks_only_visible_indexed_fields_and_history_rules():
+    from knowledge_service.domain.search_match import record_retrieval_match
+    hit = {'kind': 'chunk', 'text': '款项原路退回。', 'score': .85, 'match_channels': ['semantic']}
+    document = {'title': '退款规则', 'source_file': 'sales.md'}
+    current = record_retrieval_match(hit, '退款', mode='semantic', strategy=None,
+                                     backend='milvus', document=document)
+    assert current['fields'] == ['title']
+    assert current['indexed_fields'] == ['body', 'title', 'filename']
+    assert current['score'] == .85
+    history = record_retrieval_match(hit, '退款', mode='keyword', strategy=None,
+                                     backend='postgres_history', document=document)
+    assert history['fields'] == []
+    assert history['indexed_fields'] == ['body']
+    truncated = record_retrieval_match(hit, '退款', mode='semantic', strategy=None,
+                                       backend='milvus', document={'title': '甲' * 300 + '退款'})
+    assert truncated['fields'] == []

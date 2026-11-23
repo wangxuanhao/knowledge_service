@@ -666,8 +666,11 @@
       const row=p.dataType==='edge'?result.edges.find(e=>e.id===p.data.id):wb.nodes.get(p.data.id);
       if(!row)return;
       if(GraphTypeFilter.isAttributeEdge(row)||GraphTypeFilter.isAttributeNode(row)){
-        const entity=wb.nodes.get(row.subject_id);if(entity)inspect(entity);return;
+        const entity=wb.nodes.get(row.subject_id);
+        if(entity&&!window.NeighborhoodSearch?.pickFromGraph(entity,effectiveGraphScope()))inspect(entity);
+        return;
       }
+      if(window.NeighborhoodSearch?.pickFromGraph(row,effectiveGraphScope()))return;
       inspect(row);
     });
     chart.dispatchAction({type:'hideTip'});
@@ -707,7 +710,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   function fitGraph(chart){GraphWorkbench.fit(chart);}
   function localActionLabel(){try{return '展开'+readGraphHops()+'跳邻域';}catch{return '展开邻域（跳数待校正）';}}
   function refreshLocalActionLabels(){for(const button of get('hits').querySelectorAll('[data-graph-view="local"]'))button.textContent=localActionLabel();}
-  function renderHits(result,authorityScope=scope()){
+  function renderHits(result,authorityScope=scope(),query=''){
     const {entity_type,predicate,...authority}=authorityScope;
     const frozenAuthority=JSON.parse(JSON.stringify(authority));
     const sourceChunks=result.source_chunks||[];
@@ -722,11 +725,12 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     // 单条命中条目：isSource 区分「命中知识的来源原文」与「原文全文匹配」。
     // 实体/关系明确区分局部邻域与全局概览；原文片段保留原文入口。
     const entry=(r,kind,isSource=false)=>{
-      // Provenance/context is not ranked; only display finite scores actually returned.
-      const scoreValue=[r.score,r.keyword_score].find(value=>typeof value==='number'&&Number.isFinite(value));
-      const scoreLabel=result.retrieval_policy?.hybrid_strategy==='keyword_rerank'&&result.active_mode==='hybrid'?'语义分':{hybrid:'融合分',keyword:'关键词分',semantic:'语义分'}[result.active_mode]||'检索分';
-      const score=!isSource&&scoreValue!==undefined?` · ${scoreLabel} ${Number(scoreValue.toPrecision(5))}`:'';
-      const tag=isSource?'命中知识的来源原文':(labelOf(r.type)||'原文');
+      const match=window.SourceMatchView;
+      const legacyMatch={mode:result.active_mode,strategy:result.retrieval_policy?.hybrid_strategy,
+        channels:r.match_channels,score:r.score??r.keyword_score,rrf_score:r.rrf_score,supplemental:isExpansion(r)};
+      const labels=isSource?[]:match?.hitLabels(r.retrieval_match||legacyMatch)||[];
+      const badges=labels.length?`<div class="hit-match-details">${labels.map(label=>`<span>${esc(label)}</span>`).join('')}</div>`:'';
+      const tag=isSource?'来源与上下文':(labelOf(r.type)||(kind==='chunk'?'正文片段':'知识记录'));
       const identity=`data-graph-id="${esc(r.id)}" data-graph-kind="${esc(kind)}"${r.version_id?` data-graph-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-graph-version="${esc(r.version)}"`:''}`;
       const btn=kind==='attribute'
         ?`<button data-attribute-owner="${esc(r.owner_id||r.subject_id)}" data-attribute-fact="${esc(r.id)}" data-attribute-predicate="${esc(r.type)}"${r.version_id?` data-attribute-version-id="${esc(r.version_id)}"`:''}${r.version!=null?` data-attribute-version="${esc(r.version)}"`:''}>查看属性与来源</button>`
@@ -735,9 +739,19 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
         :(kind==='chunk'&&r.source_id?`<button data-source-record="${esc(r.source_id)}" class="secondary">查看原文</button>`:'');
       const applicability=window.ApplicabilityUI?.describe?.(r);
       const expansionLabel=isExpansion(r)?' · 类型扩展':'';
-      const title=kind==='attribute'?`${r.owner_label||r.owner_id||r.subject_id} → ${r.property_label||r.type_label||labelOf(r.type)}`:(r.text||'').slice(0,80);
+      const title=kind==='attribute'?`${r.owner_label||r.owner_id||r.subject_id} → ${r.property_label||r.type_label||labelOf(r.type)}`:
+        kind==='chunk'&&r.search_source_title?r.search_source_title:(r.text||'').slice(0,80);
       const excerpt=kind==='attribute'?(typeof r.matched_value==='string'?r.matched_value:JSON.stringify(r.matched_value??r.value)):(r.text||'');
-      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc(title)}</b><span>${esc(tag)}${score}${applicability?' · '+esc(applicability):''}${expansionLabel}${r.value_truncated?' · 属性片段':''}</span><p>${esc((excerpt||'').slice(0,180))}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
+      const text=excerpt||'', term=query.trim();
+      const bodyField={chunk:'body',entity:'entity_name',relation:'relation_text',attribute:'attribute_value'}[kind];
+      const hasLiteral=!isSource&&term&&r.retrieval_match?.fields?.includes(bodyField);
+      const offset=hasLiteral?text.toLowerCase().indexOf(term.toLowerCase()):-1;
+      const start=Math.max(0,offset-45),end=Math.min(text.length,start+180);
+      const highlight=offset>=0&&(result.active_mode==='keyword'||r.retrieval_match?.channels?.includes('keyword'));
+      const matchEnd=Math.min(end,offset+term.length);
+      const preview=highlight?`${esc(text.slice(start,offset))}<mark>${esc(text.slice(offset,matchEnd))}</mark>${esc(text.slice(matchEnd,end))}`:
+        esc(text.slice(start,end));
+      return `<article class="hit-entry${isSource?' hit-source':''}"><b>${esc(title)}</b><span>${esc(tag)}${applicability?' · '+esc(applicability):''}${expansionLabel}${r.value_truncated?' · 属性片段':''}</span>${badges}<p>${start?'…':''}${preview}${end<text.length?'…':''}</p>${btn?`<div class="row">${btn}</div>`:''}</article>`;
     };
     const entities=hits.filter(r=>r.kind==='entity');
     const relations=hits.filter(r=>r.kind==='relation');
@@ -748,7 +762,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const chunkTotal=sourceChunks.length+chunkHits.length+contextChunks.length;
     const chunkSection=`<section><h3 class="hit-kind">原文片段 <small>${chunkTotal} / ${result.channel_quotas?.chunk??5}</small></h3>`+
       (sourceChunks.length?`<div class="hit-source-label">命中知识的来源原文</div>`+sourceChunks.map(r=>entry(r,'chunk',true)).join(''):'')+
-      (chunkHits.length?`<div class="hit-source-label">原文全文匹配</div>`+chunkHits.map(r=>entry(r,'chunk')).join(''):'')+
+      (chunkHits.length?`<div class="hit-source-label">检索到的正文片段</div>`+chunkHits.map(r=>entry(r,'chunk')).join(''):'')+
       (contextChunks.length?`<div class="hit-source-label">命中条款的前后文（不参与排名）</div>`+contextChunks.map(r=>entry(r,'chunk',true)).join(''):'')+
       (chunkTotal?'':'<p class="subtle">暂无命中</p>')+`</section>`;
     const platformSummary=(result.platform_groups||[]).length
@@ -844,7 +858,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const authorityScope=Object.fromEntries(['applicability','filters','valid_at','known_at','include_unknown','kinds','ontology_scope','ontology_ids'].filter(key=>key in body).map(key=>[key,body[key]]));
     if(!('ontology_scope' in authorityScope))authorityScope.ontology_scope='all';
     if(!('ontology_ids' in authorityScope))authorityScope.ontology_ids=null;
-    renderHits(result,authorityScope);
+    renderHits(result,authorityScope,body.query);
     const modeLabel={hybrid:'混合',semantic:'语义',keyword:'关键词'}[result.active_mode]||result.active_mode;
     const explicitScope=body.applicability&&Object.values(body.applicability).some(value=>Array.isArray(value)?value.length:value?.mode==='specific');
     const resolvedScope=explicitScope?window.ApplicabilityUI?.describe?.(result.query_scope||result.scope||result):

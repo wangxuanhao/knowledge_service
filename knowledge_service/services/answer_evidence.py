@@ -53,8 +53,9 @@ class AnswerEvidence:
         reason = next((warning.get('code') for warning in warnings
                        if isinstance(warning, dict) and warning.get('code')), None)
         return {
-            **{key: value for key, value in row.items() if not key.startswith('_')},
+            **{key: value for key, value in row.items() if not key.startswith('_') and key != 'retrieval_match'},
             **purpose,
+            **({'retrieval_match': retrieval['retrieval_match']} if 'retrieval_match' in retrieval else {}),
             'citation': citation,
             'record_version_id': row.get('version_id'),
             'retrieval_channel': (row['retrieval_channel'] if row.get('retrieval_channel') in {'ontology_entity_type', 'ontology_type'}

@@ -112,8 +112,8 @@ test('query platform scope is compact, optional, and preserves the existing scop
   assert.match(workspace,/ApplicabilityUI\?\.describe\?\.\(r\)/);
   assert.match(workspace,/context_chunks/);
   assert.match(workspace,/platform_groups/);
-  assert.match(source,/按平台检索结果/);
-  assert.match(source,/未检索到本次时点确认有效的依据/);
+  assert.match(source,/各平台找到的有效依据/);
+  assert.match(source,/未找到确认有效的依据/);
   assert.match(source,/!rows\.length&&!pendingCount&&!platformGroups\.length/);
 });
 

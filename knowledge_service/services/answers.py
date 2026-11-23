@@ -301,7 +301,7 @@ def _retrieved_question_context(service, p, request):
         return evidence, unknown
 
     def preserve_retrieval_metadata(items, retrieved):
-        fields = ('retrieval_channel', 'score', 'keyword_score', 'rrf_score', 'backend_ranks',
+        fields = ('retrieval_channel', 'retrieval_match', 'score', 'keyword_score', 'rrf_score', 'backend_ranks',
                   'matched_value','value_truncated','value_length','window_start','window_end','matched_source_context',
                   'owner_id','owner_label','property_id','property_label')
         metadata = {(row['id'], row['version_id']): {key: row[key] for key in fields if key in row}

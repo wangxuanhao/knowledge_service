@@ -2,6 +2,21 @@
 (() => {
   'use strict';
   const validCitation=value=>typeof value==='string'&&/^[ERFU][1-9][0-9]*$/.test(value);
+  const matchModes=['keyword','semantic','hybrid'];
+  const matchFields=['title','filename','body','identifier','aliases','entity_name','relation_text',
+    'attribute_value','owner_name','property_name','record_text'];
+
+  function sanitizeRetrievalMatch(match){
+    if(!match||typeof match!=='object'||Array.isArray(match)||!matchModes.includes(match.mode))return null;
+    const result={mode:match.mode};
+    if([null,'fusion','keyword_rerank'].includes(match.strategy))result.strategy=match.strategy;
+    for(const [key,allowed] of [['channels',['keyword','semantic']],['fields',matchFields],['indexed_fields',matchFields]]){
+      if(Array.isArray(match[key]))result[key]=[...new Set(match[key].filter(value=>allowed.includes(value)))];
+    }
+    for(const key of ['score','rrf_score'])if(Number.isFinite(match[key]))result[key]=match[key];
+    if(typeof match.supplemental==='boolean')result.supplemental=match.supplemental;
+    return result;
+  }
 
   function tokenizeCitations(text,allowed){
     if(typeof text!=='string'||!text)return [];
@@ -25,6 +40,8 @@
     for(const key of ['text_preview','kind','provenance_ref','source_status','source_reason','retrieval_channel','ranker_version']){
       if(own(key)&&typeof item[key]==='string')result[key]=key==='text_preview'?item[key].slice(0,240):item[key];
     }
+    const match=own('retrieval_match')&&sanitizeRetrievalMatch(item.retrieval_match);
+    if(match)result.retrieval_match=match;
     if(own('version')&&Number.isSafeInteger(item.version)&&item.version>0)result.version=item.version;
     for(const key of ['version_id','valid_from','valid_until','validity_status','validity_basis','usage','query_platform','source_scope']){
       if(own(key)&&typeof item[key]==='string')result[key]=item[key].slice(0,500);
@@ -112,6 +129,11 @@
   header.append(title,closeButton);
   const status=element('p',undefined,'provenance-status');status.id='provenance-status';
   status.setAttribute('role','status');status.setAttribute('aria-live','polite');
+  const guideHost=element('p',undefined,'provenance-guide');guideHost.id='provenance-guide';
+  const overview=element('div',undefined,'provenance-overview');overview.id='provenance-overview';
+  const audit=element('details',undefined,'provenance-audit');audit.id='provenance-audit';
+  audit.open=false;audit.hidden=true;audit.append(element('summary','溯源详情'));
+  const auditBody=element('div',undefined,'provenance-audit-body');
   const tabs=element('div',undefined,'provenance-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','溯源视图');
   const chain=element('div',undefined,'provenance-chain');chain.id='provenance-chain';
   const rawPanel=element('div');rawPanel.id='provenance-api';
@@ -120,9 +142,7 @@
   function selectTab(index){
     tabButtons.forEach((tab,i)=>{tab.setAttribute('aria-selected',String(i===index));tab.tabIndex=i===index?0:-1;panels[i].hidden=i!==index;});
   }
-  // 标签名故意写成一整句：用户原话"证据溯源看不懂，E1 E2分别是干什么的"。
-  // "证据链 / API 数据"两个词既没说清这里是什么，也没说清该看哪一个。
-  ['这条引用从哪来','原始接口数据（开发排查用）'].forEach((label,index)=>{
+  ['证据链','原始接口数据'].forEach((label,index)=>{
     const tab=button(label,()=>selectTab(index));tab.id='provenance-tab-'+index;
     tab.setAttribute('role','tab');tab.setAttribute('aria-controls',panels[index].id);
     panels[index].setAttribute('role','tabpanel');panels[index].setAttribute('aria-labelledby',tab.id);
@@ -134,12 +154,8 @@
     });
     tabButtons.push(tab);tabs.appendChild(tab);
   });
-  /* 说明块挂在标签页上方的常驻容器里。以前它是 chain 的第一个子节点，而 open()/render()
-     会 replaceChildren() 清空 chain —— 于是"读取中/读取失败"时说明一起被清掉，
-     用户正好在看"看不懂"的空抽屉。说明必须独立于数据生命周期。 */
-  const guideHost=element('div');guideHost.id='provenance-guide';
-  selectTab(0);root.append(header,status,guideHost,tabs,chain,rawPanel);document.body.appendChild(root);
-  function ensureGuide(){if(!guideHost.children.length)guideHost.appendChild(explainBlock());}
+  selectTab(0);auditBody.append(tabs,chain,rawPanel);audit.append(auditBody);
+  root.append(header,guideHost,status,overview,audit);document.body.appendChild(root);
   const narrowScreen=typeof window.matchMedia==='function'?window.matchMedia('(max-width: 760px)'):null;
   function syncLayout(){
     let target=document.body;
@@ -174,7 +190,7 @@
     if(restore&&restoreFocus?.isConnected)restoreFocus.focus();restoreFocus=null;
   }
   root.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();close();}});
-  function onProjectChange(){close(false);chain.replaceChildren();raw.textContent='';}
+  function onProjectChange(){close(false);clearContent();}
   function currentProject(){
     return typeof current==='undefined'?null:current;
   }
@@ -184,52 +200,62 @@
       active?.answerId===context.answerId&&active?.citation===context.citation&&
       (project===null||project===context.projectId);
   }
-  // 「这些块是干什么的」：抽屉里原本只有一堆卡片，用户反馈看不懂为什么要展示这些。
-  // 这里给一份名词表 + 一句话说明，默认折叠，不挡住真正要看的那条链。
-  const nodePurpose={
-    answer:'你正在看的这条回答本身：它引用了哪几条证据、每条是"被引用"还是"只提供过"。',
-    retrieval:'生成这条答案的那一次检索：范围、时间点与检索模式。',
-    assertion:'写入知识时保存的那次判断（当时的状态与它引用到的原文）。',
-    record_version:'这条知识在那一刻的版本快照：名称、类型、生效区间。',
-    chunk_version:'断言引用到的原文切片（分块）。',
-    source_occurrence:'切片在那份文档里的精确位置与前后文——「往上找原文」就是从这里找。',
-    document_version:'当时那份文档的版本（不是今天的文档）。',
-    ingest_run:'这份文档是哪一次导入任务处理的。',
-    review_event:'谁在什么时候批准或拒绝了这条知识（人工审核痕迹）。'
-  };
-  /* 阅读指南：默认展开。以前这段是折叠的，等于没写——用户反馈就是"证据溯源看不懂，
-     E1 E2分别是干什么的，下面的内容是什么，为什么要展示这些，给llm提示的内容又是什么"。
-     所以先正面回答这四个问题，名词表再折一层（要用的人点开）。 */
-  function explainBlock(){
-    const box=element('details',undefined,'provenance-explain');
-    box.open=true;
-    box.appendChild(element('summary','这一页怎么看？E1 / E2 是什么？'));
-    const qa=element('dl');
-    const rows=[
-      ['E1 / E2 是什么','答案正文里的引用编号。正文写成 [E1]、[E2]，每个编号对应下面的一张卡；点正文里的编号就跳到这里。'],
-      ['下面的内容是','生成这条答案时冻结下来的一条条历史记录：哪份文档、命中哪一段原文、原文在文档里的位置、当时的置信度。'],
-      ['为什么要展示','用来核对答案有没有依据：卡片里的原文能和源文档对上，才叫有据可依；对不上就是没依据，要重新检索或补资料。也是审核与追责的凭据。'],
-      ['「给 LLM 的提示」是什么','服务端实际拼给模型的提示词片段。模型只看到证据正文，看不到这一页的历史、审核与版本痕迹——所以这些历史是给你和审核人看的，不是模型的推理过程。'],
-      ['怎么读某一张卡','按箭头从上往下：这条回答 → 那次检索 → 当时写入的判断 → 原文切片 → 这份文档的版本。'],
-    ];
-    rows.forEach(([term,copy])=>qa.append(element('dt',term),element('dd',copy)));
-    box.appendChild(qa);
-    const glossary=element('details',undefined,'provenance-explain__glossary');
-    glossary.appendChild(element('summary','名词表：每类卡片分别是什么'));
-    const list=element('dl');
-    for(const [type,purpose] of Object.entries(nodePurpose)){
-      list.append(element('dt',nodeLabels[type]),element('dd',purpose));
+  function clearContent(){
+    overview.replaceChildren();chain.replaceChildren();raw.textContent='';
+    audit.open=false;audit.hidden=true;selectTab(0);
+  }
+  function frozenSourceButton(details){
+    const excerpt=Object.fromEntries(detailFields.source_occurrence.map(key=>[key,details[key]]).filter(([,value])=>scalar(value)!==''));
+    return button('查看历史原文',()=>{
+      if(typeof window.openFrozenSourceEvidence==='function')window.openFrozenSourceEvidence(excerpt);
+      else status.textContent='原文查看器尚未就绪，请稍后重试。';
+    });
+  }
+  function sourceCard(details){
+    const card=element('article',undefined,'provenance-source-card');
+    card.append(element('h3',scalar(details.title)||'来源文档'));
+    const version=scalar(details.version);
+    const from=window.DisplayTime.format(details.valid_from,'');
+    const until=window.DisplayTime.format(details.valid_until,'');
+    const metadata=[version&&'版本 '+version,from&&'生效 '+from,until&&'失效 '+until].filter(Boolean);
+    if(metadata.length)card.append(element('p',metadata.join(' · '),'provenance-source-meta'));
+    const clip=scalar(details.highlight);
+    if(clip)card.append(element('blockquote',clip));
+    else card.append(element('p','这条引用没有保存可预览的原文片段。','provenance-source-meta'));
+    if(clip||details.source_content==='full_version')card.append(frozenSourceButton(details));
+    return card;
+  }
+  function renderOverview(nodes){
+    const occurrences=nodes.filter(node=>node.type==='source_occurrence'&&node.details).map(node=>node.details);
+    const first=occurrences.findIndex(detail=>scalar(detail.highlight));
+    if(first>0)occurrences.unshift(...occurrences.splice(first,1));
+    if(occurrences.length){
+      overview.append(sourceCard(occurrences[0]));
+      if(occurrences.length>1){
+        const more=element('details',undefined,'provenance-more-sources');
+        const sources=element('div',undefined,'provenance-more-source-list');
+        for(const details of occurrences.slice(1))sources.append(sourceCard(details));
+        more.append(element('summary','其他原文片段 · '+(occurrences.length-1)),sources);
+        overview.append(more);
+      }
+      return;
     }
-    glossary.appendChild(list);
-    glossary.appendChild(element('p','没出现的那类卡片＝这条链上确实没有那条记录（例如手工录入的对象没有「原文定位」）。缺少该有的记录时会显示上方的完整性警告。'));
-    box.appendChild(glossary);
-    return box;
+    for(const [type,field] of [['chunk_version','text_preview'],['assertion','quote'],['record_version','text_preview']]){
+      const match=nodes.find(node=>node.type===type&&scalar(node.details?.[field]));
+      if(!match)continue;
+      const card=element('article',undefined,'provenance-source-card');
+      card.append(element('h3',type==='record_version'?'引用的知识记录':'已保存的引用片段'),
+        element('blockquote',scalar(match.details[field])));
+      overview.append(card);return;
+    }
+    if(nodes.length)overview.append(element('p','这条引用没有保存可预览的片段。','provenance-source-meta'));
   }
   function render(data){
-    ensureGuide();chain.replaceChildren();raw.textContent=JSON.stringify(data,null,2);
+    clearContent();raw.textContent=JSON.stringify(data,null,2);
     const nodes=list(data.nodes).filter(node=>node&&Object.hasOwn(detailFields,node.type));
     const edges=list(data.edges),warnings=list(data.integrity?.warnings);
     const names=new Map(nodes.map(node=>[node.ref,scalar(node.label)||nodeLabels[node.type]]));
+    renderOverview(nodes);audit.hidden=false;
     if(warnings.length){
       const warningList=element('ul',undefined,'provenance-warnings');
       for(const warning of warnings){
@@ -254,11 +280,7 @@
       }
       card.appendChild(fields);
       if(node.type==='source_occurrence'){
-        const excerpt=Object.fromEntries(detailFields.source_occurrence.map(key=>[key,details[key]]).filter(([,value])=>scalar(value)!==''));
-        card.appendChild(button('查看历史原文',()=>{
-          if(typeof window.openFrozenSourceEvidence==='function')window.openFrozenSourceEvidence(excerpt);
-          else status.textContent='原文查看器尚未就绪，请稍后重试。';
-        }));
+        card.appendChild(frozenSourceButton(details));
       }
       if(node.type==='record_version'&&typeof details.record_id==='string'){
         card.appendChild(button('版本历史',()=>{
@@ -275,8 +297,8 @@
       chain.appendChild(card);
     }
     if(!nodes.length)setState('empty','没有可展示的溯源节点。');
-    else if(warnings.length||data.integrity?.complete===false)setState('partial','证据链存在历史缺口，请查看下方说明。');
-    else setState('ready','已显示生成该回答时保存的证据链。');
+    else if(warnings.length||data.integrity?.complete===false)setState('partial','部分历史记录缺失，详见溯源详情。');
+    else setState('ready','');
   }
   async function open(options={}){
     const {projectId,answerId,citation}=options;
@@ -286,7 +308,8 @@
     else if(!root.contains(document.activeElement))restoreFocus=document.activeElement;
     syncLayout();
     root.hidden=false;title.textContent='证据溯源 · ['+citation+']';
-    ensureGuide();chain.replaceChildren();raw.textContent='';selectTab(0);setState('loading','正在读取历史证据链…');closeButton.focus();
+    guideHost.textContent='['+citation+'] 是这条回答的引用编号。';
+    clearContent();root.scrollTop=0;setState('loading','正在读取引用…');closeButton.focus();
     controller=new AbortController();const signal=controller.signal;
     const url='/api/projects/'+encodeURIComponent(projectId)+'/answers/'+encodeURIComponent(answerId)+
       '/evidence/'+encodeURIComponent(citation)+'/provenance';
@@ -327,6 +350,5 @@
       }else container.appendChild(document.createTextNode(segment.text));
     }
   }
-  ensureGuide();
   window.ProvenanceDrawer={...pure,open,close,render,decorateAnswer,onProjectChange};
 })();

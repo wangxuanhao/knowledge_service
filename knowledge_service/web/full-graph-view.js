@@ -67,7 +67,9 @@
       status.textContent=text;status.title=text;status.classList.toggle('error',error);
     };
     const select=record=>{
-      if(loadedProject!==project())return null;bindExplorer(record);
+      if(loadedProject!==project())return null;
+      if(window.NeighborhoodSearch?.pickFromGraph(record,fixed))return null;
+      bindExplorer(record);
       return Promise.resolve(window.inspectKnowledgeRecord?.(record,{scope:fixed,qualify:record.kind==='entity'?'entity':'record'})).catch(error=>{if(error.name!=='AbortError')message(error.message,true);});
     };
     function bindExplorer(selected){

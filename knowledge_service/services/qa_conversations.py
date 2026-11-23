@@ -3,6 +3,8 @@ import json
 import math
 import re
 
+from ..domain.search_match import sanitize_retrieval_match
+
 
 MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024
 _CITATION = re.compile(r'[ERFU][1-9][0-9]*\Z')
@@ -45,6 +47,8 @@ def sanitize_evidence_summary(value):
         return {}
     result = _strings(value, ('text_preview', 'kind', 'provenance_ref', 'source_status',
         'source_reason', 'retrieval_channel', 'ranker_version'))
+    if match := sanitize_retrieval_match(value.get('retrieval_match')):
+        result['retrieval_match'] = match
     if 'text_preview' in result:
         result['text_preview'] = result['text_preview'][:240]
     if isinstance(value.get('citation'), str) and _CITATION.fullmatch(value['citation']):

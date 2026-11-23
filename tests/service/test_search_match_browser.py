@@ -12,18 +12,21 @@ def test_keyword_locations_and_semantic_explanation_are_distinct(redesign_page,w
         semantic='retrieval_mode=semantic' in route.request.url
         match={'mode':'semantic' if semantic else 'keyword','channels':['semantic' if semantic else 'keyword'],
             'fields':[] if semantic else ['title','body'],'query':'退款',
-            'text':'款项原路退回。' if semantic else '申请退款前核对订单。'}
+            'text':'款项原路退回。' if semantic else '申请退款前核对订单。',
+            **({'score': .86} if semantic else {})}
         route.fulfill(json={'documents':[{'id':'d','metadata':{'title':'退款办理规定','source_file':'rules.md','status':'ready'},'match':match}],
             'total':1,'counts':{'all':1,'ready':1,'failed':0,'processing':0}})
     page.route('**/api/projects/p/sources**',directory)
     page.evaluate("KnowledgeTabs.open('sources')")
     page.locator('#source-search-input').fill('退款');page.locator('#source-search-input').press('Enter')
     page.wait_for_function("document.querySelector('.source-match-labels')?.textContent.includes('正文命中')")
+    assert '关键词匹配 1' in page.locator('.source-match-labels').inner_text()
     assert page.locator('.source-item__name mark').inner_text()=='退款'
     page.locator('[data-mode="semantic"]').click()
     page.wait_for_function("document.querySelector('.source-item__match')?.dataset.matchMode==='semantic'")
     assert page.locator('.source-item__match mark').count()==0
     assert '语义相关' in page.locator('.source-match-labels').inner_text()
+    assert '语义相似度 0.86' in page.locator('.source-match-labels').inner_text()
     assert '款项原路退回' in page.locator('.source-item__match').inner_text()
     box=page.locator('.source-item__match').bounding_box()
     assert box['x']>=0 and box['x']+box['width']<=width+1

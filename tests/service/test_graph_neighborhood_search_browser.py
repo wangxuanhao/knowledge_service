@@ -4,6 +4,11 @@ import pytest
 from test_workspace_redesign_ui import redesign_page
 
 
+@pytest.fixture
+def postgres_backend():
+    """These routes serve isolated API fixtures."""
+
+
 def test_neighborhood_semantic_lookup_only_selects_versioned_entities(redesign_page):
     page, errors = redesign_page
     requests = []
@@ -17,23 +22,26 @@ def test_neighborhood_semantic_lookup_only_selects_versioned_entities(redesign_p
 
     def find(route):
         requests.append(route.request.post_data_json)
-        route.fulfill(json={'active_mode': 'semantic', 'hits': [seed,
+        route.fulfill(json={'active_mode': 'semantic', 'hits': [{**seed, 'score': .83427},
             {'id': 'relation', 'version_id': 'r1', 'kind': 'relation', 'text': '误入的关系'},
             {'id': 'unversioned', 'kind': 'entity', 'text': '无版本对象'}]})
 
     page.route('**/api/projects/p/search', find)
     page.route('**/graph-neighborhood/search', lambda route: route.fulfill(json={
-        'records': [seed], 'matches': [{**seed, 'label': seed['text'], 'hops': 0,
+        'records': [seed], 'matches': [{**seed, 'label': seed['text'], 'hops': 0, 'score': .83427,
                                       'path': {'start': 'seed', 'end': 'seed', 'steps': []}}],
         'total': 1, 'partial': False,
     }))
     page.click('#neighborhood-search-toggle')
     pane = page.locator('#graph-panel-neighborhood')
-    mode = pane.get_by_label('起点查找方式')
+    mode = page.locator('#graph-workspace-header').get_by_label('起点查找方式')
+    assert mode.is_visible()
     assert mode.input_value() == 'keyword'
     mode.select_option('semantic')
     page.locator('#query').fill('店铺违规后如何纠正')
     page.click('#search')
+    pane.get_by_text('语义相似度 0.83427', exact=True).wait_for()
+    assert pane.get_by_text('匹配实体向量', exact=True).is_visible()
     pane.get_by_role('button', name='商户整改').click()
     assert not pane.get_by_text('误入的关系').count()
     assert not pane.get_by_text('无版本对象').count()
@@ -50,6 +58,7 @@ def test_neighborhood_semantic_lookup_only_selects_versioned_entities(redesign_p
     assert body['seeds'] == ['seed'] and body['valid_at'] == scope['valid_at']
     assert 'retrieval_mode' not in body
     pane.locator('.neighborhood-match').get_by_text('商户整改', exact=True).wait_for()
+    assert not pane.get_by_text('语义相似度 0.83427', exact=True).count()
 
     page.evaluate('''() => {
         const scope = WorkspaceContext.store.read('p', 'search');
@@ -63,12 +72,27 @@ def test_neighborhood_semantic_lookup_only_selects_versioned_entities(redesign_p
     assert not errors
 
 
+def test_canvas_pick_sets_neighborhood_seed_without_opening_detail(redesign_page):
+    page, errors = redesign_page
+    page.click('#neighborhood-search-toggle')
+    pane = page.locator('#graph-panel-neighborhood')
+    page.evaluate("""() => FullGraphView.renderer.onSelect(
+        {id:'picked', version_id:'picked-v1', kind:'entity', text:'图上选择的起点'})""")
+    pane.get_by_text('起点 · 图上选择的起点').wait_for()
+    assert pane.is_visible()
+    assert pane.get_by_role('button', name='检索邻域', exact=True).is_enabled()
+    assert page.locator('#query').input_value() == '图上选择的起点'
+    assert not page.locator('#graph-panel-detail').is_visible()
+    assert not errors
+
+
 @pytest.mark.parametrize('width', [1440, 390])
 def test_neighborhood_search_uses_full_neighborhood_and_reuses_graph(redesign_page, width):
     page, errors = redesign_page
     page.set_viewport_size({'width': width, 'height': 860})
     records = [
-        {'id': 'a', 'version_id': 'a1', 'kind': 'entity', 'type': 'task', 'text': '提交材料'},
+        {'id': 'a', 'version_id': 'a1', 'kind': 'entity', 'type': 'task', 'text': '提交材料',
+         'metadata': {'aliases': ['提交申请材料', '材料登记']}},
         {'id': 'b', 'version_id': 'b1', 'kind': 'entity', 'type': 'task', 'text': '审批材料'},
         {'id': 'ab', 'version_id': 'ab1', 'kind': 'relation', 'type': 'approves', 'type_label': '审批',
          'subject_id': 'a', 'object_id': 'b', 'text': '审批'},
@@ -127,6 +151,10 @@ def test_neighborhood_search_uses_full_neighborhood_and_reuses_graph(redesign_pa
     assert panel.locator('[data-ns=hops]').input_value() == '2'
     page.locator('#query').fill('提交')
     page.click('#search')
+    panel.get_by_text('关键词匹配 1', exact=True).wait_for()
+    assert panel.get_by_text('命中实体名称', exact=True).is_visible()
+    assert panel.get_by_text('命中实体别名', exact=True).is_visible()
+    assert panel.locator('.neighborhood-choices mark').all_text_contents() == ['提交', '提交']
     panel.get_by_role('button', name='提交材料').click()
     panel.locator('[data-ns=direction]').select_option('forward')
     panel.locator('[data-ns=types-summary]').click()
@@ -134,6 +162,7 @@ def test_neighborhood_search_uses_full_neighborhood_and_reuses_graph(redesign_pa
     panel.get_by_role('button', name='检索邻域', exact=True).click()
     row = panel.locator('.neighborhood-match')
     row.wait_for()
+    assert not panel.get_by_text('关键词匹配 1', exact=True).count()
     assert '1 跳' in row.inner_text()
     assert '申请处理指南' in row.inner_text()
     assert requests[-1]['seeds'] == ['a'] and requests[-1]['hops'] == 2

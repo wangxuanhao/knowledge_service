@@ -113,6 +113,8 @@ def _visible_panels(page):
 
 
 def test_community_controls_keep_scope_and_require_explicit_generation(runtime):
+    from playwright.sync_api import expect
+
     page = runtime.page
     requests = []
     community = {'id': 'c1', 'title': '未成年人规则', 'member_count': 2, 'relationship_count': 1,
@@ -148,10 +150,14 @@ def test_community_controls_keep_scope_and_require_explicit_generation(runtime):
     page.get_by_text('从正式规则归纳的主题', exact=True).wait_for()
     page.get_by_role('button', name='就此社区提问').click()
     page.get_by_role('button', name='未成年人规则 ×').wait_for()
-    page.locator('#community-question-text').fill('适用哪些限制？')
-    page.get_by_role('button', name='查看相关报告').click()
+    question = page.get_by_role('textbox', name='社区问答问题')
+    send = page.get_by_role('button', name='发送社区问题')
+    question.fill('适用哪些限制？')
+    send.click()
     page.get_by_text('找到 1 份相关报告。', exact=True).wait_for()
-    page.get_by_role('button', name='生成答案').click()
+    page.locator('#community-questions').get_by_role('checkbox', name='生成模型答案').check()
+    question.fill('适用哪些限制？')
+    send.click()
     page.get_by_text('生成的回答', exact=True).wait_for()
     assert [body['generate'] for path, body in requests if path == '/ask'] == [False, True]
     assert all(body['community_ids'] == ['c1'] for path, body in requests if path == '/ask')
@@ -165,8 +171,9 @@ def test_community_controls_keep_scope_and_require_explicit_generation(runtime):
       document.dispatchEvent(new CustomEvent('workspace:scope-changed',
         {detail:{page:'qa',projectId:id}}));
     }""", runtime.project)
-    page.get_by_text('范围 · 京东', exact=True).wait_for()
-    page.wait_for_function("() => !document.getElementById('community-question-submit').disabled")
+    expect(page.locator('#community-questions #scope-toggle')).to_be_visible()
+    expect(page.locator('#community-ask-range')).to_have_text('范围 · 京东')
+    expect(send).to_be_enabled()
     assert requests[-1][1]['scope'] == {'kind': 'platform', 'platform': '京东'}
     assert not page.get_by_text('生成的回答', exact=True).count()
     _click_runtime(page, 'communities')

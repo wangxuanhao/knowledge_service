@@ -566,7 +566,10 @@ def apply_validity(service, project, context, request):
             if path.get('query_platform') == group.get('platform')
             and path.get('source_scope') == group.get('source_scope')]
         if not group['evidence_rows']:
-            warnings.append(str(group.get('platform')) + '：未检索到该时点确认有效的依据，不能据此断言不存在规则。')
+            label = group.get('platform') or {
+                'unknown': '平台范围待确认', 'all': '通用规则',
+            }.get(group.get('source_scope'), '当前范围')
+            warnings.append(label + '：未检索到该时点确认有效的依据，不能据此断言不存在规则。')
     if context.get('graph_truncated'):
         warnings.append('图关系上下文达到节点或关系预算，当前路径仅覆盖已读取邻域，不能据此断言全库没有路径。')
     context['coverage_warnings'] = warnings

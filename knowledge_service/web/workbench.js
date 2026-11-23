@@ -806,7 +806,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const answerContext=item=>({projectId:current,answerId:item.answer_id,evidence:['evidence','uncertain_references','historical_references','future_references'].flatMap(key=>item[key]||[])});
   const referenceKinds=[['historical_references','历史参考'],['future_references','尚未生效参考'],['uncertain_references','有效性待核对']];
   const platformText=row=>{
-    const platforms=row.metadata?.applicability?.platforms;
+    const platforms=(row.applicability||row.metadata?.applicability)?.platforms;
     if(row.source_scope==='all'||platforms?.mode==='all')return '通用规则';
     if(row.query_platform)return '平台：'+row.query_platform;
     if(platforms?.mode==='specific'&&platforms.values?.length)return '平台：'+platforms.values.join('、');
@@ -841,6 +841,73 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         +' · 失效（不含）：'+window.DisplayTime.format(source.valid_until,"未维护")+' · 原文版本：'+(source.document_version_id||'未提供');
       article.append(line);
     }
+  }
+  function evidenceHeader(row,citation,showPlatform=false){
+    const header=document.createElement('div');header.className='qa-evidence-item-header';
+    const source=Array.isArray(row.sources)?row.sources[0]:null;
+    const title=document.createElement('strong');title.className='qa-evidence-source-title';
+    const original=source?.title||source?.document_id||'原文来源未记录';
+    title.textContent=window.QaPresentation?.sourceTitle?.(original)||original;
+    title.title=original;
+    header.append(title,citation);
+    const metadata=[source?.version?'文档版本 '+source.version:'',showPlatform?platformText(row):''].filter(Boolean);
+    if(metadata.length){
+      const note=document.createElement('small');note.className='qa-evidence-source-meta';
+      note.textContent=metadata.join(' · ');header.append(note);
+    }
+    return header;
+  }
+  function evidenceItemDetails(){
+    const details=document.createElement('details');details.className='qa-evidence-item-details';
+    const summary=document.createElement('summary');summary.textContent='来源与有效期';details.append(summary);
+    return details;
+  }
+  function appendEvidenceMatch(article,row){
+    if(!row.retrieval_match)return;
+    const match=provenance.sanitizeEvidenceSummary(row).retrieval_match;
+    const labels=match&&window.SourceMatchView?.hitLabels?.(match);
+    if(!labels?.length)return;
+    const line=document.createElement('p');line.className='qa-evidence-meta subtle qa-retrieval-match';
+    line.textContent=labels.join(' · ');article.append(line);
+  }
+  function appendRetrievalScope(details,payload,platformGroups,warnings){
+    const asOf=window.DisplayTime?.format(payload.as_of,'')||'';
+    const knownAt=window.DisplayTime?.format(payload.known_at,'')||'';
+    const times=[asOf&&'规则判断时点：'+asOf,knownAt&&knownAt!==asOf&&'知识记录截止：'+knownAt].filter(Boolean);
+    if(times.length){
+      const time=document.createElement('p');time.className='qa-time-context subtle';
+      time.textContent=times.join(' · ');details.append(time);
+    }
+    const groups=platformGroups.map(group=>({group,count:Number(group.evidence_count??group.evidence_rows?.length??group.hits?.length??0)}));
+    const hasEvidence=groups.some(({count})=>count>0);
+    const emptyUnknown=groups.some(({group,count})=>group.source_scope==='unknown'&&count===0);
+    const visibleGroups=groups.filter(({group,count})=>count||!hasEvidence||group.source_scope!=='unknown');
+    if(visibleGroups.length){
+      const platformBlock=document.createElement('div');platformBlock.className='qa-reasoning-block';
+      const head=document.createElement('p');head.className='qa-reasoning-head';head.textContent='各平台找到的有效依据';platformBlock.append(head);
+      for(const {group,count} of visibleGroups){
+        const line=document.createElement('p');line.className='qa-evidence-meta subtle';
+        line.textContent=platformGroupLabel(group)+' · '+(count>0?count+' 条有效依据':'未找到确认有效的依据');
+        platformBlock.append(line);
+      }
+      details.append(platformBlock);
+    }
+    if(!warnings.length)return;
+    const notice=document.createElement('div');notice.className='qa-coverage-warnings';notice.setAttribute('role','status');
+    const limits=document.createElement('details');limits.className='qa-retrieval-limits';
+    const summary=document.createElement('summary');summary.textContent='检索限制与覆盖说明';limits.append(summary);
+    for(const warning of warnings){
+      const line=document.createElement('p');
+      const text=typeof warning==='string'?warning:JSON.stringify(warning);
+      if(!text)continue;
+      line.textContent=text.replace(/^None：(?=未检索到该时点确认有效的依据)/,
+        emptyUnknown?'范围待确认：':'当前范围：');
+      const technical=/^(上下文仅补充|参考检索先在数据库)/.test(text)
+        || (visibleGroups.length && text.includes('未检索到该时点确认有效的依据'));
+      (technical?limits:notice).append(line);
+    }
+    if(notice.childElementCount)details.append(notice);
+    if(limits.childElementCount>1)details.append(limits);
   }
   function markDraft(turn,failed=false){
     let note=turn.querySelector('.qa-draft-status');
@@ -939,35 +1006,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     toggle.textContent=(expansionEnabled?'直接命中 · ':'查看 ')+counts;
     const panel=document.createElement('div');panel.className='qa-evidence-panel';panel.id=panelId;panel.hidden=true;
     if(expansionEnabled)panel.dataset.expansionGroup='direct';
-    // 这块面板用户反馈"看不懂 E1/E2 是什么、下面这些为什么要展示"。它其实是
-    // 模型回答的输入清单，所以先给一段说明，再列条目。
-    const note=document.createElement('div');note.className='qa-evidence-note';
-    for(const line of [
-      expansionEnabled?'[E1] [E2] … 是这条答案里的引用编号：分组展示沿用答案生成时的编号，不会重新编号。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。':'[E1] [E2] … 是这条答案里的引用编号：证据从 E1 开始按检索顺序编号，答案正文里的 [E1] 就指下面第 1 条。点编号可以看它的完整溯源链（原文 → 记录版本 → 断言 → 审核决定）。',
-      'E 为本次时点的回答依据；历史 R、未来 F、有效性待核对 U 在下方单列，不计入已确认有效的依据。缺少属性不影响合格原文查询。',
-      '规则判断使用 E 依据；文档说明可以引用带状态标识的原文，不代表当前有效规则。点引用查看回答生成时冻结的原文与记录版本。',
-    ]){const p=document.createElement('p');p.textContent=line;note.append(p);}
-    panel.append(note);
-    if(payload.as_of||payload.known_at){
-      const time=document.createElement('p');time.className='qa-time-context subtle';
-      time.textContent='规则判断时点：'+window.DisplayTime.format(payload.as_of)+' · 系统知识时点：'+window.DisplayTime.format(payload.known_at);panel.append(time);
-    }
-    if(warnings.length){
-      const coverage=document.createElement('div');coverage.className='qa-coverage-warnings';coverage.setAttribute('role','status');
-      for(const warning of warnings){const line=document.createElement('p');line.textContent=typeof warning==='string'?warning:JSON.stringify(warning);coverage.append(line);}
-      panel.append(coverage);
-    }
-    if(platformGroups.length){
-      const platformBlock=document.createElement('div');platformBlock.className='qa-reasoning-block';
-      const head=document.createElement('p');head.className='qa-reasoning-head';head.innerHTML='<b>按平台检索结果</b><span>各平台分别筛选和排名。</span>';platformBlock.append(head);
-      for(const group of platformGroups){
-        const count=Number(group.evidence_count??group.evidence_rows?.length??group.hits?.length??0);
-        const line=document.createElement('p');line.className='qa-evidence-meta subtle';
-        line.textContent=platformGroupLabel(group)+' · '+count+' 条证据'+(count?'':'（未检索到本次时点确认有效的依据）');
-        platformBlock.append(line);
-      }
-      panel.append(platformBlock);
-    }
+    const details=document.createElement('details');details.className='qa-evidence-details';
+    const detailsLabel=document.createElement('summary');detailsLabel.textContent='本次检索范围';details.append(detailsLabel);
+    appendRetrievalScope(details,payload,platformGroups,warnings);
     // 图谱关系路径：命中实体沿现有关系边可到达的多跳路径，不表示 OWL 或逻辑推理。
     const paths=payload?.reasoning_paths||[];
     if(paths.length){
@@ -985,7 +1026,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         line.innerHTML=nodes.join(' ');
         reasonBlock.append(line);
       }
-      panel.append(reasonBlock);
+      details.append(reasonBlock);
     }
     const projectId=current,answerId=payload.answer_id;
     let supplement=null;
@@ -1008,62 +1049,91 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         supplement.append(empty);
       }
     }
-    const evidenceGroups=[{target:panel,items:rows},...(supplement?[{target:supplement,items:supplementalRows}]:[])];
-    for(const evidenceGroup of evidenceGroups){
-      const target=evidenceGroup.target,evidenceRows=evidenceGroup.items;
-      for(const [rowIndex,row] of evidenceRows.entries()){
-        const article=document.createElement('article');article.className='qa-evidence-item';
-        article.hidden=rowIndex>=3;
-        const citation=provenance.sanitizeEvidenceSummary(row).citation;
-        const link=document.createElement(answerId&&citation?'button':'b');
-        link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
-        if(answerId&&citation){
-          link.type='button';link.className+=' secondary provenance-citation';
-          link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
-          link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
-        }
-        const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
-        const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
-        const applicability=window.ApplicabilityUI?.describe?.(row);
-        meta.textContent=(row.kind||'')+' · '+(labelOf(row.type)||'—')+' · 版本 '+(row.version??'—')+(applicability?' · '+applicability:'')+(presentation?.isExpansionRow?.(row)?' · 类型扩展':'');
-        article.append(link,excerpt,meta);
-        if(row.validity_status){const validity=document.createElement('p');validity.className='qa-validity subtle';validity.textContent=validityText(row);article.append(validity);}
-        addSourceEligibility(article,row);
-        const sources=Array.isArray(row.sources)?row.sources:[];
-        if(sources.length){
-          const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
-          sources.forEach((source,sourceIndex)=>{
-            const sourceItem=document.createElement('section');sourceItem.className='qa-source-item';sourceItem.hidden=sourceIndex>0;
-            const title=document.createElement('b');title.textContent=source.title||source.document_id||'历史原文';
-            const quote=document.createElement('p');quote.textContent=(source.quote||'').slice(0,240);
-            const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
-            const sourceApplicability=window.ApplicabilityUI?.describe?.(source);
-            sourceMeta.textContent='文档版本 '+(source.version??'—')+' · '+(source.channel||row.retrieval_channel||'冻结来源')+(sourceApplicability?' · '+sourceApplicability:'');
-            sourceItem.append(title,quote,sourceMeta);sourceBox.append(sourceItem);
-          });
-          if(sources.length>1){
-            const more=document.createElement('button');more.type='button';more.className='qa-source-more secondary';
-            more.textContent='另有 '+(sources.length-1)+' 个来源';more.setAttribute('aria-expanded','false');
-            more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...sourceBox.querySelectorAll('.qa-source-item')].slice(1).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'另有 '+(sources.length-1)+' 个来源':'收起其他来源';};
-            sourceBox.append(more);
-          }
-          article.append(sourceBox);
-        }else{
-          const missing=document.createElement('p');missing.className='qa-source-missing subtle';
-          missing.textContent='原文状态：'+(row.source_reason||'手工录入或历史来源缺失')+'（未使用当前版本补写）';article.append(missing);
-        }
-        const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
-        const actions=document.createElement('div');actions.className='row';
-        if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
-        if(row.provenance_ref&&answerId){const button=frozenCitation(row,projectId,answerId);button.textContent='查看冻结原文';actions.append(button);}
-        if(actions.childElementCount)article.append(actions);
-        target.append(article);
+    const evidenceSections=[{target:panel,items:rows},...(supplement?[{target:supplement,items:supplementalRows}]:[])];
+    for(const {target,items} of evidenceSections){
+      const groups=new Map();
+      for(const row of items){
+        const label=platformText(row);
+        if(!groups.has(label))groups.set(label,[]);
+        groups.get(label).push(row);
       }
-      if(evidenceRows.length>3){
-        const more=document.createElement('button');more.type='button';more.className='qa-evidence-more secondary';
-        more.textContent='再看 '+(evidenceRows.length-3)+' 条依据';more.setAttribute('aria-expanded','false');
-        more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...target.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?'再看 '+(evidenceRows.length-3)+' 条依据':'收起其余依据';};
-        target.append(more);
+      for(const [label,groupRows] of groups){
+        const section=document.createElement('section');section.className='qa-evidence-group';
+        const heading=document.createElement('h4');heading.className='qa-evidence-group-heading';
+        heading.textContent=label+' · '+groupRows.length+' 条';section.append(heading);
+        for(const [rowIndex,row] of groupRows.entries()){
+          const article=document.createElement('article');article.className='qa-evidence-item';
+          article.hidden=rowIndex>=3;
+          const citation=provenance.sanitizeEvidenceSummary(row).citation;
+          const link=document.createElement(answerId&&citation?'button':'b');
+          link.className='qa-citation';link.textContent='['+(row.citation||'')+']';
+          if(answerId&&citation){
+            link.type='button';link.className+=' secondary provenance-citation';
+            link.setAttribute('aria-label','查看引用 '+citation+' 的证据溯源');
+            link.title='查看原文与溯源';
+            link.onclick=()=>provenance.open({projectId,answerId,citation,trigger:link});
+          }
+          const excerpt=document.createElement('p');excerpt.className='qa-evidence-excerpt';
+          const text=row.text_preview??row.text??'';
+          excerpt.textContent=presentation?.evidencePreview?.(text)??text;
+          const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
+          const applicability=window.ApplicabilityUI?.describe?.(row);
+          const inspection=evidenceItemDetails();
+          meta.textContent=[row.kind,row.type?labelOf(row.type):'',row.version?'记录版本 '+row.version:'',applicability,
+            presentation?.isExpansionRow?.(row)?'类型扩展':''].filter(Boolean).join(' · ');
+          article.append(evidenceHeader(row,link),excerpt);
+          appendEvidenceMatch(article,row);
+          if(meta.textContent)inspection.append(meta);
+          if(row.validity_status){const validity=document.createElement('p');validity.className='qa-validity subtle';validity.textContent=validityText(row);inspection.append(validity);}
+          addSourceEligibility(inspection,row);
+          const sources=Array.isArray(row.sources)?row.sources:[];
+          if(sources.length){
+            const sourceBox=document.createElement('div');sourceBox.className='qa-source-list';
+            const secondarySources=[];
+            sources.forEach((source,sourceIndex)=>{
+              const excerpt=presentation?.distinctSourceQuote?.(source.quote,text)??(source.quote||'').slice(0,240);
+              const sourceApplicability=window.ApplicabilityUI?.describe?.(source);
+              if(!sourceIndex&&!excerpt&&(!sourceApplicability||sourceApplicability===applicability))return;
+              const sourceItem=document.createElement('section');sourceItem.className='qa-source-item';sourceItem.hidden=sourceIndex>0;
+              if(sourceIndex){
+                const title=document.createElement('b');title.textContent=source.title||source.document_id||'原文来源未记录';
+                sourceItem.append(title);secondarySources.push(sourceItem);
+              }
+              if(excerpt){const quote=document.createElement('p');quote.textContent=excerpt;sourceItem.append(quote);}
+              const metadata=[sourceIndex&&source.version?'文档版本 '+source.version:'',sourceApplicability].filter(Boolean);
+              if(metadata.length){
+                const sourceMeta=document.createElement('p');sourceMeta.className='qa-evidence-meta subtle';
+                sourceMeta.textContent=metadata.join(' · ');sourceItem.append(sourceMeta);
+              }
+              sourceBox.append(sourceItem);
+            });
+            if(secondarySources.length){
+              const more=document.createElement('button');more.type='button';more.className='qa-source-more secondary';
+              const label='另有 '+secondarySources.length+' 个来源';
+              more.textContent=label;more.setAttribute('aria-expanded','false');
+              more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';secondarySources.forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?label:'收起其他来源';};
+              sourceBox.append(more);
+            }
+            if(sourceBox.childElementCount)inspection.append(sourceBox);
+          }else{
+            const missing=document.createElement('p');missing.className='qa-source-missing subtle';
+            missing.textContent='原文来源缺失，可能来自手工录入或旧记录。';inspection.append(missing);
+          }
+          article.append(inspection);
+          const seed=row.kind==='entity'?row.id:(row.kind==='relation'?row.subject_id:'');
+          const actions=document.createElement('div');actions.className='row';
+          if(seed){const button=document.createElement('button');button.type='button';button.dataset.evidenceNode=seed;button.textContent='在图谱中查看';actions.append(button);}
+          if(actions.childElementCount)article.append(actions);
+          section.append(article);
+        }
+        if(groupRows.length>3){
+          const more=document.createElement('button');more.type='button';more.className='qa-evidence-more secondary';
+          const label='再看 '+(groupRows.length-3)+' 条依据';
+          more.textContent=label;more.setAttribute('aria-expanded','false');
+          more.onclick=()=>{const open=more.getAttribute('aria-expanded')==='true';[...section.querySelectorAll('.qa-evidence-item')].slice(3).forEach(node=>node.hidden=open);more.setAttribute('aria-expanded',String(!open));more.textContent=open?label:'收起其余依据';};
+          section.append(more);
+        }
+        target.append(section);
       }
     }
     const referenceGroups=[{target:panel,groups:references},...(supplement?[{target:supplement,groups:supplementalReferences}]:[])];
@@ -1074,19 +1144,26 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         const heading=document.createElement('h4');heading.textContent=group.title+' · '+group.items.length+' 条';section.append(heading);
         for(const row of group.items){
           const article=document.createElement('article');article.className='qa-reference-item';
-          const excerpt=document.createElement('p');excerpt.textContent=row.text_preview??row.text??'';
+          const excerpt=document.createElement('p');excerpt.className='qa-evidence-excerpt';
+          const text=row.text_preview??row.text??'';
+          excerpt.textContent=presentation?.evidencePreview?.(text)??text;
           const use=document.createElement('p');use.className='qa-reference-usage';
           use.textContent=row.usage==='qualified_quote'||row.document_quote_allowed===true?'仅用于文档说明，未作为已确认有效规则依据':'未参与本次回答';
           const meta=document.createElement('p');meta.className='qa-evidence-meta subtle';
-          meta.textContent=platformText(row)+' · '+validityText(row)+' · 记录版本：'+(row.version_id||row.version||'—')+(presentation?.isExpansionRow?.(row)?' · 类型扩展':'');
-          article.append(frozenCitation(row,projectId,answerId),excerpt,use,meta);
-          addSourceEligibility(article,row);
-          if(row.exclusion_reasons?.length){const reasons=document.createElement('p');reasons.className='qa-reference-exclusions subtle';reasons.textContent=exclusionText(row);article.append(reasons);}
-          for(const source of row.sources||[]){
+          meta.textContent=validityText(row)+' · 记录版本：'+(row.version_id||row.version||'—')+(presentation?.isExpansionRow?.(row)?' · 类型扩展':'');
+          const inspection=evidenceItemDetails();inspection.append(meta);
+          article.append(evidenceHeader(row,frozenCitation(row,projectId,answerId),true),excerpt);
+          appendEvidenceMatch(article,row);
+          article.append(use,inspection);
+          addSourceEligibility(inspection,row);
+          if(row.exclusion_reasons?.length){const reasons=document.createElement('p');reasons.className='qa-reference-exclusions subtle';reasons.textContent=exclusionText(row);inspection.append(reasons);}
+          for(const [index,source] of (row.sources||[]).entries()){
+            const quote=presentation?.distinctSourceQuote?.(source.quote,text)??source.quote??'';
+            if(!index&&!quote)continue;
             const sourceLine=document.createElement('p');sourceLine.className='qa-source-item subtle';
-            sourceLine.textContent=(source.title||source.document_id||'冻结原文')+' · 文档版本：'+(source.document_version_id||source.record_version_id||source.version||'—')+' · '+(source.quote||'');article.append(sourceLine);
+            sourceLine.textContent=[index?(source.title||source.document_id||'冻结原文'):'',index&&source.version?'文档版本 '+source.version:'',quote].filter(Boolean).join(' · ');inspection.append(sourceLine);
           }
-          if(!row.provenance_ref||!answerId){const missing=document.createElement('p');missing.className='qa-source-missing subtle';missing.textContent='冻结来源不可用，无法打开历史原文（未使用当前版本补写）';article.append(missing);}
+          if(!row.provenance_ref||!answerId){const missing=document.createElement('p');missing.className='qa-source-missing subtle';missing.textContent='冻结来源不可用，无法打开历史原文';inspection.append(missing);}
           section.append(article);
         }
         referenceGroup.target.append(section);
@@ -1122,6 +1199,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(!expansionEnabled&&!rows.length)toggle.textContent='查看 '+pending.count+' 条结构待定的知识';
       panel.append(block);
     }
+    if(details.childElementCount>1)panel.append(details);
     toggle.onclick=()=>{const open=toggle.getAttribute('aria-expanded')==='true';toggle.setAttribute('aria-expanded',String(!open));panel.hidden=open;toggle.textContent=(open?'查看 ':'收起 ')+counts;};
     block.append(toggle,panel);if(supplement)block.append(supplement);
     block.querySelectorAll('[data-evidence-node]').forEach(node=>{node.onclick=async()=>{
@@ -1214,12 +1292,14 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         showRetrievalNotice(item.data);
       }else if(item.event==='delta'){
         const chunk=String(item.data?.text??'');
-        text+=chunk;pending+=chunk;answer.textContent=text;speak(false);atEnd();
+        text+=chunk;
+        if(!body.generate&&window.QaPresentation?.isEvidenceTranscript?.({...record,mode:'evidence_only',text}))answer.hidden=true;
+        if(!answer.hidden){pending+=chunk;answer.textContent=text;speak(false);atEnd();}
       }else if(item.event==='done'){
         capture(item.data);
         record.generation=item.data?.generation;record.timings_ms=item.data?.timings_ms;record.mode=item.data?.mode;
         record.answer_purpose=item.data?.answer_purpose;record.answer_label=item.data?.answer_label;
-        if(typeof item.data?.answer==='string'){text=item.data.answer;answer.textContent=text;spoken='';pending=text;live.textContent='';}
+        if(typeof item.data?.answer==='string'){text=item.data.answer;spoken='';pending=text;live.textContent='';}
         finished=true;
       }
     };
@@ -1253,17 +1333,20 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         for(const item of tail.events){handle(item);if(finished)break;}
       }
       if(!finished)throw Error('回答流提前结束');
-      speak(true);
       target.dataset.state='done';progress.textContent='回答完成';
       target.querySelector('.qa-draft-status')?.remove();
       record.text=text;
+      answer.hidden=false;
       provenance.decorateAnswer(answer,text,{...answerContext(record),projectId:project});
       if(!record.answer_id)markUnresolvedProvenance(target);
       window.QaPresentation?.annotate(target,record);
+      if(target.dataset.result==='evidence'){pending='检索完成。';spoken='';}
+      speak(true);
       persist();
     }catch(error){
       if(mine!==serial||project!==current)return;
       failed=true;target.dataset.state='error';progress.textContent='';
+      answer.hidden=false;answer.textContent=text;
       markDraft(target,true);
       const emsg=error?.message||String(error);
       record.text=text;record.error=emsg;persist();
@@ -1429,14 +1512,16 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   });
   // Keep the composer inside the viewport at every width and above a soft keyboard.
   function fit(){
-    const page=$c('qa-page');if(!page)return;
+    const community=$c('community-questions');
+    const page=community&&!community.hidden?community:$c('qa-page');if(!page)return;
     const viewport=window.visualViewport,height=viewport?viewport.height:window.innerHeight,offsetTop=viewport?viewport.offsetTop:0;
     const main=document.querySelector('body>main'),bottomPadding=main?parseFloat(getComputedStyle(main).paddingBottom)||0:0;
     page.style.setProperty('--qa-fit',Math.max(0,Math.floor(height+offsetTop-page.getBoundingClientRect().top-Math.max(10,bottomPadding)))+'px');
-    $c('qa-workspace')?.style.setProperty('--qa-fit',page.style.getPropertyValue('--qa-fit'));
+    if(page!==community)$c('qa-workspace')?.style.setProperty('--qa-fit',page.style.getPropertyValue('--qa-fit'));
     page.style.setProperty('--qa-keyboard-inset',Math.max(0,Math.round(window.innerHeight-height-offsetTop))+'px');
   }
   window.addEventListener('resize',fit);
+  document.addEventListener('community:question-view-changed',fit);
   window.visualViewport?.addEventListener('resize',fit);
   window.visualViewport?.addEventListener('scroll',fit);
   document.querySelector('[data-tab="qa"]')?.addEventListener('click',()=>setTimeout(fit,0));
