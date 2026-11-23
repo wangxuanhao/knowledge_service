@@ -27,10 +27,13 @@ body main #tab-mindmap #mindmap-version-scope button{min-height:24px;margin:0;pa
 #tab-mindmap .mindmap-stage-title strong{display:flex;align-items:center;gap:7px;color:#3c675c;font-size:12px;font-weight:600;white-space:nowrap}
 #tab-mindmap .mindmap-stage-title strong::before{content:"";width:6px;height:6px;border-radius:50%;background:#69a58e}
 body main #tab-mindmap #mindmap-summary{margin:0;color:#81958e;font-size:11px;line-height:1.6}
-#tab-mindmap .mindmap-view-tools{display:flex;align-items:center;gap:3px;flex-shrink:0}
+#tab-mindmap .mindmap-view-tools{display:flex;align-items:center;justify-content:flex-end;gap:5px 10px;max-width:100%;flex-shrink:0;flex-wrap:wrap}
+#tab-mindmap .mindmap-view-group{display:flex;align-items:center;gap:3px}
 body main #tab-mindmap .mindmap-view-tools button{display:flex;align-items:center;justify-content:center;min-width:29px;min-height:29px;height:29px;margin:0;padding:0 8px;border:1px solid #dfe9e4;border-radius:6px;background:#fff;color:#4d7265;font-size:12px;box-shadow:none}
 body main #tab-mindmap .mindmap-view-tools button:hover:not(:disabled){border-color:#9ec4b5;background:#eef6f1}
 body main #tab-mindmap .mindmap-view-tools button:disabled{opacity:.35;cursor:default}
+body main #tab-mindmap .mindmap-view-tools button[aria-pressed=true]{border-color:#a9c7b8;background:#e5f0e9;color:#315e4a}
+body main #tab-mindmap .mindmap-view-tools button:focus-visible{outline:2px solid #78a78b;outline-offset:2px}
 #tab-mindmap #mindmap-zoom-level{min-width:42px;color:#738c81;font-size:11px;text-align:center;font-variant-numeric:tabular-nums}
 #tab-mindmap .mindmap-viewport{position:relative;background-image:radial-gradient(#b8cfc450 .8px,transparent .8px);background-size:20px 20px}
 body main #mindmap-canvas{height:clamp(420px,calc(100dvh - 355px),760px);min-height:420px;margin:0;padding:0;border:0;border-radius:0;background:transparent;overflow:hidden;touch-action:none}
@@ -159,4 +162,13 @@ body main #tab-mindmap #mindmap-node-search:focus-visible,body main #tab-mindmap
  #tab-mindmap .mindmap-export-status{padding-right:12px;padding-left:12px}
  #tab-mindmap .mindmap-overview{right:10px;bottom:10px;width:174px;padding:6px}
  #tab-mindmap .mindmap-overview>small{font-size:8px}
+}
+
+/* Keep entity drawers and the full workspace canvas in the same viewport. */
+body:has(#tab-mindmap:not(.hidden) #mindmap-stage.is-mindmap-fullscreen){overflow:hidden}
+#tab-mindmap #mindmap-stage.is-mindmap-fullscreen{position:fixed;inset:0;z-index:100;width:100%;height:100dvh;min-height:0;border:0}
+#tab-mindmap #mindmap-stage.is-mindmap-fullscreen>.mindmap-viewport{flex:1;height:auto;min-height:0}
+#tab-mindmap #mindmap-stage.is-mindmap-fullscreen>.mindmap-trace-panel[open]{max-height:28dvh;overflow:auto}
+@media(max-height:500px){
+ #tab-mindmap #mindmap-stage.is-mindmap-fullscreen .mindmap-canvas-note{display:none}
 }

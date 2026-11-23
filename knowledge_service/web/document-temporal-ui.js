@@ -1,4 +1,4 @@
-/* Shared, inert date and evidence summary for previews and saved documents. */
+/* Shared date, status, and evidence summary for previews and saved documents. */
 (function(root,factory){
   const api=factory(typeof module==='object'&&module.exports?require('./display-time.js'):root.DisplayTime);
   if(typeof module==='object'&&module.exports)module.exports=api;
@@ -54,11 +54,21 @@
     const record=input?.document_time||input||{},metadata=record.metadata||{};
     const temporal=record.document_temporal||metadata.document_temporal||{},fields=temporal.fields||{};
     const effectiveSource=record.effective_time_source||metadata.effective_time_source;
-    const rows=[],details=[];
+    const sourceStatus=temporal.source_status;
+    const candidate=sourceStatus&&typeof sourceStatus==='object'?sourceStatus:{raw:sourceStatus};
+    function dateValue(name){
+      if(Object.hasOwn(record,name))return record[name];
+      if((name==='published_at'||name==='revised_at')&&Object.hasOwn(metadata,name))return metadata[name];
+      return fields[name]?.value;
+    }
+    const until=dateValue('valid_until');
+    const expiry=typeof until==='string'?Date.parse(until):until;
+    const markedExpired=typeof candidate.raw==='string'&&candidate.raw.trim()==='已失效';
+    const expired=markedExpired||(Number.isFinite(expiry)&&expiry<=Date.now());
+    const rows=['<p><strong>当前状态</strong> · '+(expired?'已失效':'有效')+'</p>'],details=[];
     for(const [name,label] of Object.entries(labels)){
       const field=fields[name]||{};
-      const metadataDate=['published_at','revised_at'].includes(name)&&Object.hasOwn(metadata,name);
-      const value=Object.hasOwn(record,name)?record[name]:metadataDate?metadata[name]:field.value;
+      const value=dateValue(name);
       const candidates=Array.isArray(field.candidates)?field.candidates.filter(candidate=>candidate&&typeof candidate==='object'):[];
       if(name==='revised_at'&&!value&&!candidates.length&&!field.supplied_value&&(!field.status||field.status==='unknown'))continue;
       let status=typeof field.status==='string'&&Object.hasOwn(statuses,field.status)?statuses[field.status]:'来源未知';
@@ -69,9 +79,7 @@
       for(const candidate of candidates)details.push('<p><strong>'+label+'</strong> · '+evidence(candidate)+'</p>');
       if(field.supplied_value)details.push('<p><strong>'+label+'</strong> · 待核验输入 '+escape(field.supplied_value)+'</p>');
     }
-    const sourceStatus=temporal.source_status;
     if(sourceStatus){
-      const candidate=typeof sourceStatus==='object'?sourceStatus:{raw:sourceStatus};
       rows.push('<p>原文状态 · '+escape(candidate.raw)+'</p>');
       details.push('<p>原文状态 · '+evidence(candidate)+'</p>');
     }

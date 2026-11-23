@@ -373,6 +373,73 @@ test('loaded-node search reveals and centers a folded descendant without changin
   }finally{await page.close();}
 });
 
+test('one action expands every loaded level and can fold back to the root',async()=>{
+  const page=await fixture();
+  try{
+    await page.evaluate(()=>mindmapView.render({truncated:true,tree:{id:'a',text:'根实体',children:[
+      {id:'b',text:'第一层',children:[{id:'c',text:'第二层',children:[{id:'d',text:'第三层',children:[
+        {id:'e',text:'第四层',children:[{id:'f',text:'第五层'}]}]}]}]},
+      {id:'g',text:'另一分支',children:[{id:'h',text:'另一分支的末端'}]}]}}));
+    const summary=page.locator('#mindmap-summary');
+    assert.match(await summary.innerText(),/5 \/ 8/);
+    const expand=page.getByRole('button',{name:'展开全部',exact:true});
+    assert.equal(await expand.count(),1);
+    await expand.click();
+    assert.match(await summary.innerText(),/8 \/ 8.*部分结果/);
+    assert.equal(await page.evaluate(()=>mindmapView.geometry().nodes.length),8);
+    await page.getByRole('button',{name:'收起全部',exact:true}).click();
+    assert.match(await summary.innerText(),/1 \/ 8/);
+    await expand.click();
+    assert.equal(await page.evaluate(()=>mindmapView.geometry().nodes.length),8);
+    await page.evaluate(()=>mindmapView.clear());
+    assert.equal(await expand.isDisabled(),true);
+  }finally{await page.close();}
+});
+
+test('vertical layout places the next level beneath its parent without overlapping siblings',async()=>{
+  const page=await fixture();
+  try{
+    const button=page.getByRole('button',{name:'纵向布局',exact:true});
+    assert.equal(await button.count(),1);
+    await button.click();
+    assert.equal(await button.getAttribute('aria-pressed'),'true');
+    const [root,first,second]=await page.evaluate(()=>{
+      const {nodes}=mindmapView.geometry();
+      return ['mindmap-root','mindmap-root.0','mindmap-root.1'].map(id=>nodes.find(node=>node.id===id));
+    });
+    assert.ok(first.y-first.height/2>root.y+root.height/2);
+    assert.ok(second.x-second.width/2>first.x+first.width/2);
+    assert.ok(Math.abs(second.y-first.y)<1);
+    await button.click();
+    assert.equal(await button.getAttribute('aria-pressed'),'false');
+    assert.equal(await page.evaluate(()=>chart.getOption().series[0].orient),'LR');
+  }finally{await page.close();}
+});
+
+for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
+  test(`mindmap fills the viewport and exits fullscreen at ${viewport.width}x${viewport.height}`,async()=>{
+    const page=await fixture(viewport);
+    try{
+      const button=page.getByRole('button',{name:'全屏',exact:true});
+      assert.equal(await button.count(),1);
+      await button.click();
+      const exit=page.getByRole('button',{name:'退出全屏',exact:true});
+      assert.equal(await exit.getAttribute('aria-pressed'),'true');
+      const stage=await page.locator('.mindmap-stage').boundingBox();
+      assert.deepEqual(stage,{x:0,y:0,...viewport});
+      assert.ok((await page.locator('#mindmap-canvas').boundingBox()).height>viewport.height/2);
+      await page.keyboard.press('Escape');
+      assert.equal(await button.getAttribute('aria-pressed'),'false');
+      await button.click();
+      await exit.click();
+      assert.equal(await button.getAttribute('aria-pressed'),'false');
+      await button.click();
+      await page.evaluate(()=>document.dispatchEvent(new CustomEvent('workspace:page-changed',{detail:{page:'records'}})));
+      assert.equal(await button.getAttribute('aria-pressed'),'false');
+    }finally{await page.close();}
+  });
+}
+
 test('route controls highlight only the loaded occurrence path and can clear it',async()=>{
   const page=await fixture();
   try{

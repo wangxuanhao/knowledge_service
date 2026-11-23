@@ -40,7 +40,7 @@
     if(secondLevelLeaves>7)tree.children.forEach(node=>{node.collapsed=node.children.length>0;});
     return tree;
   }
-  function layout(tree,canvasWidth,canvasHeight){
+  function layout(tree,canvasWidth,canvasHeight,vertical=false){
     let total=0,visible=0,depth=0;
     const leafParents=[];
     function visit(node,level,shown,parent=null){
@@ -53,12 +53,17 @@
     // that same span, so a pair of siblings never gets squeezed by other branches.
     let span=leafParents[0]===leafParents.at(-1)?1:2;
     for(let i=1;i<leafParents.length;i++)span+=leafParents[i]===leafParents[i-1]?1:2;
+    if(vertical){
+      const step=Math.max(144,Math.min(192,(canvasHeight-144)/Math.max(1,depth)));
+      const width=span*244,height=Math.max(1,depth*step);
+      return {width,height,left:(canvasWidth-width)/2,top:Math.max(72,(canvasHeight-height)/2),total,visible};
+    }
     const step=Math.max(244,Math.min(288,(canvasWidth-264)/Math.max(1,depth)));
     const width=Math.max(1,depth*step),height=Math.max(160,span*128);
     return {width,height,left:Math.max(132,(canvasWidth-width)/2),top:(canvasHeight-height)/2,total,visible};
   }
   function create({chart,host,summary,empty,buttons,zoomLabel,labelOf=value=>value||'实体',colorFor=()=> '#548e88',onInspect=()=>{},onHover=null}){
-    let tree=null,truncated=false,styledZoom=1,roamFrame=null;
+    let tree=null,truncated=false,vertical=false,styledZoom=1,roamFrame=null;
     let indexed=null,focusedId=null,viewFrame=null,autoFit=true,drag=null,suppressClick=false,hoverSerial=0;
     const Model=globalThis.EntityMindmapModel;
     const nodes=new Map(),listeners=new Set(),pathNodes=new Set(),pathEdges=new Set();
@@ -106,7 +111,7 @@
       // Rebuild both ends of removed edges when collapsing several levels at once.
       if(topologyChanged)chart.clear();
       chart.resize();
-      const geometry=layout(tree,host.clientWidth,host.clientHeight);
+      const geometry=layout(tree,host.clientWidth,host.clientHeight,vertical);
       chart.setOption({animation:animate,animationDuration:220,animationDurationUpdate:220,animationEasingUpdate:'cubicOut',
         aria:{enabled:true},tooltip:{trigger:'item',confine:true,borderColor:'#d3e3e0',padding:14,
           textStyle:{fontFamily:'"Microsoft YaHei",sans-serif',fontSize:12,color:'#234e49'},
@@ -118,7 +123,7 @@
             }
             return html;
           }},
-        series:[{id:'entity-mindmap-tree',type:'tree',layout:'orthogonal',orient:'LR',data:[styled(tree,true,zoom)],
+        series:[{id:'entity-mindmap-tree',type:'tree',layout:'orthogonal',orient:vertical?'TB':'LR',data:[styled(tree,true,zoom)],
           left:geometry.left,top:geometry.top,width:geometry.width,height:geometry.height,
           right:null,bottom:null,roam:false,nodeScaleRatio:1,scaleLimit:{min:.01,max:2},zoom,center:prior?.center||null,
           expandAndCollapse:false,initialTreeDepth:-1,edgeShape:'curve',
@@ -254,6 +259,16 @@
       },
       reset(){autoFit=false;draw(false,false);},
       fit(){autoFit=true;draw(true,false);fit();},
+      setAllExpanded(expanded){
+        if(!tree?.children.length)return;
+        nodes.forEach(node=>{node.collapsed=!expanded&&node.children.length>0;});
+        autoFit=true;draw(false,false,true);fit();
+      },
+      isVertical(){return vertical;},
+      toggleOrientation(){
+        if(!tree)return;
+        vertical=!vertical;autoFit=true;draw(false,false,true);fit();
+      },
       getTree(){return tree;},
       snapshot(){return tree?{tree:JSON.parse(JSON.stringify(tree)),truncated}:null;},
       geometry,pan(dx,dy){autoFit=false;pan(dx,dy);},

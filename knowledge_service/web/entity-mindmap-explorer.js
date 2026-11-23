@@ -17,6 +17,8 @@
     const toggle=get('mindmap-toggle-overview'),overview=get('mindmap-overview'),map=get('mindmap-overview-map');
     const svgButton=get('mindmap-export-svg'),pngButton=get('mindmap-export-png'),exportStatus=get('mindmap-export-status');
     const fitButton=get('mindmap-fit-view');
+    const branchButton=get('mindmap-toggle-branches'),orientationButton=get('mindmap-toggle-orientation');
+    const fullscreenButton=get('mindmap-fullscreen'),stage=get('mindmap-stage');
     const listeners=[];
     let index=null,generation=0,destroyed=false,frame=null,exporting=false,hasTrace=false;
     let overviewVisible=toggle?.getAttribute('aria-pressed')!=='false',mapTransform=null,matches=[],activeResult=-1;
@@ -55,9 +57,30 @@
     function resetSearch(){
       if(search)search.value='';matches=[];results?.replaceChildren();hideResults();text(searchStatus,'');
     }
+    function hasFoldedBranches(){
+      if(index)for(const node of index.nodes.values())if(node.collapsed)return true;
+      return false;
+    }
+    function syncBranches(){
+      if(!branchButton)return;
+      branchButton.disabled=!index?.edges.length;
+      const label=branchButton.disabled||hasFoldedBranches()?'展开全部':'收起全部';
+      if(branchButton.textContent!==label)text(branchButton,label);
+    }
+    function setFullscreen(active){
+      stage?.classList.toggle('is-mindmap-fullscreen',active);
+      fullscreenButton?.setAttribute('aria-pressed',String(active));
+      text(fullscreenButton,active?'退出全屏':'全屏');
+    }
     function syncButtons(){
       const empty=!hasTree();
       if(fitButton)fitButton.disabled=empty;
+      if(fullscreenButton)fullscreenButton.disabled=empty;
+      if(orientationButton){
+        orientationButton.disabled=empty;
+        orientationButton.setAttribute('aria-pressed',String(view.isVertical()));
+      }
+      syncBranches();
       if(search)search.disabled=empty;
       if(from)from.disabled=empty;if(to)to.disabled=empty;
       if(run)run.disabled=empty||!hasNode(from?.value)||!hasNode(to?.value);
@@ -182,6 +205,7 @@
     function updateData(){
       if(destroyed)return;
       generation++;exporting=false;const tree=view.getTree();index=tree?model.indexTree(tree):null;
+      if(!tree)setFullscreen(false);
       resetSearch();resetTrace(tree?TRACE_NOTE:'',false);makeEndpoints();text(exportStatus,'');syncButtons();
       if(overview)overview.hidden=true;map?.replaceChildren();mapTransform=null;scheduleOverview();
     }
@@ -190,7 +214,7 @@
     listen(search,'keydown',event=>{
       if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();moveSearch(event.key==='ArrowDown'?1:-1);}
       else if(event.key==='Enter'&&matches.length&&!results?.hidden){event.preventDefault();chooseResult(matches[Math.max(0,activeResult)]);}
-      else if(event.key==='Escape'){event.preventDefault();hideResults();}
+      else if(event.key==='Escape'&&results&&!results.hidden){event.preventDefault();hideResults();}
     });
     listen(document,'pointerdown',event=>{if(event.target!==search&&!results?.contains(event.target))hideResults();});
     [from,to].forEach(select=>listen(select,'change',()=>resetTrace()));
@@ -211,8 +235,16 @@
     });
     listen(svgButton,'click',()=>download('svg'));listen(pngButton,'click',()=>download('png'));
     listen(fitButton,'click',()=>view.fit());
+    listen(branchButton,'click',()=>{view.setAllExpanded(hasFoldedBranches());syncBranches();});
+    listen(orientationButton,'click',()=>{view.toggleOrientation();syncButtons();});
+    listen(fullscreenButton,'click',()=>setFullscreen(!stage?.classList.contains('is-mindmap-fullscreen')));
+    listen(document,'keydown',event=>{
+      if(event.key!=='Escape'||event.defaultPrevented||!stage?.classList.contains('is-mindmap-fullscreen')||event.target.closest?.('dialog[open]'))return;
+      event.preventDefault();setFullscreen(false);
+    });
+    listen(document,'workspace:page-changed',event=>{if(event.detail?.page!=='mindmap')setFullscreen(false);});
     const unsubscribe=view.subscribe(event=>{
-      if(event?.type==='render'||event?.type==='clear')updateData();else scheduleOverview();
+      if(event?.type==='render'||event?.type==='clear')updateData();else{syncBranches();scheduleOverview();}
     });
     const observer=typeof window.ResizeObserver==='function'?new window.ResizeObserver(scheduleOverview):null;
     observer?.observe(host);
@@ -220,6 +252,7 @@
       if(destroyed)return;destroyed=true;generation++;
       if(frame!==null)window.cancelAnimationFrame(frame);frame=null;
       unsubscribe?.();observer?.disconnect();listeners.splice(0).forEach(remove=>remove());
+      setFullscreen(false);
       index=null;exporting=false;resetSearch();resetTrace('');text(exportStatus,'');syncButtons();
       if(overview)overview.hidden=true;map?.replaceChildren();mapTransform=null;
       if(mounted.get(root)===controller)mounted.delete(root);

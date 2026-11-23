@@ -23,6 +23,22 @@ test('document time summary keeps publication separate from unknown validity',()
   assert.doesNotMatch(html,/持续有效/);
 });
 
+test('current status uses explicit source expiry before comparing the expiry date',t=>{
+  t.mock.timers.enable({apis:['Date'],now:new Date('2026-11-23T04:00:00Z')});
+  const {render}=require('../../knowledge_service/web/document-temporal-ui.js');
+  const cases=[
+    [{document_temporal:{source_status:{raw:'已失效'}}},'已失效'],
+    [{valid_until:'2026-11-24T00:00:00Z',metadata:{document_temporal:{source_status:'已失效'}}},'已失效'],
+    [{valid_until:'2026-11-23T11:59:59+08:00'},'已失效'],
+    [{valid_until:'2026-11-23T12:00:00+08:00',document_temporal:{source_status:{raw:'生效中'}}},'已失效'],
+    [{document_time:{document_temporal:{fields:{valid_until:{value:'2026-11-23T12:00:01+08:00'}}}}},'有效'],
+    [{valid_until:null},'有效'],
+  ];
+  for(const [input,expected] of cases){
+    assert.match(render(input),new RegExp('<strong>当前状态</strong> · '+expected+'</p>'),JSON.stringify(input));
+  }
+});
+
 test('saved time evidence and review state render as inert text',()=>{
   const {render}=require('../../knowledge_service/web/document-temporal-ui.js');
   const html=render({valid_from:null,valid_until:null,metadata:{document_temporal:{fields:{
@@ -89,7 +105,7 @@ test('time helper is versioned and loaded before preview and saved-source consum
   assert.match(html,/手工填写（兼容发布时间推定）/);
   assert.match(html,/id="doc-upload-package-help"/);
   assert.match(fs.readFileSync('knowledge_service/web/ingest-mode.js','utf8'),/ZIP[^\n]*相对目录/);
-  const helper=html.indexOf('/assets/document-temporal-ui.js?v=display-time-20261123-1');
+  const helper=html.indexOf('/assets/document-temporal-ui.js?v=current-status-20261123-1');
   assert.ok(helper>=0);
   for(const file of ['ingest-mode','workbench','sources-view','ingest-batches','library-workspace','ingest-results']){
     const tag=new RegExp(`<script src="/assets/${file}\\.js\\?v=[^"\\s]+"></script>`).exec(html);
