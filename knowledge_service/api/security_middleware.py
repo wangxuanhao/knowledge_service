@@ -31,8 +31,8 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from ..core.database_errors import InterfaceError, OperationalError
 from ..core.security import TokenError, credential_fingerprint, decode_access_token
-from ..repository.connection import InterfaceError, OperationalError
 from .error_responses import database_unavailable_response
 
 LOG = logging.getLogger('knowledge_service')
@@ -53,6 +53,7 @@ _READ_ONLY_POST_PATTERNS = (
     r'^/api/auth/password$',
     # ── knowledge.py：检索 / 问答 / 图谱 / 查询 / 校验 / SPARQL ──
     r'^/api/projects/[^/]+/records/page$',
+    r'^/api/projects/[^/]+/records/counts$',
     r'^/api/projects/[^/]+/assertions/batch$',
     r'^/api/projects/[^/]+/search$',
     r'^/api/projects/[^/]+/qa$',
@@ -65,7 +66,8 @@ _READ_ONLY_POST_PATTERNS = (
     r'^/api/projects/[^/]+/graph-neighborhood$',
     r'^/api/projects/[^/]+/graph-neighborhood/search$',
     r'^/api/projects/[^/]+/merge/preview$',
-    r'^/api/projects/[^/]+/duplicates/(scan|preview|sources)$',
+    r'^/api/projects/[^/]+/duplicates/(scan|preview|preview-batch|sources|members)$',
+    r'^/api/projects/[^/]+/duplicates/partition/preview$',
     r'^/api/projects/[^/]+/attribute-conflicts/[^/]+/read$',
     r'^/api/projects/[^/]+/attribute-conflicts$',
     r'^/api/projects/[^/]+/attribute-conflicts/[^/]+/members/[^/]+/(read|sources)$',

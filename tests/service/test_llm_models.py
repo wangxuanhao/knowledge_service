@@ -92,6 +92,7 @@ def test_invalid_or_lost_key_fails_closed(models, monkeypatch, tmp_path):
     with pytest.raises(LLMKeyError):
         LLMModels(models.repository).resolve()
     monkeypatch.delenv('KG_LLM_ENCRYPTION_KEY')
+    assert LLMModels(models.repository).resolve().api_key == 'secret-one'
     (tmp_path / 'llm.key').unlink()
     with pytest.raises(LLMKeyError):
         LLMModels(models.repository).resolve()
@@ -173,6 +174,30 @@ def test_snapshot_only_key_loss_never_regenerates(models, tmp_path):
     with pytest.raises(LLMKeyError):
         LLMModels(models.repository).pin('unconfigured-job')
     assert not (tmp_path / 'llm.key').exists()
+
+
+@pytest.mark.parametrize('storage', ['profile', 'snapshot'])
+def test_unmarked_ciphertext_prevents_key_initialization(models, tmp_path, storage):
+    from cryptography.fernet import Fernet
+    from knowledge_service.services.llm_models import LLMKeyError
+
+    ciphertext = Fernet(Fernet.generate_key()).encrypt(b'legacy credentials').decode()
+    if storage == 'profile':
+        saved = models.store.create(name='legacy', base_url='https://provider.example/v1',
+                                    model='legacy', api_key_encrypted=ciphertext)
+    else:
+        models.store.pin('legacy', ciphertext, {})
+
+    with pytest.raises(LLMKeyError):
+        profile(models)
+
+    assert not (tmp_path / 'llm.key').exists()
+    marker = models.repository._db.execute('SELECT key_check FROM llm_model_settings').fetchone()
+    assert marker['key_check'] is None
+    if storage == 'profile':
+        assert models.store.get(saved['id'])['api_key_encrypted'] == ciphertext
+    else:
+        assert models.store.snapshot('legacy') == ciphertext
 
 
 def test_explicit_auth_disabled_keeps_model_management_available(tmp_path):

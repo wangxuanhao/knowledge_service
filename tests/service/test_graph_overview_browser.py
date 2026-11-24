@@ -1,4 +1,5 @@
 """Real page, real SessionLoader, faithful PostgreSQL graph-session transport."""
+import re
 import threading
 from contextlib import ExitStack
 from http.server import ThreadingHTTPServer
@@ -116,6 +117,105 @@ def _loaded(page):
 
 def _restart(page):
     page.evaluate('() => FullGraphView.restart()')
+
+
+def test_import_project_switch_reloads_the_visible_source_list(overview_page):
+    page, errors, _, _ = overview_page
+    _loaded(page)
+    def sources(route):
+        project = route.request.url.split('/api/projects/', 1)[1].split('/', 1)[0]
+        route.fulfill(json={
+            'documents': [{'id': f'{project}-doc', 'kind': 'document', 'text': '', 'text_length': 0,
+                           'metadata': {'title': f'{project} fixture', 'source_file': f'{project}.txt'}}],
+            'total': 1,
+        })
+
+    page.route(re.compile(r'/api/projects/[^/]+/sources(?:\?|$)'), sources)
+    page.evaluate("() => KnowledgeTabs.open('sources')")
+    page.locator('.source-item b').filter(has_text='p fixture').wait_for()
+    page.route('**/api/jobs', lambda route: route.fulfill(json={'jobs': [
+        {'id': 'import-complete', 'kind': 'import', 'status': 'completed',
+         'result': {'project': {'id': 'b', 'name': 'b'}}},
+    ]}))
+    page.evaluate("() => wb.jobs.set('import-complete', {})")
+    page.wait_for_function("() => current === 'b'")
+    page.locator('.source-item b').filter(has_text='b fixture').wait_for(timeout=8000)
+    assert not page.locator('.source-item b').filter(has_text='p fixture').count()
+    assert errors == []
+
+
+def test_reopening_scope_reuses_catalogue_reads_until_range_changes(overview_page):
+    page, errors, calls, _ = overview_page
+    _loaded(page)
+    for _ in range(2):
+        page.click('#scope-toggle')
+        page.wait_for_function("() => document.querySelector('#query-platforms input') && !document.querySelector('#query-platforms small')")
+        page.wait_for_function("() => document.querySelector('#metadata-facet-summary').textContent.includes('条记录')")
+        page.click('#scope-close')
+    assert sum(path.endswith('/applicability-values') for path, _ in calls) == 1
+    assert sum(path.endswith('/metadata/facets') for path, _ in calls) == 1
+
+    page.click('#scope-toggle')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='台账平台', exact=True).check()
+    page.click('#apply-scope')
+    _loaded(page)
+    with page.expect_response('**/metadata/facets'):
+        page.click('#scope-toggle')
+    assert sum(path.endswith('/applicability-values') for path, _ in calls) == 1
+    assert sum(path.endswith('/metadata/facets') for path, _ in calls) == 2
+    assert errors == []
+
+
+def test_reload_restores_applied_scope_chips_and_graph_request(overview_page):
+    page, errors, calls, _ = overview_page
+    _loaded(page)
+    page.click('#scope-toggle')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='台账平台', exact=True).check()
+    page.click('#apply-scope')
+    _loaded(page)
+
+    before = len(calls)
+    page.reload(wait_until='domcontentloaded')
+    _loaded(page)
+    graph_requests = [body for path, body in calls[before:] if path.endswith('/graph-sessions')]
+    assert graph_requests[-1]['applicability']['platforms'] == {'mode': 'specific', 'values': ['台账平台']}
+    assert page.locator('#applied-scope-chips').inner_text() == '平台：台账平台 ×'
+
+    before = len(calls)
+    page.locator('#applied-scope-chips button').click()
+    _loaded(page)
+    graph_requests = [body for path, body in calls[before:] if path.endswith('/graph-sessions')]
+    assert not (graph_requests[-1].get('applicability') or {}).get('platforms', {}).get('values')
+    assert page.locator('#applied-scope-chips').inner_text() == ''
+    assert errors == []
+
+
+def test_apply_scope_starts_graph_while_entity_choices_are_pending(overview_page):
+    page, errors, calls, _ = overview_page
+    _loaded(page)
+    page.click('[data-fg-mode="local"]')
+    page.click('#graph-settings')
+    page.locator('#graph-settings-drawer .workspace-drawer-close').click()
+    page.click('#scope-toggle')
+    page.click('#query-platforms > summary')
+    page.get_by_role('checkbox', name='台账平台', exact=True).check()
+
+    pending = []
+    page.route('**/records/page', lambda route: pending.append(route))
+    before = len(calls)
+    page.evaluate('''() => {
+      document.getElementById('graph-settings-drawer').showModal();
+      WorkspaceContext.apply();
+    }''')
+    page.wait_for_function("() => FullGraphView.loader?.state === 'complete'", timeout=4000)
+    graph_requests = [body for path, body in calls[before:] if path.endswith('/graph-sessions')]
+    assert len(graph_requests) == 1
+    assert graph_requests[0]['applicability']['platforms']['values'] == ['台账平台']
+    assert pending, 'the candidate list must still be waiting while the graph finishes'
+    pending[0].fulfill(json={'records': [], 'total': 0, 'next_cursor': None})
+    assert errors == []
 
 
 def test_default_entry_reads_real_bounded_overview_without_an_index(overview_page):

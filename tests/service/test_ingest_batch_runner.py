@@ -191,7 +191,7 @@ def test_shutdown_fences_provider_return_without_waiting_forever(tmp_path,monkey
     assert not wait([future for future,row in runner.active.values()],timeout=3).not_done
 
 
-def test_shacl_metadata_cannot_write_after_cancel(tmp_path,monkeypatch):
+def test_cancel_during_publication_rolls_back_chunks_mappings_and_review(tmp_path,monkeypatch):
     from knowledge_service.repository import Repository
     from knowledge_service.services.service import KnowledgeService
     from knowledge_service.integrations.embeddings import HashingEncoder
@@ -205,22 +205,24 @@ def test_shacl_metadata_cannot_write_after_cancel(tmp_path,monkeypatch):
     store.transition(project,batch['id'],'start')
     service=KnowledgeService(repo,HashingEncoder());sources=SourceDocumentService(repo,SourceObjectStore(tmp_path/'objects'))
     runner=IngestBatchRunner(service,store,repo.ingest_checkpoints,sources)
-    original=service.write;committed=[]
+    original=service.write;attempted=[]
     def write(*args,**kwargs):
         result=original(*args,**kwargs)
         if kwargs.get('completion'):
-            committed.append(repo.get_record(project,item['document_id'])['version'])
+            attempted.append(repo.get_record(project,item['document_id'])['version'])
             kwargs['shacl_review_out'].append({'record_id':'synthetic','constraint':'test','message':'test'})
             store.transition(project,batch['id'],'cancel')
         return result
     monkeypatch.setattr(service,'write',write)
     runner.run_once()
     future=next(iter(runner.active.values()))[0];future.result(timeout=10)
-    assert committed
+    assert attempted
     document=repo.get_record(project,item['document_id'])
-    assert document['version']==committed[0]
-    assert document['metadata']['review_candidates']==[]
-    assert store.list_items(project,batch['id'])['items'][0]['status']=='cancelled'
+    assert document['metadata']['status']!='ready'
+    assert not document['metadata'].get('review_candidates')
+    assert repo.document_chunks(project,item['document_id'])==[]
+    spans=repo._db.execute('SELECT count(*) AS n FROM chunk_source_spans WHERE project_id=?',(project,)).fetchone()
+    assert spans['n']==0
     runner.close()
 
 

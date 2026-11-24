@@ -2,7 +2,7 @@
 from contextlib import nullcontext
 from functools import wraps
 
-from ..repository.scoped_reads import ScopedReads
+from ..repository.scoped_reads import ScopedReads, business_scope_snapshot
 from .graph_sessions import GraphSessions
 from .graph_neighborhood import present_neighborhood
 from .graph_progressive_search import progressive_search
@@ -45,16 +45,30 @@ class GraphWorkspace:
         values = dict(values)
         query, cursor, limit, include_total, record_ids = (
             values.pop(key) for key in ('query', 'cursor', 'limit', 'include_total', 'record_ids'))
-        if record_ids is not None:
-            if cursor is not None or query:
-                raise ValueError('精确记录定位不能同时提供分页游标或关键词')
-            records = self.reads.by_ids(project, values, record_ids)
-            result = {'records': records, 'total': len(records) if include_total else None, 'next_cursor': None}
-        else:
-            result = self.reads.page(project, values, query=query, after=cursor,
-                                     limit=limit, include_total=include_total)
-        endpoint_ids = {record.get(key) for record in result['records']
-                        for key in ('subject_id', 'object_id') if record.get(key)}
-        endpoints = self.reads.by_ids(project, values, sorted(endpoint_ids), kinds=['entity']) if endpoint_ids else []
+        kinds = values.get('kinds')
+        can_read_entities = kinds is None or not {'entity', 'relation', 'attribute'}.isdisjoint(kinds)
+        snapshot = business_scope_snapshot(self.service.repository, values) if can_read_entities else nullcontext()
+        with snapshot:
+            if record_ids is not None:
+                if cursor is not None or query:
+                    raise ValueError('精确记录定位不能同时提供分页游标或关键词')
+                records = self.reads.by_ids(project, values, record_ids)
+                result = {'records': records, 'total': len(records) if include_total else None, 'next_cursor': None}
+            else:
+                result = self.reads.page(project, values, query=query, after=cursor,
+                                         limit=limit, include_total=include_total)
+            endpoint_ids = {record.get(key) for record in result['records']
+                            for key in ('subject_id', 'object_id') if record.get(key)}
+            endpoints = self.reads.by_ids(project, values, sorted(endpoint_ids), kinds=['entity']) if endpoint_ids else []
         self.service.annotate_structure_pending(project, [*result['records'], *endpoints])
         return {**result, 'records': [public(record) for record in result['records']]}
+
+    @_snapshot_operation
+    def record_counts(self, project, values):
+        scope = dict(values)
+        query = scope.pop('query')
+        kinds = scope.pop('kinds')
+        snapshot = (business_scope_snapshot(self.service.repository, scope)
+                    if kinds is None or 'entity' in kinds else nullcontext())
+        with snapshot:
+            return {'counts': self.reads.counts_by_kind(project, scope, kinds=kinds, query=query)}

@@ -157,6 +157,26 @@ def test_shacl_cardinality_respects_nonoverlapping_business_versions():
     assert not ontology.validate_timeline(records)['conforms']
 
 
+def test_timeline_reuses_a_passing_fact_set_across_time_segments(monkeypatch):
+    ontology = Ontology(TTL)
+    validate = ontology.validate
+    checked = []
+    def capture(rows, **options):
+        checked.append({row['id'] for row in rows})
+        return validate(rows, **options)
+
+    monkeypatch.setattr(ontology, 'validate', capture)
+    records = [
+        dict(id='persistent', kind='entity', type='Rule', metadata={'applicability': {
+            'platforms': {'mode': 'specific', 'values': ['first']}}}),
+        dict(id='temporary', kind='entity', type='Rule', valid_from='2025-01-01', valid_until='2026-01-01',
+             metadata={'applicability': {'platforms': {'mode': 'specific', 'values': ['second']}}}),
+    ]
+    report = ontology.validate_timeline(records)
+    assert report['conforms'] and report['segments_checked'] == 3
+    assert checked == [{'persistent'}, {'temporary'}]
+
+
 def test_default_extraction_ontology_does_not_require_relations_from_every_mention():
     turtle=(Path(__file__).resolve().parents[2]/'knowledge_service'/'resources'/'default_ontology.ttl').read_text(encoding='utf-8')
     ontology=Ontology(turtle)

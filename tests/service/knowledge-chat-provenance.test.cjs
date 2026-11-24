@@ -33,7 +33,8 @@ function setup(){
   for(const id of ['qa-transcript','qa-hero','qa-query','qa','qa-progress','qa-summary','qa-live','qa-scroll','qa-composer','qa-clear','generate']){
     const node=doc.createElement('div');node.id=id;doc.body.append(node);
   }
-  const storage=new Map(),requests=[],provenance=[],streams=[];
+  const storage=new Map(),requests=[],provenance=[],streams=[],frames=new Map();
+  let frameId=0;
   const localStorage={getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)};
   const fetch=(url,options)=>{
     if(url.endsWith('/provenance')){
@@ -42,7 +43,8 @@ function setup(){
     requests.push(JSON.parse(options.body));
     return Promise.resolve(new Response(new ReadableStream({start(controller){streams.push(controller);}})));
   };
-  const window={document:doc,fetch,RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){}};
+  const window={document:doc,fetch,RequestDeadline:require('../../knowledge_service/web/request-deadline.js'),innerWidth:1200,innerHeight:900,addEventListener(){},
+    requestAnimationFrame(callback){frames.set(++frameId,callback);return frameId;},cancelAnimationFrame(id){frames.delete(id);}};
   const context={window,document:doc,localStorage,current:'p',wb:{epoch:0},AbortController,TextDecoder,console,
     fetch,endpoint:s=>'/api/projects/'+context.current+s,scope:()=>({known_at:null}),setTimeout,
     esc:String,labelOf:x=>x,showTab(){throw Error('citation must not navigate');},status(){}};
@@ -54,7 +56,8 @@ function setup(){
   const get=id=>doc.getElementById(id);
   const emit=(event,data)=>streams.at(-1).enqueue(new TextEncoder().encode('event: '+event+'\ndata: '+JSON.stringify(data)+'\n\n'));
   const submit=()=>{get('qa-query').value='question';get('qa-composer').dispatch('submit');};
-  return {context,window,doc,get,emit,submit,streams,requests,provenance,storage,history:()=>JSON.parse(storage.get('kg_qa_v1_p')||'null')};
+  const flushFrame=()=>{const callbacks=[...frames.values()];frames.clear();callbacks.forEach(callback=>callback());};
+  return {context,window,doc,get,emit,submit,flushFrame,streams,requests,provenance,storage,history:()=>JSON.parse(storage.get('kg_qa_v1_p')||'null')};
 }
 const evidence=id=>({answer_id:id,retrieval_run_id:'run-'+id,channels:{chunk:1},evidence:[{
   citation:'E1',kind:'chunk',text:'x'.repeat(500),version:2,provenance_ref:'answer:'+id+'#E1',
@@ -79,7 +82,7 @@ test('running evidence opens once; safe done decorations and bounded history res
   assert.equal(turn.dataset.state,'streaming');citation.dispatch('click');
   assert.equal(env.provenance.length,1);
   assert.equal(env.provenance[0].url,'/api/projects/p/answers/a/evidence/E1/provenance');
-  const literal='<img onerror=evil()>[E1] [E99]';env.emit('delta',{text:literal});await settle();
+  const literal='<img onerror=evil()>[E1] [E99]';env.emit('delta',{text:literal});await settle();env.flushFrame();
   const answer=turn.querySelector('.qa-answer');assert.equal(answer.textContent,literal);assert.equal(answer.querySelectorAll('button').length,0);
   env.emit('done',{});env.streams.at(-1).close();await settle();
   assert.equal(answer.textContent,literal);assert.equal(answer.querySelectorAll('button').length,1);
@@ -141,6 +144,7 @@ test('interrupted streams restore only the submitted question, never a blank com
     if(phase!=='submit')env.emit('evidence',evidence('pending'));
     if(phase==='partial')env.emit('delta',{text:'unfinished answer [E1]'});
     await settle();
+    if(phase==='partial')env.flushFrame();
     assert.deepEqual(env.history().map(({scope,project_id,...row})=>row),[{kind:'user',text:'question'}],phase+' must not persist a pending assistant');
     env.window.clearKnowledgeChat();
     assert.equal(env.get('qa-transcript').querySelectorAll('.qa-turn-user').length,1);

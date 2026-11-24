@@ -152,6 +152,7 @@ test('initial render and fit control include every visible card, and fit mode fo
 test('generation settings collapse to release more vertical canvas space',async()=>{
   const page=await fixture({width:1440,height:900});
   try{
+    await page.getByRole('button',{name:'展开设置',exact:true}).click();
     const toggle=page.getByRole('button',{name:'收起设置',exact:true});
     const before=await page.locator('#mindmap-canvas').boundingBox();
     await toggle.click();await settle(page);
@@ -178,6 +179,19 @@ test('fit excludes folded descendants and fits a fully expanded deep tree on a p
     });
     await settle(page);await assertFitted(page);
     assert.equal((await page.evaluate(()=>mindmapView.geometry().nodes.length)),10);
+  }finally{await page.close();}
+});
+
+test('a generated phone mindmap starts with the diagram and fits a three-level branch legibly',async()=>{
+  const page=await fixture({width:390,height:844});
+  try{
+    const canvas=await page.locator('#mindmap-canvas').boundingBox();
+    const tools=await page.locator('.mindmap-explorer-bar').boundingBox();
+    assert.equal(await page.locator('#mindmap-settings').isVisible(),false);
+    assert.equal(await page.locator('#mindmap-overview').isVisible(),false);
+    assert.ok(tools.y>=canvas.y+canvas.height-1,'find and export controls follow the diagram');
+    assert.ok((await metrics(page)).zoom>=.75,'a three-level branch must fit without reducing labels to thumbnail size');
+    await assertFitted(page);
   }finally{await page.close();}
 });
 
@@ -534,6 +548,7 @@ test('a pending PNG export is invalidated when regeneration starts before the HT
       const act=(id,handler)=>get(id).onclick=handler;
       ${requests[0]}
     }`});
+    await page.getByRole('button',{name:'展开设置',exact:true}).click();
     await page.getByRole('button',{name:'生成脑图',exact:true}).click();
     assert.equal(await page.evaluate(()=>mindmapRequestStarted),true);
     await page.evaluate(()=>releaseMindmapPng());

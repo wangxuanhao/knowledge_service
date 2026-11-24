@@ -21,6 +21,11 @@ class OperationContextStale(ValueError):
     retryable = False
 
 
+class DuplicateReviewRequired(ValueError):
+    def result(self, key):
+        return dict(key=key, status='review_required', error=str(self))
+
+
 def exact_candidates(mention, rows, policy):
     eligible = [row for row in rows if row.get('id') != mention.get('id')
         and not (row.get('metadata') or {}).get('_deleted')

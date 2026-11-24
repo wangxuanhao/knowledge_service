@@ -17,6 +17,9 @@ def test_graph_conversion_failure_preserves_current_searchable_chunks(env,monkey
     item=repo.ingest_batches.claim(operation['batch']['id'],'test-worker',120)
     with pytest.raises(Exception):run_item(app,item,operation['batch']['settings'])
     current=repo.document_chunks(project,document['id'])
+    current_document=repo.get_record(project,document['id'])
+    assert current_document['metadata']['status']=='ready'
+    assert current_document['metadata']['run_id']==document['metadata']['run_id']
     assert current, 'Graph conversion failure must not remove document retrieval'
     assert current[0]['text']==document['text']
     assert not current[0]['metadata'].get('_deleted')

@@ -4,8 +4,8 @@
   get('ingest-back-sources').onclick=()=>window.KnowledgeTabs.open('sources');
   get('ingest-open-jobs').onclick=()=>showRuntimeView('jobs');
   const panel=get('scope'),details=get('cb-details');let trigger=null;
-  const dimensions=['platforms','businesses','audiences'];
-  let vocabulary={},vocabularyProject='',vocabularyRequest=0,vocabularyStatus='';
+  const dimensions=['platforms','businesses','audiences'],vocabularyLookup=context.createLookup();
+  let vocabulary={},vocabularyRequest=0,vocabularyStatus='';
   const picker=name=>get('query-'+name);
   const selected=name=>Array.from(picker(name)?.querySelectorAll?.('input:checked')||[],input=>input.value);
   function updatePicker(name){
@@ -38,10 +38,12 @@
     const project=current,request=++vocabularyRequest;
     const active=()=>request===vocabularyRequest&&project===current&&details.open;
     const draft=()=>window.ApplicabilityUI?.readQueryScope?.().applicability;
-    const draftBefore=draft();vocabularyStatus='正在读取项目选项…';renderPickers(draftBefore);
+    if(vocabularyLookup.peek(project)===vocabulary)return;
+    const url=endpoint('/applicability-values');
+    if(!vocabularyLookup.peek(project)){vocabularyStatus='正在读取项目选项…';renderPickers(draft());}
     try{
-      const values=await api(endpoint('/applicability-values'),undefined,'GET');
-      if(!active())return;
+      const values=await vocabularyLookup.read(project,()=>api(url,undefined,'GET'));
+      if(!active()||vocabularyLookup.peek(project)!==values)return;
       vocabulary=values||{};vocabularyStatus='';
     }catch{
       if(!active())return;
@@ -90,7 +92,7 @@
     get('scope-applicability-help').textContent=shared?'从当前项目的已有值中多选。应用后，检索与问答共用这些条件。':'从当前项目的已有值中选择，可多选。';
     if(allowed&&!window.GraphWorkspaceLayout?.placeScope(panel))placePanel(page);
     const value=context.read(current);
-    if(vocabularyProject!==current){vocabularyProject=current;vocabulary={};}
+    vocabulary=vocabularyLookup.peek(current)||{};
     vocabularyStatus=current?'':'请先选择项目';
     for(const name of dimensions)picker(name).open=false;
     renderPickers(value.applicability);
@@ -154,7 +156,6 @@
   get('scope-close').onclick=()=>{restore();trigger?.focus();};
   details.addEventListener('toggle',()=>get('scope-toggle').setAttribute('aria-expanded',String(details.open)));
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&details.open){restore();trigger?.focus();}});
-  get('project').addEventListener('change',restore);
   get('scope-time-mode').addEventListener('change',timeControls);
   for(const name of dimensions)picker(name).addEventListener('change',()=>updatePicker(name));
   context.register({restore,apply,reset});

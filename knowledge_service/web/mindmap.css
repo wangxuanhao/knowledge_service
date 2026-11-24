@@ -72,22 +72,31 @@ body main #mindmap-canvas{height:clamp(420px,calc(100dvh - 355px),760px);min-hei
 }
 
 /* Allocate the remaining panel space to the drawing, including after collapse. */
-body main #tab-mindmap>.mindmap-panel{display:flex;flex-direction:column;height:max(680px,calc(100dvh - 140px))}
+body main #tab-mindmap:not(.hidden){display:flex;flex-direction:column;flex:1 1 0;min-height:min-content}
+body main #tab-mindmap>.mindmap-panel{display:flex;flex-direction:column;flex:1 0 auto;margin-bottom:0}
+#tab-mindmap .mindmap-heading>div{flex:1;min-width:0}
+#tab-mindmap .mindmap-heading{gap:8px}
+body main #tab-mindmap .mindmap-heading #draw-mindmap{height:34px;min-height:34px;padding:0 11px}
+body main #tab-mindmap .mindmap-controls{grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) minmax(72px,100px)}
+#tab-mindmap #mindmap-heading-title{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 #tab-mindmap #mindmap-settings[hidden]{display:none}
 body main #tab-mindmap #mindmap-toggle-settings{flex-shrink:0;margin:0;padding:5px 10px;min-height:30px;border:1px solid #d8e5e1;border-radius:6px;background:#f6faf8;color:#53716b;font-size:12px;box-shadow:none}
 #tab-mindmap #mindmap-toggle-settings:focus-visible{outline:2px solid #78a78b;outline-offset:2px}
 #tab-mindmap .mindmap-config-footer{margin:0 18px;padding:6px 0 8px}
-#tab-mindmap .mindmap-stage{display:flex;flex:1;flex-direction:column;min-height:440px}
+#tab-mindmap .mindmap-stage{display:flex;flex:1 0 auto;flex-direction:column}
 #tab-mindmap .mindmap-stage>*{flex-shrink:0}
-#tab-mindmap .mindmap-stage>.mindmap-viewport{flex:1;min-height:300px}
+#tab-mindmap .mindmap-stage>.mindmap-viewport{flex:1 0 auto;min-height:clamp(220px,30dvh,300px)}
 body main #mindmap-canvas{position:absolute;inset:0;width:100%;height:100%;min-height:0;cursor:grab;user-select:none}
 body main #mindmap-canvas.is-panning,body main #mindmap-canvas.is-panning canvas{cursor:grabbing!important}
 #tab-mindmap .mindmap-canvas-note{padding:7px 18px}
 #tab-mindmap .mindmap-stage-toolbar{min-height:44px;padding:6px 18px}
-#tab-mindmap .mindmap-panel:has(.mindmap-trace-panel[open]){height:max(900px,calc(100dvh - 140px))}
+
 @media(max-width:700px){
- body main #tab-mindmap>.mindmap-panel{height:auto}
- #tab-mindmap .mindmap-stage>.mindmap-viewport{flex:auto;height:65dvh;min-height:360px}
+ body main #tab-mindmap .mindmap-controls{grid-template-columns:minmax(0,1fr) 75px}
+ body main #tab-mindmap .mindmap-root-control{grid-column:1}
+ body main #tab-mindmap .mindmap-depth-control{grid-column:2}
+ #tab-mindmap .mindmap-heading{padding:10px 12px}
+ #tab-mindmap .mindmap-heading p{font-size:11px}
  #tab-mindmap .mindmap-stage-toolbar{flex-wrap:wrap}
  #tab-mindmap .mindmap-view-tools{margin-left:auto;flex-wrap:wrap}
 }
@@ -100,7 +109,7 @@ body main #tab-mindmap #mindmap-node-search{width:100%;height:33px;min-height:33
 #tab-mindmap #mindmap-node-search::placeholder{color:#91a498}
 #tab-mindmap #mindmap-search-status{grid-column:2;min-width:0;color:#7a9284;font-size:10px;line-height:1.5;overflow-wrap:anywhere}
 #tab-mindmap #mindmap-search-status:empty{display:none}
-#tab-mindmap #mindmap-search-results{position:absolute;z-index:25;top:calc(100% + 5px);right:0;left:0;max-height:320px;overflow:auto;padding:5px;border:1px solid #cddfd3;border-radius:9px;background:#fff;box-shadow:0 12px 30px #1d4b3520;overscroll-behavior:contain}
+#tab-mindmap #mindmap-search-results{position:absolute;z-index:25;bottom:calc(100% + 5px);right:0;left:0;max-height:min(320px,45dvh);overflow:auto;padding:5px;border:1px solid #cddfd3;border-radius:9px;background:#fff;box-shadow:0 8px 24px #1d4b3520;overscroll-behavior:contain}
 #tab-mindmap #mindmap-search-results[hidden]{display:none}
 body main #tab-mindmap .mindmap-search-result{display:flex;flex-direction:column;align-items:flex-start;gap:4px;width:100%;min-width:0;min-height:50px;margin:0;padding:9px 10px;border:0;border-radius:5px;background:#fff;color:#264d3d;text-align:left;white-space:normal;box-shadow:none}
 body main #tab-mindmap .mindmap-search-result:hover,body main #tab-mindmap .mindmap-search-result[aria-selected=true]{background:#edf6ef}
@@ -133,7 +142,7 @@ body main #tab-mindmap #mindmap-trace-run:hover:not(:disabled){border-color:#397
 #tab-mindmap .mindmap-trace-relation{color:#5a856b}
 #tab-mindmap .mindmap-export-status{min-width:0;margin:0;padding:8px 18px;border-bottom:1px solid #e3ede7;background:#f4f8f3;color:#5e7f66;font-size:11px;line-height:1.6;overflow-wrap:anywhere}
 #tab-mindmap .mindmap-export-status:empty{display:none}
-#tab-mindmap .mindmap-overview{position:absolute;z-index:5;right:14px;bottom:14px;width:218px;max-width:calc(100% - 28px);padding:8px;border:1px solid #ccdfd0;border-radius:9px;background:#fffffff0;box-shadow:0 3px 18px #234a3214;backdrop-filter:blur(6px)}
+#tab-mindmap .mindmap-overview{position:absolute;z-index:5;right:12px;bottom:12px;width:150px;max-width:calc(100% - 24px);padding:6px;border:1px solid #ccdfd0;border-radius:8px;background:#fffffff0;box-shadow:0 3px 12px #234a3214;backdrop-filter:blur(6px)}
 #tab-mindmap .mindmap-overview[hidden]{display:none}
 #tab-mindmap .mindmap-overview>span{display:block;margin:1px 3px 5px;color:#65836d;font-size:10px;font-weight:600;letter-spacing:.03em}
 #tab-mindmap #mindmap-overview-map{display:block;width:100%;height:auto;aspect-ratio:5/3;border:1px solid #e5eee7;border-radius:4px;background:#f6faf6;cursor:crosshair;touch-action:manipulation}
@@ -160,8 +169,25 @@ body main #tab-mindmap #mindmap-node-search:focus-visible,body main #tab-mindmap
  #tab-mindmap .mindmap-trace-controls{gap:9px}
  #tab-mindmap .mindmap-trace-controls>button{width:100%;justify-self:stretch}
  #tab-mindmap .mindmap-export-status{padding-right:12px;padding-left:12px}
- #tab-mindmap .mindmap-overview{right:10px;bottom:10px;width:174px;padding:6px}
+ #tab-mindmap .mindmap-overview{right:8px;bottom:8px;width:112px;padding:5px}
  #tab-mindmap .mindmap-overview>small{font-size:8px}
+}
+
+#tab-mindmap .mindmap-review-notice{margin:0;padding:0 18px;border-bottom:1px solid var(--ui-line);background:var(--ui-surface)}
+#tab-mindmap .mindmap-review-notice:not(:has(>.discovery-hint:not([hidden]))){display:none}
+#tab-mindmap .mindmap-review-notice>summary{padding:7px 0;color:var(--ui-muted);font-size:12px;cursor:pointer}
+#tab-mindmap .mindmap-review-notice>.discovery-hint{position:static;display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:0 0 8px;padding:8px 10px}
+#tab-mindmap .mindmap-stage-toolbar{border-top:1px solid var(--ui-line)}
+#tab-mindmap .mindmap-explorer-bar{padding-block:7px;background:var(--ui-surface);border-top:1px solid var(--ui-line)}
+#tab-mindmap .mindmap-stage #mindmap-summary{color:var(--ui-muted)}
+@media(max-width:700px){
+ #tab-mindmap .mindmap-stage>.mindmap-viewport{min-height:clamp(320px,48dvh,500px)}
+ #tab-mindmap .mindmap-stage-toolbar{display:grid;grid-template-columns:minmax(0,1fr);gap:5px;padding:7px 10px}
+ #tab-mindmap .mindmap-stage-title{display:flex;align-items:center;gap:9px}
+ #tab-mindmap .mindmap-view-tools{justify-content:flex-start;gap:4px 7px;margin:0}
+ #tab-mindmap .mindmap-view-tools button{min-height:32px;height:32px}
+ #tab-mindmap .mindmap-viewport{border-bottom:1px solid var(--ui-line)}
+ #tab-mindmap .mindmap-review-notice{padding-inline:12px}
 }
 
 /* Keep entity drawers and the full workspace canvas in the same viewport. */

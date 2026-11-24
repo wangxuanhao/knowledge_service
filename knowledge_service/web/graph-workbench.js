@@ -83,7 +83,7 @@
     const chart=state.chart,element=chart.getDom(),width=element.clientWidth,height=element.clientHeight;
     const series=chart.getModel().getSeriesByIndex(0);if(!width||!height||!series?.coordinateSystem?.dataToPoint)return;
     const data=series.option.data||[],candidates=path?GraphAppearance.labelsFor(state.styles.data,path.nodes):state.candidates;
-    textMeasure||=document.createElement('canvas').getContext('2d');textMeasure.font='12px sans-serif';
+    textMeasure||=document.createElement('canvas').getContext('2d');textMeasure.font=(GraphAppearance.labelSize?.(data.length)||12)+'px sans-serif';
     const factor=((series.get('zoom')||1)-1)*(series.get('nodeScaleRatio')??.6)+1;
     const visible=GraphAppearance.avoidLabelOverlap(data,candidates,{project:node=>series.coordinateSystem.dataToPoint([node.x,node.y]),
       measure:text=>textMeasure.measureText(text).width,width,height,size:node=>{const size=node.symbolSize||20;return (Array.isArray(size)?size:[size,size]).map(n=>n*factor);}});

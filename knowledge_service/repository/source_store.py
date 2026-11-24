@@ -62,7 +62,7 @@ class SourceStore:
                 self._insert('source_assets',dict(id=value['id'],project_id=project_id,document_version_id=version_id,source_object_id=asset_obj['id'] if asset_obj else None,original_path=value.get('original_path',value.get('url','')),resolved_path=value.get('resolved_path',''),alt_text=value.get('alt',''),width=value.get('width'),height=value.get('height'),status=value['status'],kind=value['kind'],source_start_line=value.get('source_start_line'),source_end_line=value.get('source_end_line'),provenance=encode(value.get('provenance',{}))))
         return self.get_version(project_id, version_id)
 
-    def get_version(self, project_id, version_id):
+    def get_version(self, project_id, version_id, *, chunk_version_id=None):
         with self.repo._lock:
             row=self.repo._db.execute('SELECT v.*,o.storage_key,o.mime_type,o.sha256 FROM source_document_versions v JOIN source_objects o ON o.id=v.source_object_id WHERE v.project_id=? AND v.id=?',(project_id,version_id)).fetchone()
             if row is None: raise KeyError('Source version not found')
@@ -71,7 +71,7 @@ class SourceStore:
             result['blocks']=self._list('parsed_blocks',project_id,version_id,'ordinal')
             result['assets']=self._list('source_assets',project_id,version_id,'id')
             result['assets'].sort(key=lambda a:(a.get('provenance',{}).get('source_image_ordinal',1_000_000),a.get('source_start_line') or 0,a['id']))
-            result['chunks']=self._version_chunks(project_id,version_id)
+            result['chunks']=self._version_chunks(project_id,version_id,chunk_version_id)
             return result
 
     def clone_version(self,project_id,version_id,document_id,*,original_name=None):
@@ -124,18 +124,43 @@ class SourceStore:
                 for row in copies[table]:self._insert(table,copy_row(row))
             return self.get_version(project_id,identifier),mapping
 
-    def _version_chunks(self,project_id,version_id):
-        """Read the immutable mapped record version; never substitute a current revision."""
-        rows=self.repo._db.execute('''SELECT s.*,r.id AS record_id,r.payload AS record_payload
-            FROM chunk_source_spans s JOIN record_versions r
-              ON r.project_id=s.project_id AND r.version_id=s.chunk_version_id
-            WHERE s.project_id=? AND s.document_version_id=?
-            ORDER BY r.recorded_at,r.id,s.ordinal''',(project_id,version_id)).fetchall()
+    def _version_chunks(self,project_id,version_id,chunk_version_id=None):
+        """Read one successful result for this source, with an optional pinned fragment."""
+        rows=self.repo._db.execute('''WITH mapped AS (
+                SELECT s.*,r.id AS record_id,r.payload AS record_payload,r.version,
+                    r.payload::jsonb#>>'{metadata,run_id}' AS run_id
+                FROM chunk_source_spans s JOIN record_versions r
+                  ON r.project_id=s.project_id AND r.version_id=s.chunk_version_id
+                WHERE s.project_id=? AND s.document_version_id=?
+                  AND r.payload::jsonb#>>'{metadata,_deleted}' IS DISTINCT FROM 'true'
+            ), latest_run AS (
+                SELECT run.id FROM ingest_runs run JOIN record_versions receipt
+                  ON receipt.project_id=run.project_id AND receipt.version_id=run.document_version_id
+                JOIN source_document_versions source ON source.project_id=run.project_id
+                  AND source.document_id=run.document_id AND source.id=?
+                WHERE run.project_id=? AND run.status='completed'
+                  AND (receipt.payload::jsonb#>>'{metadata,source_document_version_id}'=?
+                       OR EXISTS (SELECT 1 FROM mapped WHERE mapped.run_id=run.id))
+                ORDER BY run.created_at DESC,run.id DESC LIMIT 1
+            ), ranked AS (
+                SELECT mapped.*,dense_rank() OVER (
+                    PARTITION BY record_id ORDER BY
+                    CASE WHEN chunk_version_id=? THEN 0 ELSE 1 END,mapped.version DESC
+                ) AS position
+                FROM mapped LEFT JOIN ingest_runs run
+                  ON run.project_id=mapped.project_id AND run.id=mapped.run_id
+                WHERE mapped.run_id IS NOT DISTINCT FROM (SELECT id FROM latest_run)
+                   OR (chunk_version_id=? AND (mapped.run_id IS NULL OR run.status='completed'))
+            )
+            SELECT * FROM ranked WHERE position=1 ORDER BY record_id,ordinal''',
+            (project_id,version_id,version_id,project_id,version_id,chunk_version_id,chunk_version_id)).fetchall()
         chunks={}
         for row in rows:
             item=dict(row)
             payload=json.loads(item.pop('record_payload'))
             record_id=item.pop('record_id')
+            for key in ('version','run_id','position'):
+                item.pop(key)
             identity=item['chunk_version_id']
             item['payload']=json.loads(item['payload'])
             if identity not in chunks:

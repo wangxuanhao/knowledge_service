@@ -102,7 +102,7 @@ body main #tab-qa .qa-page-heading #scope{grid-column:1/-1;margin:0;padding:0;mi
 .qa-page-actions .qa-header-icon{display:grid;place-items:center;width:31px;height:31px;min-width:31px;margin:0;padding:6px;border:0;border-radius:8px;background:transparent;color:#7b857c;box-shadow:none}
 .qa-page-actions .qa-header-icon:hover{background:#f1f4ef;color:#33483b}
 .qa-header-icon svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
-#tab-qa .qa-scroll{position:relative;padding:20px 0;scrollbar-gutter:auto;scrollbar-width:thin;scrollbar-color:#bfcfc6 transparent}
+#tab-qa .qa-scroll{position:relative;padding:12px 0;scrollbar-gutter:auto;scrollbar-width:thin;scrollbar-color:#bfcfc6 transparent}
 #tab-qa .qa-transcript{max-width:var(--qa-column);margin:0 auto;gap:15px}
 #tab-qa .qa-turn-user{justify-content:flex-end;padding:0}
 #tab-qa .qa-bubble{max-width:min(85%,620px);padding:8px 15px;border:1px solid #d3e5dc;border-radius:13px 13px 4px 13px;background:#e8f3ed;color:#174a39;font-size:14px;font-weight:500;box-shadow:none;line-height:1.75}
@@ -116,7 +116,7 @@ body main #tab-qa .qa-page-heading #scope{grid-column:1/-1;margin:0;padding:0;mi
 #tab-qa .qa-evidence-panel{margin-top:11px;box-shadow:none}
 #tab-qa .provenance-citation{border-color:#d9ebe2;border-radius:5px;background:#eef7f2;color:#245943;box-shadow:none}
 #tab-qa .qa-summary{max-width:var(--qa-column);margin:0 auto;color:#526963;font-size:12px}
-body main #tab-qa .qa-hero{max-width:var(--qa-column);margin:clamp(23px,9vh,98px) auto 24px;padding:14px 0;text-align:left}
+body main #tab-qa .qa-hero{max-width:var(--qa-column);margin:clamp(8px,2vh,22px) auto 18px;padding:10px 0;text-align:left}
 body main #tab-qa .qa-hero h2{font-size:clamp(25px,3vw,36px);font-weight:650;color:#183d34;line-height:1.35;margin-bottom:9px;letter-spacing:-.02em}
 #tab-qa .qa-lead{max-width:540px;margin:0;font-size:14px;color:#526963;line-height:1.8}
 #tab-qa .qa-examples{justify-content:flex-start;gap:8px;margin-top:20px}
@@ -160,10 +160,10 @@ body main #tab-qa .qa-example:hover{background:#f6f8f3;border-color:#d6dfd2}
   #tab-qa .qa-scroll{padding:12px 0 16px}
   #tab-qa .qa-transcript{gap:12px}
   #tab-qa .qa-turn-assistant{padding:13px;border-radius:12px}
-  body main #tab-qa .qa-hero{margin:35px auto 20px;padding:12px 4px}
+  body main #tab-qa .qa-hero{margin:6px auto 16px;padding:8px 4px}
   body main #tab-qa .qa-hero h2{font-size:23px}
   #tab-qa .qa-lead{font-size:12px;max-width:280px}
-  #tab-qa .qa-examples{gap:7px;margin-top:22px}
+  #tab-qa .qa-examples{gap:7px;margin-top:12px}
   body main #tab-qa .qa-example{padding:8px 10px;font-size:11px}
   #tab-qa .qa-composer{padding:9px 10px 7px;border-radius:12px}
   body main #tab-qa>.community-nav{padding:0 12px}

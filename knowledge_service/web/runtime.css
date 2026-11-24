@@ -50,3 +50,7 @@ body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) :is(input,select){min-he
   body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation)>.panel{padding:14px}
   body main :is(#tab-dashboard,#tab-jobs,#tab-evaluation) .row{flex-wrap:wrap}
 }
+
+body main #tab-dashboard .neo4j-panel summary { margin:0; }
+body main #tab-dashboard .neo4j-panel pre { color:var(--ks-ink); }
+body main #tab-dashboard #dashboard { margin-top:12px; }

@@ -336,6 +336,20 @@ test('completed batch items open existing results with fixed project and documen
   assert.match(f.text(),/主动未执行图谱知识抽取/);
 });
 
+test('batch result drawer opens while the selected file result is loading',async()=>{
+  const f=fixture();
+  let resolveItem;
+  const itemRead=new Promise(resolve=>{resolveItem=resolve;});
+  const load=f.context.window.IngestResults.showBatchItem({id:'item',original_name:'规则.md',document_id:'doc-1'},
+    {projectId:'p',mode:'discovery',loadItem:()=>itemRead});
+  assert.match(f.text(),/正在读取结果/);
+  assert.equal(f.apiCalls.length,0);
+  resolveItem({id:'item',batch_id:'batch',result:{document:{id:'doc-1'},run_id:'fixed-run'}});
+  await load;
+  assert.ok(f.apiCalls.includes('/api/projects/p/assertions?document_id=doc-1'));
+  assert.match(f.text(),/已完成/);
+});
+
 test('results show the actual historical ontology instead of the latest release',async()=>{
   const f=fixture({assertions:[{kind:'entity',status:'accepted',ontology_id:'old-ontology',
     payload:{text:'商户',type:'Merchant'}}]});

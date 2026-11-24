@@ -113,6 +113,135 @@ async function fixture(){
   return {page,conversations,requests,errors,failures,close:async()=>{await browser.close();await new Promise(resolve=>server.close(resolve));}};
 }
 
+async function controlQaStream(page,{pauseFrames=true}={}){
+  await page.evaluate(pauseFrames=>{
+    const originalFetch=window.fetch, streams=[], frames=new Map();
+    const scroll=document.getElementById('qa-scroll'),live=document.getElementById('qa-live');
+    const reads={scrollHeight:0},writes={answer:0,live:0};
+    const scrollHeight=Object.getOwnPropertyDescriptor(Element.prototype,'scrollHeight').get;
+    Object.defineProperty(scroll,'scrollHeight',{get(){reads.scrollHeight++;return scrollHeight.call(this);}});
+    const textContent=Object.getOwnPropertyDescriptor(Node.prototype,'textContent');
+    Object.defineProperty(Node.prototype,'textContent',{
+      ...textContent,set(value){
+        if(this===live)writes.live++;
+        if(this.classList?.contains('qa-answer')&&this.closest('[data-state="streaming"]'))writes.answer++;
+        textContent.set.call(this,value);
+      }
+    });
+    let sequence=0;
+    if(pauseFrames){
+      window.requestAnimationFrame=callback=>{frames.set(++sequence,callback);return sequence;};
+      window.cancelAnimationFrame=id=>frames.delete(id);
+    }
+    window.fetch=(url,options)=>{
+      if(!String(url).endsWith('/qa/stream'))return originalFetch(url,options);
+      const stream={signal:options.signal};streams.push(stream);
+      const body=new ReadableStream({
+        start(controller){
+          stream.emit=events=>controller.enqueue(new TextEncoder().encode(events.map(([event,data])=>
+            'event: '+event+'\ndata: '+JSON.stringify(data)+'\n\n').join('')));
+        }
+      });
+      return Promise.resolve(new Response(body,{headers:{'Content-Type':'text/event-stream'}}));
+    };
+    window.qaStreamProbe={streams,reads,writes,
+      flushFrame(){const callbacks=[...frames.values()];frames.clear();callbacks.forEach(callback=>callback(performance.now()));}};
+  },pauseFrames);
+}
+
+async function startControlledQuestion(page,question){
+  const count=await page.evaluate(()=>window.qaStreamProbe.streams.length);
+  await page.fill('#qa-query',question);
+  await page.click('#qa');
+  await page.waitForFunction(count=>window.qaStreamProbe.streams.length>count,count,{polling:10});
+}
+
+async function emitQaEvents(page,events){
+  await page.evaluate(async events=>{
+    window.qaStreamProbe.streams.at(-1).emit(events);
+    await new Promise(resolve=>setTimeout(resolve,0));
+  },events);
+}
+
+test('QA displays one progressive update per frame and preserves the reader position through completion',async()=>{
+  const env=await fixture();
+  try{
+    const page=await env.page();
+    await controlQaStream(page);
+    await startControlledQuestion(page,'逐段阅读');
+    const answer=page.locator('.qa-answer');
+    const chunk='说明内容。第一段说明内容。内容继续。\n';
+    const draft=chunk.repeat(600)+'未完成句';
+    await page.evaluate(()=>{
+      Object.assign(window.qaStreamProbe.writes,{answer:0,live:0});
+      window.qaStreamProbe.reads.scrollHeight=0;
+    });
+    await emitQaEvents(page,[...Array.from({length:600},()=>['delta',{text:chunk}]),['delta',{text:'未完成句'}]]);
+    assert.equal((await answer.textContent()).length,0,'the draft waits for its frame');
+    await page.evaluate(()=>window.qaStreamProbe.flushFrame());
+    assert.equal(await answer.textContent(),draft);
+    assert.equal(await page.locator('#qa-live').textContent(),draft.slice(0,-5));
+    assert.deepEqual(await page.evaluate(()=>window.qaStreamProbe.writes),{answer:1,live:1});
+    assert.ok(await page.evaluate(()=>window.qaStreamProbe.reads.scrollHeight)<=2);
+    assert.equal(await page.locator('.qa-turn-assistant').getAttribute('data-state'),'streaming');
+    const scroll=page.locator('#qa-scroll');
+    assert.ok(await scroll.evaluate(node=>node.scrollHeight-node.scrollTop-node.clientHeight<=2));
+
+    await scroll.evaluate(node=>{node.scrollTop=50;});
+    await emitQaEvents(page,[['delta',{text:chunk.repeat(50)}]]);
+    await page.evaluate(()=>window.qaStreamProbe.flushFrame());
+    assert.equal(await scroll.evaluate(node=>node.scrollTop),50);
+
+    const evidence={citation:'E1',kind:'chunk',text:'流式依据',answer_eligible:true,provenance_ref:'answer:progressive#E1',sources:[]};
+    await emitQaEvents(page,[['evidence',{answer_id:'progressive',evidence:[evidence],requested_mode:'hybrid',active_modes:['hybrid'],degraded:false,_backend:'milvus'}]]);
+    assert.equal(await scroll.evaluate(node=>node.scrollTop),50);
+    await page.locator('.qa-evidence-toggle').evaluate(button=>button.click());
+    const final=chunk.repeat(610)+'权威结尾';
+    await emitQaEvents(page,[['delta',{text:'未绘制的增量'}],['done',{answer_id:'progressive',answer:final,mode:'evidence_only'}]]);
+    assert.equal(await page.locator('.qa-turn-assistant').getAttribute('data-state'),'done');
+    assert.equal(await page.locator('#qa-live').textContent(),final);
+    assert.match(await answer.textContent(),/权威结尾$/);
+    assert.equal(await scroll.evaluate(node=>node.scrollTop),50);
+    assert.ok(await page.locator('.qa-evidence-panel').isVisible());
+    await page.evaluate(()=>window.qaStreamProbe.flushFrame());
+    assert.match(await answer.textContent(),/权威结尾$/);
+
+    await startControlledQuestion(page,'底部继续阅读');
+    assert.ok(await scroll.evaluate(node=>node.scrollHeight-node.scrollTop-node.clientHeight<=2));
+    await emitQaEvents(page,[['delta',{text:chunk.repeat(100)}]]);
+    await page.evaluate(()=>window.qaStreamProbe.flushFrame());
+    assert.ok(await scroll.evaluate(node=>node.scrollHeight-node.scrollTop-node.clientHeight<=2));
+    assert.deepEqual(env.errors,[]);
+  }finally{await env.close();}
+});
+
+test('QA discards a cleared draft and finalizes a new reply while frames are paused',async()=>{
+  const env=await fixture();
+  try{
+    const page=await env.page();
+    await controlQaStream(page);
+    await startControlledQuestion(page,'旧会话');
+    await emitQaEvents(page,[['delta',{text:'即将取消。'}]]);
+    await page.click('#qa-clear');await page.click('#qa-session-dialog-confirm');
+    await page.waitForFunction(()=>!document.getElementById('qa').disabled,undefined,{polling:10});
+    await page.evaluate(()=>window.qaStreamProbe.flushFrame());
+    assert.equal(await page.locator('.qa-turn').count(),0);
+    assert.equal(await page.locator('#qa-live').textContent(),'');
+    assert.equal(await page.evaluate(()=>window.qaStreamProbe.streams[0].signal.aborted),true);
+
+    await startControlledQuestion(page,'新一轮');
+    await emitQaEvents(page,[['delta',{text:'新草稿。'}]]);
+    await page.evaluate(()=>window.KnowledgeTabs.open('search'));
+    assert.equal(await page.locator('#qa-scroll').evaluate(node=>node.clientHeight),0);
+    await emitQaEvents(page,[['done',{answer:'新答案。',answer_id:'new-answer',mode:'evidence_only'}]]);
+    assert.equal(await page.locator('.qa-turn-assistant').getAttribute('data-state'),'done');
+    await page.evaluate(()=>{window.KnowledgeTabs.open('qa');window.qaStreamProbe.flushFrame();});
+    assert.equal(await page.locator('.qa-answer').textContent(),'新答案。');
+    assert.equal(await page.locator('#qa-live').textContent(),'新答案。');
+    assert.deepEqual(env.errors,[]);
+  }finally{await env.close();}
+});
+
 test('QA shows the shared scope and submits choices from project dropdowns',async()=>{
   const env=await fixture();
   try{

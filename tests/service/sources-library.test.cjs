@@ -2,6 +2,34 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const {setup,documentRow,settle}=require('./fixtures/sources-ui.cjs');
 
+test('source pagination keeps unchanged rows and applies overlapping updates in place',async()=>{
+  const one=documentRow('one'),two=documentRow('two'),three=documentRow('three');
+  const updated={...two,metadata:{...two.metadata,title:'资料 two 已更新',status:'processing',batch_id:'new-batch',batch_item_id:'item-two'}};
+  const opened=[];
+  const env=setup({documents:[one,updated,three],sourceRead:url=>{
+    const cursor=new URL(url,'http://test').searchParams.get('cursor');
+    return Promise.resolve(cursor
+      ?{documents:[{...one},two,updated,three],total:3,counts:{all:3,ready:2,processing:1,failed:0}}
+      :{documents:[one,two],total:3,next_cursor:'next'});
+  }});
+  env.context.LibraryWorkspace.openBatch=options=>opened.push(options);
+  await settle();
+  const [first,second]=env.rows();
+  await env.get('source-load-more').click();
+  const rows=env.rows();
+  assert.ok(rows[0]===first,'the first row keeps its original button');
+  assert.ok(rows[1]===second,'updating the second row keeps its original button');
+  assert.deepEqual(rows.map(row=>row.querySelector('b').textContent),['资料 one','资料 two 已更新','资料 three']);
+  assert.match(rows[1].textContent,/等待 \/ 处理中/);
+  const progress=env.list.querySelector('.source-item-progress');
+  await progress.click();
+  assert.equal(opened[0].batchId,'new-batch');
+  assert.equal(opened[0].itemId,'item-two');
+  await rows[1].click();
+  assert.equal(env.title.textContent,'资料 two 已更新');
+  assert.equal(rows[1].getAttribute('aria-current'),'true');
+});
+
 test('a processing document can reopen the progress for its own batch file from the library',async()=>{
   const doc=documentRow('one','processing'),opened=[];
   Object.assign(doc.metadata,{batch_id:'batch-one',batch_item_id:'item-one',active_stage:'ocr'});
@@ -133,7 +161,7 @@ test('processing records summarize execution and keep the exact raw payload lazy
     failure:{code:'timeout',message:'服务连接超时',retryable:true},debug:{large:'RAW_PROCESSING_SENTINEL'.repeat(1000)}};
   env.requests.at(-1).resolve({runs:[run]});await pending;
   assert.match(env.body.textContent,/处理记录|执行记录/);assert.match(env.body.textContent,/服务连接超时/);
-  assert.match(env.body.textContent,/切片总数/);assert.match(env.body.textContent,/知识抽取/);
+  assert.doesNotMatch(env.body.textContent,/切片总数|当次写入记录/);assert.match(env.body.textContent,/知识抽取/);
   assert.doesNotMatch(env.body.textContent,/RAW_PROCESSING_SENTINEL/);
   const raw=env.body.querySelector('.source-raw-data');assert.equal(raw.open,false);
   raw.open=true;await raw.dispatch('toggle');
@@ -161,27 +189,43 @@ test('formal pending source facts open the project review queue with its visible
   assert.equal(intake.length,0);assert.equal(env.requests.length,reads,'navigation performs no write');
 });
 
-test('source processing actions do not guess historical discovery from the current document mode',async()=>{
+test('source processing shows the latest status and exposes only its successful results',async()=>{
   const doc=documentRow('one');doc.metadata={...doc.metadata,extraction_mode:'discovery',run_id:'current-run'};
   const env=setup({documents:[doc]});await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
   env.requests.at(-1).resolve({runs:[
-    {id:'unknown-old-run',readiness:{candidate_ready:true}},
-    {id:'already-in-graph',counts:{assertions_pending:0},readiness:{candidate_ready:true,graph_ready:true}},
-    {id:'formal-old-run',counts:{assertions_pending:2},readiness:{candidate_ready:true}},
-    {id:'current-run',readiness:{candidate_ready:true}},
+    {id:'failed-run',status:'failed',failure:{message:'旧的处理失败'}},
+    {id:'formal-old-run',status:'completed',counts:{assertions_pending:2},readiness:{candidate_ready:true}},
+    {id:'current-run',status:'completed',readiness:{candidate_ready:true}},
   ]});await reading;
-  const cards=env.body.querySelectorAll('.source-processing-run'),card=id=>cards.find(node=>node.dataset.runId===id);
-  assert.equal(card('unknown-old-run').querySelectorAll('button').length,0);
-  assert.equal(card('already-in-graph').querySelectorAll('button').length,0);
-  assert.equal(card('formal-old-run').querySelector('button').textContent,'查看项目待审核事实');
-  assert.equal(card('current-run').querySelector('button').textContent,'核对本次处理的候选');
+  const cards=env.body.querySelectorAll('.source-processing-run');
+  assert.deepEqual(cards.map(card=>card.dataset.runId),['current-run']);
+  assert.equal(cards[0].querySelector('button').textContent,'核对本次处理的候选');
+  assert.doesNotMatch(env.body.textContent,/旧的处理失败/);
+});
+
+test('source processing shows a current pre-extraction task over an older success',async()=>{
+  const doc=documentRow('one');
+  doc.processing_task={status:'running',stage:'ocr',batch_id:'new-batch',batch_item_id:'new-item'};
+  const env=setup({documents:[doc]});await settle();await env.rows()[0].click();
+  const reading=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({runs:[{id:'old-run',status:'completed',counts:{records_accepted:8}}]});
+  await reading;
+  assert.match(env.body.textContent,/处理中.*图片文字识别/);
+  assert.doesNotMatch(env.body.textContent,/当次写入记录/);
+  const failed=env.tab('处理记录').click();
+  env.requests.at(-1).resolve({
+    runs:[{id:'old-run',status:'completed',created_at:'2026-11-23T01:00:00Z'}],
+    processing_task:{status:'failed',stage:'ocr',updated_at:'2026-11-23T02:00:00Z',public_error:'图片处理失败'},
+  });
+  await failed;
+  assert.match(env.body.textContent,/处理失败.*图片处理失败/);
 });
 
 test('captured source review actions reject a changed project or read-only role',async()=>{
   for(const change of ['project','role']){
     const env=setup(),opened=[];env.context.KnowledgeNavigation={open:async(...args)=>opened.push(args)};
     await settle();await env.rows()[0].click();const reading=env.tab('处理记录').click();
-    env.requests.at(-1).resolve({runs:[{id:'formal-run',counts:{assertions_pending:1}}]});await reading;
+    env.requests.at(-1).resolve({runs:[{id:'formal-run',status:'completed',counts:{assertions_pending:1}}]});await reading;
     const button=env.body.querySelectorAll('button').find(node=>node.textContent==='查看项目待审核事实');assert.ok(button);
     if(change==='project')env.context.current='other';else env.setWriter(false);
     await button.click();assert.equal(opened.length,0);
@@ -239,21 +283,39 @@ test('late fact confirmation cannot replace a newer tab and is reread on the nex
   assert.match(env.body.textContent,/暂无独立处理记录/);
 });
 
-test('record history distinguishes status updates from text changes without repeating full snapshots',async()=>{
+test('record history shows saved content revisions without processing status updates',async()=>{
   const env=setup();await settle();await env.rows()[0].click();
   const fullText='FULL_TEXT_SENTINEL'.repeat(1000),pending=env.tab('修订记录').click();
   const versions=[
     {id:'one',version:1,version_id:'v1',recorded_at:'2026-10-22T03:00:00Z',text:fullText,metadata:{title:'业务规则',status:'processing'}},
     {id:'one',version:2,version_id:'v2',recorded_at:'2026-10-22T03:01:00Z',text:fullText,metadata:{title:'业务规则',status:'ready'}},
-    {id:'one',version:3,version_id:'v3',recorded_at:'2026-10-22T03:02:00Z',text:fullText+'新规则',metadata:{title:'业务规则',status:'ready'}}];
+    {id:'one',version:3,version_id:'v3',recorded_at:'2026-10-22T03:02:00Z',text:fullText+'新规则',metadata:{title:'业务规则',status:'ready'}},
+    {id:'one',version:4,version_id:'v4',recorded_at:'2026-10-22T03:03:00Z',text:fullText+'新规则',metadata:{title:'业务规则',status:'failed'}},
+    {id:'one',version:5,version_id:'v5',recorded_at:'2026-10-22T03:04:00Z',text:fullText+'新规则',metadata:{title:'业务规则',status:'ready',run_id:'retry',extracted_at:'2026-10-22T03:04:00Z'}}];
   env.requests.at(-1).resolve({versions});await pending;
   const revisions=env.body.querySelectorAll('.source-revision');
-  assert.equal(revisions.length,3);assert.equal(revisions[0].dataset.versionId,'v3');
+  assert.equal(revisions.length,2);assert.equal(revisions[0].dataset.versionId,'v3');
   assert.match(revisions[0].textContent,/正文.*变化|正文.*更新/);
-  assert.match(revisions[1].textContent,/处理状态/);assert.match(revisions[1].textContent,/正文未变化/);
-  assert.match(revisions[2].textContent,/首次保存/);assert.doesNotMatch(env.body.textContent,/FULL_TEXT_SENTINEL/);
+  assert.match(revisions[1].textContent,/首次保存/);assert.doesNotMatch(env.body.textContent,/FULL_TEXT_SENTINEL/);
   const raw=revisions[0].querySelector('.source-raw-data');raw.open=true;await raw.dispatch('toggle');
   assert.deepEqual(JSON.parse(raw.querySelector('pre').textContent),versions[2]);
+});
+
+test('the source drawer shows identical accepted evidence once across overlapping chunks',async()=>{
+  const env=setup();await settle();await env.rows()[0].click();
+  const reading=env.tab('抽取结果').click();
+  const anchor={kind:'entity',status:'accepted',document_id:'one',document_version_id:'original',canonical_record_id:'entity',
+    start_char:14,end_char:19,quote:'同一处证据'};
+  env.requests.at(-1).resolve({assertions:[
+    {...anchor,id:'a',chunk_id:'0',payload:{id:'a',text:'同一实体',confidence:0.8,created_at:'earlier',metadata:{chunk_id:'0'}}},
+    {...anchor,id:'b',chunk_id:'1',payload:{id:'b',text:'同一实体',confidence:0.9,created_at:'later',metadata:{chunk_id:'1'}}},
+    {...anchor,id:'c',chunk_id:'1',start_char:30,end_char:35,payload:{text:'同一实体'}},
+    {...anchor,id:'pending',status:'pending',chunk_id:'0',payload:{text:'同一实体'}},
+  ]});
+  await reading;
+  const rows=env.body.querySelectorAll('.source-record-row');
+  assert.equal(rows.length,3);
+  assert.match(rows[2].textContent,/待核对/);
 });
 
 test('only explicit row selection opens details; closing, refreshing and filtering never reopen them',async()=>{

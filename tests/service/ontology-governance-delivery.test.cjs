@@ -128,12 +128,13 @@ test('an unpublished empty project renders its action bar and routes pending can
 test('normal draft action bar reports its exact linked knowledge scope',()=>{
   const actions=element('actions');
   const state={summary:{classes:[],relations:[],attributes:[]},draft:{id:'draft',status:'pending',revision:2,operations:[{action:'create_term'}],associated_knowledge:{selected:3,per_batch:[{run_id:'run-1',selected:3}]}},preview:null};
-  const window={OntologyModel:{S:state,status(){}}};
+  const window={OntologyModel:{S:state,status(){}},OntologyReview:require('../../knowledge_service/web/ontology-review-workspace.js')};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/ontology-model-panel.js'),'utf8'),{
     window,document:{createElement:element},current:'p',console,
   });
   window.OntologyPanel.mount(null,actions,window.OntologyModel);
   assert.ok(all(actions).some(node=>node.textContent==='关联候选事实'));
+  assert.ok(all(actions).some(node=>node.textContent==='3 条关联候选 · 查看处理规则'));
   assert.ok(all(actions).some(node=>String(node.textContent).includes('明确选中 3 条')));
 });
 

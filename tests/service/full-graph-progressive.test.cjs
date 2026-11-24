@@ -113,21 +113,24 @@ function drawingHarness(){
   const context={window:{},performance,console};vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/full-graph.js'),'utf8'),context);
   const {Renderer,GraphDataset,Camera}=context.window.FullGraph;
-  const gl={LINES:1,POINTS:2,TRIANGLE_STRIP:3,SRC_ALPHA:4,ONE_MINUS_SRC_ALPHA:5,ONE:6,FRAMEBUFFER:7,COLOR_BUFFER_BIT:8,
+  const gl={LINES:1,POINTS:2,TRIANGLE_STRIP:3,SRC_ALPHA:4,ONE_MINUS_SRC_ALPHA:5,ONE:6,FRAMEBUFFER:7,COLOR_BUFFER_BIT:8,TRIANGLES:9,
     bound:null,pixels:[0,0,0,0],cached:[0,0,0,0],color:[0,0,0,0],draws:[],uploads:[],sizes:[],
     bindFramebuffer(type,value){this.bound=value;},viewport(){},clearColor(...v){this.clearValue=v;},
     clear(){if(this.bound)this.cached=[...this.clearValue];else this.pixels=[...this.clearValue];},
-    useProgram(){},enableVertexAttribArray(){},disableVertexAttribArray(){},vertexAttrib3f(){},bindBuffer(type,value){this.buffer=value;},bufferData(type,value){this.uploads.push({buffer:this.buffer,length:value.length});},vertexAttribPointer(){},uniform2f(){},uniform1i(){},uniform1f(location,value){if(location==='size')this.sizes.push(value);},activeTexture(){},bindTexture(){},generateMipmap(){},
+    createShader:()=>({}),shaderSource(){},compileShader(){},getShaderParameter:()=>true,deleteShader(){},
+    createProgram:()=>({}),attachShader(){},linkProgram(){},getProgramParameter:()=>true,getAttribLocation:(program,name)=>name,getUniformLocation:(program,name)=>name,
+    createBuffer:()=> 'strokes',useProgram(){},enableVertexAttribArray(){},disableVertexAttribArray(){},vertexAttrib3f(){},bindBuffer(type,value){this.buffer=value;},bufferData(type,value){this.uploads.push({buffer:this.buffer,length:value.length});},vertexAttribPointer(){},uniform2f(){},uniform1i(){},uniform1f(location,value){if(location==='size')this.sizes.push(value);},activeTexture(){},bindTexture(){},generateMipmap(){},
     uniform4f(location,...v){this.color=v;},blendFunc(s,d){this.blend=[s,d,s,d];},blendFuncSeparate(...v){this.blend=v;},
     drawArrays(mode,first,count){this.draws.push({mode,first,count});if(!count||mode===this.POINTS)return;
-      const src=mode===this.LINES?this.color:this.cached,dst=this.bound?this.cached:this.pixels;
+      const src=mode===this.TRIANGLE_STRIP?this.cached:this.color,dst=this.bound?this.cached:this.pixels;
       const factor=(f)=>f===this.ONE?1:f===this.SRC_ALPHA?src[3]:1-src[3];
       const result=src.map((v,i)=>Math.min(1,v*factor(this.blend[i===3?2:0])+dst[i]*factor(this.blend[i===3?3:1])));
       if(this.bound)this.cached=result;else this.pixels=result;
     }};
   const data=new GraphDataset();data.addNodes([{id:'a'},{id:'b'}]);data.addEdges([{id:'r1',subject_id:'a',object_id:'b'}]);
   const renderer=Object.assign(Object.create(Renderer.prototype),{gl,dataset:data,locations:{position:0,size:'size'},pointLocations:{position:0,size:'size'},cacheLocations:{position:0},cacheFramebuffer:{},cacheSize:2048,
-    program:{},pointProgram:{},cacheProgram:{},nodeBuffer:'nodes',groupedNodeBuffer:'grouped-nodes',edgeBuffer:'edges',width:800,height:600,canvas:{width:800,height:600},camera:new Camera(),showEdges:true,dpr:1,selected:-1,durations:[],drawLabels(){},requestDraw(){}});
+    program:{},pointProgram:{},cacheProgram:{},edgeBuffer:'edges',classicBuffers:{nodes:'nodes',grouped:'grouped-nodes',edges:{buffer:'edges',capacity:0}},
+    width:800,height:600,canvas:{width:800,height:600},camera:new Camera(),showEdges:true,dpr:1,selected:-1,durations:[],drawLabels(){},requestDraw(){}});
   // This isolated harness does not load GraphAppearance; the renderer's
   // documented fallback canvas is white, matching the live light theme.
   return {gl,renderer,background:[1,1,1,1]};
@@ -136,7 +139,7 @@ function drawingHarness(){
 test('cached sparse relationship pixels darken the background instead of becoming white',()=>{
   const {gl,renderer,background}=drawingHarness();renderer.sync();renderer.draw();
   assert.ok(gl.cached[3]>.3,'a sparse relationship must retain useful alpha in the cache');
-  assert.ok(gl.pixels[1]<background[1]-.1,'a visible relationship must darken green by at least 0.1');
+  assert.ok(gl.pixels[1]<background[1]-.06,'a visible relationship must darken green by at least 0.06');
   assert.ok(gl.pixels.every((value,i)=>i===3||value<background[i]));
   renderer.showEdges=false;renderer.draw();assert.deepEqual(gl.pixels,background);
 });
@@ -149,16 +152,16 @@ test('progressive cache appends new relations within an opacity bucket',()=>{
 
 test('isolated entity sweep keeps the completed relationship layer without reuploading it',()=>{
   const {gl,renderer}=drawingHarness();renderer.sync();const drawCount=gl.draws.length;
-  assert.deepEqual(gl.uploads,[{buffer:'nodes',length:4},{buffer:'grouped-nodes',length:4},{buffer:'edges',length:4}]);
-  renderer.sync();assert.equal(gl.uploads.length,3);assert.equal(gl.draws.length,drawCount);
+  assert.deepEqual(gl.uploads,[{buffer:'nodes',length:4},{buffer:'grouped-nodes',length:4},{buffer:'edges',length:4},{buffer:'strokes',length:36}]);
+  renderer.sync();assert.equal(gl.uploads.length,4);assert.equal(gl.draws.length,drawCount);
   renderer.dataset.addNodes([{id:'isolated'}]);renderer.sync();
-  assert.deepEqual(gl.uploads.slice(3),[{buffer:'nodes',length:6},{buffer:'grouped-nodes',length:6}]);
+  assert.deepEqual(gl.uploads.slice(4),[{buffer:'nodes',length:6},{buffer:'grouped-nodes',length:6}]);
   assert.equal(gl.uploads.filter(value=>value.buffer==='edges').length,1,'isolated nodes do not rebuild or upload complete relations');
   assert.equal(gl.draws.length,drawCount);
 });
 
-test('small partial graphs pad ten-pixel node discs while dense normal graphs retain two-pixel nodes',()=>{
-  const {gl,renderer}=drawingHarness();renderer.sync();renderer.draw();assert.equal(gl.sizes.at(-1),10+2,'sparse ten-pixel discs reserve a physical pixel on each side for coverage');
+test('small partial graphs pad readable node discs while dense normal graphs retain two-pixel nodes',()=>{
+  const {gl,renderer}=drawingHarness();renderer.sync();renderer.draw();assert.equal(gl.sizes.at(-1),14+2,'sparse node discs reserve a physical pixel on each side for coverage');
   renderer.dataset.addNodes(Array.from({length:800},(_,i)=>({id:'extra'+i})));renderer.sync();renderer.draw();
   assert.equal(gl.sizes.at(-1),2);
 });

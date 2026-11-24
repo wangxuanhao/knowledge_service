@@ -95,7 +95,7 @@ SHELL = """<!doctype html><html><head><meta charset="utf-8"></head><body>
     if(options.method!=='GET')options.body=JSON.stringify(body||{});
     const response=await fetch(url,options);
     const payload=await response.json();
-    if(!response.ok)throw Object.assign(new Error(payload.error||payload.detail||'请求失败'),payload);
+    if(!response.ok)throw Object.assign(new Error(payload.error||payload.detail||'请求失败'),payload,{status:response.status});
     return payload;
   };
   // 真实页面里这个按钮的处理器在 workbench.js；台账在外面包了一层（先跑原处理器，再把结果卡片装饰一遍）。
@@ -120,6 +120,7 @@ MOCKS = r"""() => {
   window.apiLog = [];
   window.recordQueryBodies = [];
   window.undoCalls = [];
+  window.deleteCalls = [];
   window.historyRequests = 0;
   window.timelineRecord = {id:'timeline',kind:'entity',text:'当前仍可查看',type:'urn:ontology:文档标题',
     ontology_id:'o2-note',version:3,version_id:'revision-r3-aaaaaaaaaaaaaaaa-0003',recorded_at:'2026-03-01T09:00:00Z',
@@ -131,7 +132,7 @@ MOCKS = r"""() => {
     {id:'timeline',kind:'entity',text:'第二次修订',type:'urn:ontology:文档标题',ontology_id:'o1',
       version:2,version_id:'revision-r2-aaaaaaaaaaaaaaaa-0002',recorded_at:'2026-02-01T09:00:00Z',superseded_at:'2026-03-01T09:00:00Z',
       valid_from:null,valid_until:null,metadata:{_deleted:true},properties:{note:'历史删除态'}},
-    window.timelineRecord,
+    {...window.timelineRecord,manual_change:{actor:'知识维护员 (editor; user:editor)'}},
   ];
   const entity = (id,text,type,ontologyId,extra={}) => ({id,kind:'entity',text,type,ontology_id:ontologyId,
     version:1,recorded_at:'2026-10-01T10:00:00Z',valid_from:null,valid_until:null,properties:{},
@@ -160,6 +161,21 @@ MOCKS = r"""() => {
     {id:'assert-2',canonical_record_id:'e1',status:'accepted'},
     {id:'assert-3',canonical_record_id:'e3',status:'accepted'},
   ];
+  const mergeBefore = [
+    {id:'e4',kind:'entity',text:'标准价格',type:'urn:ontology:保证金',version:2,valid_until:'2026-06-17T02:56:00Z',
+      metadata:{aliases:['标准价'],source_file:'平台规则.md',applicability:{platforms:{mode:'specific',values:['抖音电商']}}}},
+    {id:'e5',kind:'entity',text:'参考价格',version:1,metadata:{}},
+    {id:'r2',kind:'relation',text:'属于价格体系',subject_id:'e5',object_id:'e7',version:5,metadata:{}},
+  ];
+  const mergeAfter = [
+    {...mergeBefore[0],version:3,metadata:{...mergeBefore[0].metadata,aliases:['标准价','参考价格'],_operation_id:'op1'}},
+    {...mergeBefore[1],version:2,metadata:{_deleted:true,merged_into:'e4',_operation_id:'op1'}},
+    {...mergeBefore[2],version:6,subject_id:'e4',metadata:{_operation_id:'op1'}},
+  ];
+  const mergeRow = (row,index) => window.sameNameMerge&&index<2?{
+    ...row,text:'违规儿童模特肖像',metadata:{...row.metadata,discovery_candidate_id:index?'original-retired':'original-kept'},
+  }:row;
+  const deleteBefore = [{id:'e6',kind:'entity',text:'旧价格',version:3,metadata:{}}];
   const original = window.fetch;
   window.fetch = async (input,options={}) => {
     const url = typeof input === 'string' ? input : input.url;
@@ -172,7 +188,7 @@ MOCKS = r"""() => {
       if(window.mockFailSide==='history') return new Response('{"error":"history boom"}',{status:500,headers:{'Content-Type':'application/json'}});
       return payload({versions:window.historyRevisions});
     }
-    if(parsed.pathname.endsWith('/records/page')) {
+    if(parsed.pathname.endsWith('/records/page')||parsed.pathname.endsWith('/records/counts')) {
       const body = JSON.parse(options.body||'{}');
       window.recordQueryBodies.push(body);
       let filtered = body.ontology_scope==='ids'
@@ -181,6 +197,8 @@ MOCKS = r"""() => {
           ? records.filter(row=>!row.ontology_id||!['o1','o2','o2-note'].includes(row.ontology_id))
           : records;
       filtered=filtered.filter(row=>(!body.record_ids?.length||body.record_ids.includes(row.id))&&(!body.kinds?.length||body.kinds.includes(row.kind))&&(!body.query||(row.id+' '+row.text).includes(body.query)));
+      if(parsed.pathname.endsWith('/records/counts'))return payload({counts:Object.fromEntries(
+        body.kinds.map(kind=>[kind,filtered.filter(row=>row.kind===kind).length]))});
       const offset=Number(body.cursor||0),limit=body.limit||50;
       return payload({total:filtered.length,records:filtered.slice(offset,offset+limit),next_cursor:offset+limit<filtered.length?String(offset+limit):null});
     }
@@ -212,9 +230,27 @@ MOCKS = r"""() => {
     if(parsed.pathname.endsWith('/operations')) return payload({operations:[
       // 故意把**旧的排在前面**：服务端回来的顺序按 id/写入顺序，不等于时间顺序（真机上就是这样）
       {id:'audit:op1',recorded_at:'2026-10-01T12:00:00Z',metadata:{operation:'merge',operation_id:'op1',
-        _audit:true,created_at:'2026-10-01T12:00:00Z',before:[{id:'e4'},{id:'e5'}]}},
+        _audit:true,created_at:'2026-10-01T12:00:00Z',before:mergeBefore.map(mergeRow)}},
       {id:'audit:op2',recorded_at:'2026-10-02T09:00:00Z',metadata:{operation:'delete',operation_id:'op2',
-        _audit:true,created_at:'2026-10-02T09:00:00Z',before:[{id:'e6'}]}}]});
+        _audit:true,created_at:'2026-10-02T09:00:00Z',before:deleteBefore}}]});
+    if(parsed.pathname.endsWith('/operations/op1')) {
+      if(window.noOperationDetailEndpoint) return new Response('{"detail":"Not Found"}',{status:404});
+      return payload({before:mergeBefore.map(mergeRow),redirects:{e5:'e4'},after:mergeAfter.map(mergeRow)});
+    }
+    const historyId=parsed.pathname.match(/\/records\/([^/]+)\/history$/)?.[1];
+    const mergeIndex=mergeBefore.findIndex(row=>row.id===historyId);
+    if(mergeIndex>=0) {
+      const after=mergeRow(mergeAfter[mergeIndex],mergeIndex);
+      return payload({versions:[mergeRow(mergeBefore[mergeIndex],mergeIndex),after,{...after,version:after.version+1,text:'后续编辑'}]});
+    }
+    if(parsed.pathname.endsWith('/assertions/original-kept/evidence')) return payload({assertion_id:'original-kept',
+      document:{title:'《实施细则》意见征集通知',source_content:'full_version'},source_location:{document_version_id:'source-kept'}});
+    if(parsed.pathname.endsWith('/assertions/original-retired/evidence')) return payload({assertion_id:'original-retired',
+      document:{title:'【已失效】旧规则解读',source_content:'full_version'},source_location:{document_version_id:'source-retired'}});
+    if(parsed.pathname.endsWith('/operations/op2')) {
+      if(window.mockFailSide==='operation-detail') return new Response('{"error":"读取超时"}',{status:500});
+      return payload({before:deleteBefore,after:[],redirects:{}});
+    }
     if(parsed.pathname.endsWith('/reclassify')) {
       if(window.mockFailSide==='reclassify') return new Response('{"error":"boom"}',{status:500,headers:{'Content-Type':'application/json'}});
       return payload({current_ontology_id:'o2-note',current_version:'本体 v2',stale_records:2,
@@ -224,6 +260,14 @@ MOCKS = r"""() => {
         ]});
     }
     if(parsed.pathname.endsWith('/operations/op1/undo')) { window.undoCalls.push('op1'); return payload({restored:2}); }
+    if(parsed.pathname.endsWith('/delete')) {
+      const request = JSON.parse(options.body);
+      window.deleteCalls.push(request);
+      const index = records.findIndex(row=>row.id===request.record_id&&row.version===request.expected_version);
+      if(index<0||window.mockFailSide==='delete') return new Response('{"detail":"版本冲突：请刷新记录"}',{status:409});
+      const removed = records.splice(index,1);
+      return payload({deleted:removed.length,records:removed});
+    }
     if(parsed.pathname.endsWith('/resolve')) return payload({status:'exact_duplicates',backend:'semantica+aliases',
       canonical:null,candidates:[{id:'e1',text:'价格说明',type:'urn:ontology:文档标题',version:1},
         {id:'e3',text:'价格说明',type:'urn:ontology:文档标题',version:1}]});
@@ -254,6 +298,7 @@ def page(ledger_browser):
     pg.add_style_tag(path=str(WEB / 'workspace.css'))
     pg.add_style_tag(path=str(WEB / 'library-workspace.css'))
     pg.add_style_tag(path=str(WEB / 'records-view.css'))
+    pg.add_script_tag(path=str(WEB / 'display-time.js'))
     pg.add_script_tag(path=str(WEB / 'workspace-drawers.js'))
     pg.add_script_tag(path=str(WEB / 'record-version-context.js'))
     pg.add_script_tag(path=str(WEB / 'record-attribute-editor.js'))
@@ -483,6 +528,9 @@ def test_revision_timeline_orders_immutable_revisions_and_resolves_ontology(revi
     assert '本体 v2（当前）' in items[0]
     assert '已删除' in items[1], '删除状态与“已取代”是两个独立维度，都要显示'
     assert '本体 v1（历史）' in items[1]
+    detail = revision_page.inner_text('#record-revision-detail')
+    assert '手动变更' in detail
+    assert '知识维护员 (editor; user:editor)' in detail
 
 
 def test_revision_timeline_old_selection_is_read_only(revision_page):
@@ -548,6 +596,82 @@ def test_undo_is_reachable_and_hits_the_undo_endpoint(page):
     page.wait_for_function("() => (window.__status?.message||'').includes('已撤销')", timeout=5000)
 
 
+@pytest.mark.parametrize(('kind', 'record_id', 'version'), [('entity', 'e1', 4), ('relation', 'r1', 2), ('attribute', 'a1', 1)])
+def test_ledger_deletes_the_selected_revision_and_refreshes(page, kind, record_id, version):
+    page.add_script_tag(path=str(WEB / 'knowledge-changes.js'))
+    page.evaluate('window.refreshKnowledgeGraph = detail => { window.graphChange = detail; }')
+    select_view(page, kind)
+    row = page.locator(f'[data-record-id="{record_id}"]')
+    row.get_by_role('button', name='删除', exact=True).click()
+    confirmation = page.get_by_role('dialog', name='删除', exact=False)
+    confirmation.wait_for()
+    assert page.evaluate('window.deleteCalls') == []
+    confirmation.get_by_role('button', name='确认删除', exact=True).click()
+    page.wait_for_function("window.__status?.message.includes('可撤销的操作')")
+    assert not confirmation.is_visible()
+    assert row.count() == 0
+    assert page.evaluate('window.deleteCalls') == [{'record_id': record_id, 'expected_version': version}]
+    assert page.evaluate('window.graphChange.kind') == 'delete'
+
+
+def test_ledger_delete_can_be_cancelled_and_requires_a_current_admin_scope(page):
+    row = page.locator('[data-record-id="e1"]')
+    remove = row.get_by_role('button', name='删除', exact=True)
+    remove.click()
+    confirmation = page.get_by_role('dialog', name='删除实体？')
+    assert '价格说明' in confirmation.inner_text()
+    assert '关联关系和属性' in confirmation.inner_text()
+    assert '可撤销的操作' in confirmation.inner_text()
+    cancel = confirmation.get_by_role('button', name='取消', exact=True)
+    assert cancel.evaluate('button => document.activeElement === button')
+    cancel.click()
+    assert not confirmation.is_visible()
+    assert remove.evaluate('button => document.activeElement === button')
+    remove.click()
+    page.keyboard.press('Escape')
+    assert not confirmation.is_visible()
+    assert page.evaluate('window.deleteCalls') == []
+    page.evaluate("window.scope = () => ({known_at: '2026-09-01T00:00:00Z'})")
+    page.click('#load-records')
+    row.wait_for()
+    assert row.get_by_role('button', name='删除', exact=True).count() == 0
+    page.evaluate('window.scope = () => ({}); window.Auth.isAdmin = () => false;')
+    page.click('#load-records')
+    row.wait_for()
+    assert row.get_by_role('button', name='删除', exact=True).count() == 0
+    page.evaluate('window.Auth.isAdmin = () => true')
+    select_view(page, 'chunk')
+    page.locator('[data-record-id="c1"]').wait_for()
+    assert page.locator('[data-record-id="c1"]').get_by_role('button', name='删除', exact=True).count() == 0
+
+
+def test_ledger_delete_keeps_the_row_on_revision_conflict(page):
+    page.evaluate("window.mockFailSide = 'delete'")
+    remove = page.locator('[data-record-id="e1"]').get_by_role('button', name='删除', exact=True)
+    remove.click()
+    confirmation = page.get_by_role('dialog', name='删除实体？')
+    confirm = confirmation.get_by_role('button', name='确认删除', exact=True)
+    confirm.click()
+    feedback = confirmation.get_by_role('alert')
+    feedback.wait_for()
+    assert '版本冲突' in feedback.inner_text()
+    assert confirm.is_enabled()
+    confirmation.get_by_role('button', name='取消', exact=True).click()
+    assert remove.is_enabled()
+
+
+def test_ledger_delete_rechecks_scope_after_opening_confirmation(page):
+    page.set_viewport_size({'width': 320, 'height': 800})
+    page.locator('[data-record-id="e1"]').get_by_role('button', name='删除', exact=True).click()
+    confirmation = page.get_by_role('dialog', name='删除实体？')
+    box = confirmation.bounding_box()
+    assert box and box['x'] >= 0 and box['x'] + box['width'] <= 320
+    page.evaluate("window.scope = () => ({known_at: '2026-09-01T00:00:00Z'})")
+    confirmation.get_by_role('button', name='确认删除', exact=True).click()
+    assert '范围' in confirmation.get_by_role('alert').inner_text()
+    assert page.evaluate('window.deleteCalls') == []
+
+
 def test_ledger_tools_open_on_demand_and_return_to_the_same_list(page):
     assert not page.locator('#ledger-operations').is_visible()
     assert not page.locator('#resolve-text').is_visible()
@@ -591,6 +715,7 @@ def test_review_drawer_keeps_ledger_open_at_mobile_width(page):
     drawer = page.get_by_role('dialog', name='知识审核')
     drawer.wait_for()
     page.wait_for_function("document.getElementById('review-view-facts').textContent === '待审核事实 0'")
+    assert drawer.locator('.entity-review-card').count() == 0
     assert page.locator('#tab-records').is_visible()
     assert page.inner_text('#title') == '知识台账'
     assert abs(drawer.bounding_box()['width'] - 390) <= 1
@@ -599,6 +724,32 @@ def test_review_drawer_keeps_ledger_open_at_mobile_width(page):
     assert page.locator('[data-ledger-view="relation"]').get_attribute('aria-selected') == 'true'
     assert page.evaluate('window.reviewReads') == 1
     assert not page._errors
+
+
+def test_review_drawer_lists_conflicts_compactly_and_loads_more(page):
+    page.evaluate("""() => {
+      window.bind = () => {};
+      window.api = async (url, body) => {
+        if (url.endsWith('/reviews')) return {reviews: []};
+        if (url.endsWith('/ontology')) return {id: 'o1'};
+        if (url.endsWith('/health')) return {capabilities: ['typed_reviews']};
+        if (url.endsWith('/attribute-conflicts')) {
+          return {conflict_sets: [{id: body.cursor || 'first', entity_id: body.cursor ? 'e2' : 'e1',
+            predicate: '重量', members: [{}, {}], version: 1}], next_cursor: body.cursor ? null : 'second'};
+        }
+        throw Error(url);
+      };
+    }""")
+    page.add_script_tag(path=str(WEB / 'task-review.js'))
+    page.click('#ledger-open-reviews')
+    drawer = page.get_by_role('dialog', name='知识审核')
+    drawer.get_by_role('heading', name='属性冲突集合', exact=True).wait_for()
+    assert drawer.locator('.entity-review-card').count() == 0
+    assert drawer.get_by_role('button', name='处理属性冲突集合').count() == 1
+    more = drawer.get_by_role('button', name='更多属性冲突集合')
+    more.click()
+    assert drawer.get_by_role('button', name='处理属性冲突集合').count() == 2
+    assert not more.is_visible()
 
 
 def test_operations_list_is_newest_first_and_says_how_many(page):
@@ -615,8 +766,67 @@ def test_operations_list_is_newest_first_and_says_how_many(page):
     assert '共 2 条' in page.inner_text('.ledger-operations-head'), page.inner_text('.ledger-operations-head')
 
 
+@pytest.mark.parametrize('legacy_server', [False, True])
+def test_operations_show_merge_direction_and_exact_changes_on_demand(page, legacy_server):
+    page.add_script_tag(path=str(WEB / 'ingest-mode.js'))
+    page.evaluate('legacy => { window.noOperationDetailEndpoint = legacy; }', legacy_server)
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.click('#ledger-open-operations')
+    operation = page.locator('.ledger-operation').filter(has_text='合并实体')
+    expand = operation.get_by_role('button', name='查看详情', exact=True)
+    assert 'GET /api/projects/p1/operations/op1' not in page.evaluate('window.apiLog')
+    expand.click()
+    operation.get_by_text('操作前 → 操作后', exact=True).wait_for()
+    detail = operation.locator('.ledger-operation-details')
+    text = detail.inner_text()
+    assert '合并后继续使用「标准价格」' in text and '停用 1 条重复记录（参考价格）' in text
+    assert all(value in text for value in ['保证金', '抖音电商', '2026年06月17日', '平台规则.md', '转接 1 条关系'])
+    assert all(value in text for value in ['r5 → r6', '起点', '已停用', '别名'])
+    assert '后续编辑' not in text
+    assert detail.evaluate('(el) => el.scrollWidth <= el.clientWidth + 1')
+    operation.get_by_role('button', name='收起详情', exact=True).click()
+    assert not detail.is_visible()
+    expand.click()
+    assert detail.is_visible()
+    assert page.evaluate('window.apiLog').count('GET /api/projects/p1/operations/op1') == 1
+    assert ('GET /api/projects/p1/records/r2/history' in page.evaluate('window.apiLog')) == legacy_server
+    assert page.evaluate('window.undoCalls') == []
+
+
+def test_operations_retry_details_and_show_legacy_before_snapshot(page):
+    page.evaluate("window.mockFailSide = 'operation-detail'")
+    page.click('#ledger-open-operations')
+    operation = page.locator('.ledger-operation').filter(has_text='软删除')
+    operation.get_by_role('button', name='查看详情', exact=True).click()
+    operation.get_by_text('读取超时', exact=False).wait_for()
+    page.evaluate('window.mockFailSide = null')
+    operation.get_by_role('button', name='重试读取详情').click()
+    operation.get_by_text('旧价格', exact=True).wait_for()
+    assert '操作后快照未保存' in operation.inner_text()
+
+
+def test_same_name_operation_shows_each_original_source_under_its_role(page):
+    page.evaluate('''() => {
+      window.sameNameMerge=true;window.noOperationDetailEndpoint=true;
+      window.SourceReader={open:options=>{window.openedSource=options;}};
+    }''')
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.click('#ledger-open-operations')
+    operation = page.locator('.ledger-operation').filter(has_text='合并实体')
+    operation.get_by_role('button', name='查看详情', exact=True).click()
+    operation.get_by_text('合并了 2 条同名记录「违规儿童模特肖像」', exact=True).wait_for()
+    continued = operation.get_by_role('listitem').filter(has_text='合并后继续使用')
+    retired = operation.get_by_role('listitem').filter(has_text='停用的重复记录')
+    continued.get_by_text('《实施细则》意见征集通知', exact=True).wait_for()
+    retired.get_by_text('【已失效】旧规则解读', exact=True).wait_for()
+    retired.get_by_role('button', name='查看原文', exact=True).click()
+    assert page.evaluate('window.openedSource.versionId') == 'source-retired'
+    assert page.evaluate('window.undoCalls') == []
+
+
 def test_duplicate_lookup_in_the_drawer_shows_selectable_cards(page):
     page.click('#ledger-open-governance')
+    page.click('#ledger-manual-merge')
     page.click('#ledger-find-duplicates')
     page.wait_for_function("document.getElementById('ledger-duplicate-feedback').textContent.includes('找到 1 组')")
     page.wait_for_selector('#resolve-result .candidate [data-keep]', timeout=5000)
@@ -628,14 +838,62 @@ def test_duplicate_lookup_in_the_drawer_shows_selectable_cards(page):
     assert keep and drop and keep != drop, (keep, drop)
 
 
+def test_duplicate_scan_controls_align_in_the_drawer(page, tmp_path):
+    page.add_style_tag(path=str(WEB / 'theme.css'))
+    page.add_style_tag(path=str(WEB / 'entity-governance.css'))
+    page.add_script_tag(path=str(WEB / 'entity-governance.js'))
+    page.evaluate('''() => {
+      const api = window.api;
+      window.api = (path, ...args) => {
+        if (path.endsWith('/duplicates/scan')) return Promise.resolve({groups: [], next_cursor: 'next'});
+        if (path.endsWith('/resolution-reviews')) return Promise.resolve({reviews: []});
+        return api(path, ...args);
+      };
+    }''')
+    page.click('#ledger-open-governance')
+    drawer = page.locator('#ledger-governance-drawer')
+    scanner = drawer.locator('.duplicate-scanner')
+    scan = scanner.get_by_role('button', name='扫描已有重复实体', exact=True)
+    more = scanner.get_by_role('button', name='继续扫描')
+    width_before = scan.bounding_box()['width']
+    scan.click()
+    more.wait_for()
+    assert scan.bounding_box()['width'] == pytest.approx(width_before, abs=1)
+
+    for width in (1560, 360):
+        page.set_viewport_size({'width': width, 'height': 900})
+        modes = [drawer.locator(f'#{key}').bounding_box() for key in ('ledger-open-resolution', 'ledger-manual-merge')]
+        actions = [control.bounding_box() for control in (scan, more)]
+        scope = scanner.locator('#duplicate-scan-scope').bounding_box()
+        for left, right in (modes, actions):
+            assert left['width'] == pytest.approx(right['width'], abs=1)
+            assert left['y'] == pytest.approx(right['y'], abs=1)
+        assert all(box['height'] == pytest.approx(scope['height'], abs=1) for box in [*modes, *actions])
+        assert scope['x'] + scope['width'] == pytest.approx(actions[1]['x'] + actions[1]['width'], abs=1)
+        assert actions[1]['x'] + actions[1]['width'] <= width
+        scanner.locator('#duplicate-scan-scope').select_option('related')
+        assert scan.is_disabled()
+        assert scanner.get_by_role('searchbox', name='文档关键词').is_visible()
+        scanner.locator('#duplicate-scan-scope').select_option('all')
+        scan.click()
+        more.wait_for()
+    drawer.screenshot(path=str(tmp_path / 'duplicate-scan-controls.png'))
+
+
 def test_merge_preview_states_the_impact_before_confirming(page):
     """合并是不可逆动作：确认之前必须看到影响面，且口径写清楚是按哪些记录统计的。"""
     page.click('#ledger-open-governance')
+    page.click('#ledger-manual-merge')
     page.click('#resolve-entity')
     page.wait_for_selector('#resolve-result [data-keep]', timeout=5000)
     cards = page.locator('#resolve-result .candidate')
     cards.nth(0).locator('[data-keep]').click()               # e1 保留
+    prompt = page.locator('.governance-merge-preview')
+    heading = prompt.locator('b').bounding_box()
+    instruction = prompt.locator('span').bounding_box()
+    assert heading['width'] >= 105 and heading['y'] + heading['height'] <= instruction['y'] + 1
     cards.nth(1).locator('[data-drop]').click()               # e3 合并
+    assert prompt.locator('small').bounding_box()['width'] >= prompt.bounding_box()['width'] - 30
     preview = page.inner_text('.governance-merge-preview')
     assert '影响面' in preview and '条关系' in preview
     assert '关联断言' in preview and '原文断言' not in preview
@@ -651,9 +909,68 @@ def test_ledger_never_blanks_the_table_when_a_side_request_fails(page):
     page.click('#load-records')
     page.wait_for_function("() => document.getElementById('records').getAttribute('aria-busy')==='false'")
     page.click('#ledger-open-governance')
+    page.click('#ledger-manual-merge')
     page.click('#ledger-find-duplicates')
     page.wait_for_function("document.getElementById('ledger-duplicate-feedback').textContent.includes('治理信息读取失败')")
     assert page.query_selector_all('.record-library tbody tr'), '分组接口挂了，表格也不能消失'
+    assert not page._errors
+
+
+def test_ledger_updates_enrichment_without_replacing_focused_links_or_open_details(page):
+    select_view(page, 'relation')
+    page.evaluate("""() => {
+      const fetch = window.fetch;
+      const gate = new Promise(resolve => { window.releaseLedgerDetails = resolve; });
+      window.fetch = async (url, options) => {
+        const body = JSON.parse(options?.body || '{}');
+        if (/\\/ontologies|\\/assertions\\/batch/.test(url) || body.include_total === false) {
+          await gate;
+        }
+        const response = await fetch(url, options);
+        if (!url.endsWith('/records/page') || body.kinds?.[0] !== 'relation') return response;
+        const result = await response.json();
+        const row = result.records[0];
+        result.records = [row, ...Array.from({length: 49}, (_, index) => ({...row, id: 'extra-' + index}))];
+        result.total = 50;
+        return new Response(JSON.stringify(result), {headers: {'Content-Type': 'application/json'}});
+      };
+    }""")
+    page.click('#load-records')
+    row = page.locator('tr[data-record-id="r1"]')
+    row.wait_for()
+    assert '本体归属读取中' in row.locator('td').nth(2).inner_text()
+    assert '读取中' in row.locator('td').nth(4).inner_text()
+    page.evaluate("""() => {
+      const row = document.querySelector('tr[data-record-id="r1"]');
+      const detail = [...row.querySelectorAll('details')].find(item => item.textContent.includes('原文上下文'));
+      detail.open = true;
+      const link = row.querySelector('[data-ledger-entity="e1"]');
+      link.focus();
+      const rows = [...document.querySelectorAll('#records tbody tr')];
+      window.ledgerBeforeEnrichment = {rows, detail, link};
+      const start = performance.now();
+      const records = document.getElementById('records');
+      const observer = new MutationObserver(() => {
+        if (records.getAttribute('aria-busy') !== 'false') return;
+        observer.disconnect();
+        window.ledgerEnrichmentMs = performance.now() - start;
+      });
+      observer.observe(records, {attributes: true, attributeFilter: ['aria-busy']});
+      window.releaseLedgerDetails();
+    }""")
+    page.wait_for_function("document.querySelector('#records').getAttribute('aria-busy') === 'false'")
+    assert '本体 v1' in row.locator('td').nth(2).inner_text()
+    assert row.locator('td').nth(4).locator('b').inner_text() == '0'
+    assert row.locator('[data-ledger-entity="e1"]').inner_text() == '价格说明'
+    metrics = page.evaluate("""() => {
+      const {rows, detail, link} = window.ledgerBeforeEnrichment;
+      return {rows: rows.length, removed: rows.filter(row => !row.isConnected).length,
+        open: detail.isConnected && detail.open, focused: document.activeElement === link,
+        elapsed_ms: window.ledgerEnrichmentMs};
+    }""")
+    print('Ledger enrichment:', metrics)
+    assert metrics['rows'] == 50 and metrics['removed'] == 0
+    assert metrics['open'] and metrics['focused']
     assert not page._errors
 
 

@@ -447,22 +447,7 @@
         browse.anchor ? '该实体在此范围内没有已收录的社区。' :
         sparse ? '当前范围的正式关系尚未形成可展示的社区。' : '没有符合条件的社区。','community-empty'));
     }
-    if (result.status?.state === 'disabled' && window.Auth?.isAdmin?.()) {
-      host.append(action('前往社区索引',() => {
-        const range = browse.override || currentScope('search');
-        if (range?.kind === 'platform') {
-          get('community-build-kind').value = 'platform';
-          get('community-build-platform').value = range.platform;
-          get('community-build-platform-row').hidden = false;
-          loadPlatforms();
-        } else {
-          get('community-build-kind').value = 'project';
-          get('community-build-platform-row').hidden = true;
-        }
-        window.KnowledgeTabs?.open('runtime');
-        window.RuntimeView?.show('communities');
-      }));
-    } else if (result.status?.browseable === false) {
+    if (result.status?.browseable === false && result.status.state !== 'disabled') {
       host.append(action('刷新社区',loadBrowse));
     }
     if (browse.offset || browse.offset + 24 < result.total) {
@@ -480,6 +465,10 @@
     const id = project.value, view = browse, ticket = ++view.request;
     const notice = get('community-browse-status');
     const range = appliedRange(view,'search',get('community-browse-range'),get('community-browse-all'));
+    get('community-browse-scope').hidden = range?.kind === 'project' && !view.override;
+    const askButton = get('community-browse-ask'), buildButton = get('community-browse-build');
+    askButton.hidden = buildButton.hidden = true;
+    browser.removeAttribute('data-index-missing');
     const host = get('community-results');
     const entry = view.trail.at(-1);
     const path = get('community-browse-path'), trail = get('community-trail');
@@ -507,7 +496,14 @@
       get('community-browse-back').textContent = view.trail.length > 1 ? '返回上一级' : '返回社区列表';
       trail.hidden = view.trail.length < 2;
       trail.textContent = view.trail.slice(0,-1).map(item => item.title).join(' / ');
-      showStatus(notice,data.status);
+      const state = stateOf(data.status);
+      const missingIndex = state === 'disabled';
+      askButton.hidden = Boolean(entry) || !data.status?.browseable;
+      buildButton.hidden = !missingIndex || !window.Auth?.isAdmin?.();
+      browser.toggleAttribute('data-index-missing',missingIndex);
+      if (missingIndex) note(notice,'当前范围尚未构建社区索引');
+      else if (!entry && state === 'ready') note(notice,'');
+      else showStatus(notice,data.status);
       const heading = entry ? renderDetail(data.community || data,range,id) : renderBrowseList(data);
       if (focusResult) (heading || get('query')).focus();
     } catch (error) {
@@ -898,6 +894,21 @@
   qa.querySelectorAll('[data-community-view]').forEach(button => {
     button.addEventListener('click',() => showQuestionView(button.dataset.communityView));
   });
+  const stateIcon = window.WorkspaceIcons?.create('network');
+  if (stateIcon) get('community-browse-state-icon').append(stateIcon);
+  window.WorkspaceIcons?.decorate(get('community-browse-ask'),'chat');
+  get('community-browse-build').onclick = () => {
+    const range = browse.override || currentScope('search');
+    const platform = range?.kind === 'platform';
+    get('community-build-kind').value = platform ? 'platform' : 'project';
+    get('community-build-platform-row').hidden = !platform;
+    if (platform) {
+      get('community-build-platform').value = range.platform;
+      loadPlatforms();
+    }
+    window.KnowledgeTabs?.open('runtime');
+    window.RuntimeView?.show('communities');
+  };
   get('community-browse-ask').onclick = () => {
     window.KnowledgeTabs?.open('qa');
     showQuestionView('questions');

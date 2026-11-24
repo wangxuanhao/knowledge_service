@@ -36,6 +36,57 @@ def _within(inner, outer):
             and inner['y'] + inner['height'] <= outer['y'] + outer['height'] + 1)
 
 
+def test_project_switch_uses_shared_notice_and_keeps_heading_in_sync(redesign_page):
+    import re
+
+    page, errors = redesign_page
+    projects = [{'id': 'p', 'name': '首个项目'}, {'id': 'q', 'name': 'all_test_1123'}]
+    page.route(re.compile(r'/api/projects(?:\?.*)?$'),
+               lambda route: route.fulfill(json={'projects': projects}))
+    page.evaluate("sessionStorage.setItem('knowledge-project', 'q')")
+    page.reload(wait_until='domcontentloaded')
+    page.wait_for_function("current === 'q'")
+    _open(page, 1912, 914)
+    label = page.locator('#graph-workspace-header .retrieval-project-name')
+    assert label.inner_text() == 'all_test_1123'
+    assert '项目已切换' not in page.locator('#status').text_content()
+    for width in (390, 320):
+        page.set_viewport_size({'width': width, 'height': 844})
+        assert label.evaluate('el => el.clientWidth === el.scrollWidth')
+        assert _within(label.bounding_box(), _bounds(page, '#graph-workspace-header'))
+
+    page.emulate_media(reduced_motion='reduce')
+    notice = page.locator('#status .ks-notice')
+    for width in (390, 1440):
+        page.set_viewport_size({'width': width, 'height': 844})
+        positions = []
+        for tab, target, name in [('search', 'p', '首个项目'), ('qa', 'q', 'all_test_1123'),
+                                  ('records', 'p', '首个项目')]:
+            page.evaluate("name => KnowledgeTabs.open(name)", tab)
+            page.select_option('#project', target)
+            assert notice.locator('.ks-notice__text').inner_text() == '项目已切换：' + name
+            assert label.text_content() == name
+            box = notice.bounding_box()
+            positions.append((round(box['x'] + box['width']), round(box['y'])))
+            assert box['y'] < 100
+            if width == 390:
+                selector = page.locator('#project').bounding_box()
+                assert box['y'] >= selector['y'] + selector['height']
+            notice.get_by_role('button', name='关闭这条提示').click()
+            assert notice.count() == 0
+        assert len(set(positions)) == 1
+        page.select_option('#project', 'q')
+    page.evaluate("KnowledgeTabs.open('search')")
+    page.select_option('#project', 'p')
+    assert label.inner_text() == '首个项目'
+    projects[0]['name'] = '改名后的项目'
+    page.evaluate('projects()')
+    assert label.inner_text() == '改名后的项目'
+    page.select_option('#project', '')
+    assert label.is_hidden()
+    assert not errors
+
+
 def test_unified_header_owns_existing_query_and_unique_page_scope(redesign_page):
     page, errors = redesign_page
     page.route('**/applicability-values', lambda route: route.fulfill(json=dict(platforms=['布局平台'])))
@@ -91,6 +142,30 @@ def test_desktop_detail_uses_one_fixed_pane_without_losing_canvas_height(redesig
     closed = _bounds(page, '#graph-canvas')
     assert closed['width'] > after['width'] + 290
     assert abs(closed['height'] - before['height']) <= 1
+    assert errors == []
+
+
+@pytest.mark.parametrize('width', [320, 390])
+def test_mobile_full_graph_locate_controls_share_one_visible_row(redesign_page, width):
+    page, errors = redesign_page
+    _open(page, width, 844)
+    page.click('[data-fg-mode="full"]')
+    page.evaluate('() => GraphWorkspaceLayout.settled()')
+    toolbar = _bounds(page, '.full-graph-toolbar')
+    canvas = _bounds(page, '.full-graph-host')
+    field = page.locator('[data-fg="query"]')
+    assert field.bounding_box()['width'] >= 62
+    for selector in ['[data-fg="query"]', '[data-fg="locate"]', '.full-graph-options > summary', '#graph-neighbors']:
+        control = page.locator(selector)
+        rect = control.bounding_box()
+        assert _within(rect, toolbar), (selector, rect, toolbar)
+        assert rect['y'] + rect['height'] <= canvas['y'] + 1
+        assert control.evaluate('''el => {
+          const b = el.getBoundingClientRect();
+          return el.contains(document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2));
+        }'''), selector
+    field.fill('示例实体')
+    assert field.input_value() == '示例实体'
     assert errors == []
 
 

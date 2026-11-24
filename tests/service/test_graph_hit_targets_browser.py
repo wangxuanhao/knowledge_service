@@ -128,7 +128,11 @@ def test_full_graph_real_pointer_uses_css_tolerance_across_zoom_and_drag(dpr):
             for scale in [.25, 1, 4]:
                 page.evaluate('(scale)=>{renderer.camera.scale=scale;renderer.draw();}', scale)
                 box = page.locator('.fg-gl').bounding_box()
-                point = page.evaluate('()=>renderer.camera.worldToScreen(0,0,renderer.width,renderer.height)')
+                point = page.evaluate('''()=>{
+                  const {camera,width,height}=renderer, center=camera.worldToScreen(0,0,width,height);
+                  center[1]-=Math.min(.4*.1*camera.unit(width,height),40)/2;
+                  return center;
+                }''')
                 page.mouse.click(box['x']+point[0], box['y']+point[1]+9)
                 assert page.evaluate('()=>targetSelections.at(-1)') == 'ab'
                 point = page.evaluate('()=>renderer.camera.worldToScreen(-.2,0,renderer.width,renderer.height)')

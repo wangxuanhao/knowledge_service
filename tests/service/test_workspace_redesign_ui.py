@@ -143,6 +143,7 @@ def test_mindmap_cards_keep_text_inside_and_support_pointer_folding(redesign_pag
         }''')
         canvas=page.locator('#mindmap-canvas').bounding_box()
         page.mouse.click(canvas['x']+center['x'],canvas['y']+center['y'])
+        page.get_by_role('button',name='关闭实体属性').click()
     click_branch()
     page.wait_for_function('() => document.getElementById("mindmap-summary").textContent.includes("3 / 4")')
     page.wait_for_function('() => wb.tree.getZr().animation.isFinished()')
@@ -224,6 +225,40 @@ def test_ontology_expansion_button_uses_existing_checkbox_state(redesign_page):
     checkbox.evaluate('(el)=>{el.checked=true;el.dispatchEvent(new Event("change",{bubbles:true}));}')
     assert toggle.get_attribute('aria-pressed')=='true'
     assert errors==[]
+
+
+def test_mobile_management_keeps_results_and_actions_in_view(redesign_page):
+    page, errors = redesign_page
+    page.set_viewport_size({'width': 390, 'height': 844})
+    page.evaluate("KnowledgeTabs.open('projects')")
+    search = page.locator('#projects-find')
+    create = page.locator('#new-project')
+    assert abs(search.bounding_box()['y'] - create.bounding_box()['y']) < 3
+    search.fill('找不到的项目')
+    assert page.locator('#projects-no-matches').is_visible()
+    assert page.locator('#projects-visible-count').inner_text() == '0 / 1'
+    assert page.locator('.project-card').is_hidden()
+    search.fill('')
+    assert page.locator('.project-card').is_visible()
+
+    page.route('**/api/users', lambda route: route.fulfill(json={'items': [
+        {'id': 'reader', 'username': 'reviewer', 'display_name': '审阅员',
+         'role': 'viewer', 'is_active': True}
+    ]}))
+    page.evaluate("KnowledgeTabs.open('useradmin')")
+    row = page.locator('[data-ua-rows] tr', has_text='审阅员')
+    row.wait_for()
+    for cell in row.locator('td').all():
+        box = cell.bounding_box()
+        assert 0 <= box['x'] < box['x'] + box['width'] <= 390
+    page.evaluate("KnowledgeTabs.open('quality')")
+    run = page.locator('#run-evaluation')
+    assert 0 <= run.bounding_box()['y'] < 600
+    guide = page.locator('.eval-input-guide')
+    assert guide.get_attribute('open') is None
+    guide.locator('summary').click()
+    assert page.locator('#gold-json-format').is_visible()
+    assert not errors
 
 
 def test_local_graph_uses_canonical_type_colors_and_keeps_names(redesign_page):
@@ -940,6 +975,57 @@ def test_library_is_list_first_and_details_are_docked_and_closed_with_focus(rede
     assert errors==[]
 
 
+def test_duplicate_review_opens_in_batch_and_source_shortcut_preserves_document_version(redesign_page):
+    page, errors = redesign_page
+    doc = dict(id='d', kind='document', version=3, version_id='document-v3', text='平台规则正文',
+               metadata={'title':'平台规则', 'status':'completed'})
+    members = [dict(id=f'entity-{index}', type='平台', text='小红书平台', version=1,
+                    version_id=f'entity-version-{index}', valid_from=f'2026-0{index}-01',
+                    metadata={'aliases':['小红书']}) for index in (1, 2)]
+    group = dict(key='same-platform', name='小红书平台', type='平台', members=members, member_count=2)
+    page.route('**/sources?**', lambda route: route.fulfill(json={'documents':[doc], 'total':1}))
+    page.route('**/records/d', lambda route: route.fulfill(json=doc))
+    page.route('**/duplicates/scan', lambda route: route.fulfill(json={'groups':[group], 'next_cursor':None}))
+    page.route('**/duplicates/preview-batch', lambda route: route.fulfill(json={'results':[
+        dict(**group, status='ready', keep_id='entity-1', preview_fingerprint='a'*64,
+             affected_records={'relations':1, 'attributes':0}, attribute_conflicts=[]),
+    ]}))
+
+    page.click('[data-tab="records"]')
+    page.click('#ledger-open-governance')
+    drawer = page.locator('#ledger-governance-drawer')
+    assert drawer.locator('#ledger-open-resolution').get_attribute('aria-pressed') == 'true'
+    drawer.get_by_role('button', name='关闭 ×').click()
+    page.click('[data-tab="sources"]')
+    page.locator('#source-list .source-item').first.click()
+    page.locator('#source-detail-drawer').get_by_role('button', name='查重本文件').click()
+
+    assert drawer.is_visible()
+    assert not page.locator('#source-detail-drawer').is_visible()
+    assert page.locator('#tab-records').is_visible()
+    picker = drawer.locator('#duplicate-scan-scope')
+    picker.wait_for()
+    assert picker.input_value() == 'within'
+    assert '平台规则' in drawer.locator('.duplicate-document-selection').inner_text()
+    with page.expect_request(lambda request: request.url.endswith('/duplicates/scan')) as scan:
+        drawer.get_by_role('button', name='扫描已有重复实体', exact=True).click()
+    payload = scan.value.post_data_json
+    assert {k:payload[k] for k in ('document_id','document_version_id','document_mode')} == {
+        'document_id':'d', 'document_version_id':'document-v3', 'document_mode':'within',
+    }
+    drawer.get_by_role('button', name='勾选前 20 组待预览').click()
+    with page.expect_request(lambda request: request.url.endswith('/duplicates/preview-batch')) as preview:
+        drawer.locator('#duplicate-preview-batch').click()
+    assert preview.value.post_data_json == {'keys':['same-platform']}
+    comparison = drawer.locator('.duplicate-comparison')
+    comparison.wait_for()
+    assert comparison.get_by_text('业务有效期', exact=True).count() == 2
+    drawer.locator('#duplicate-diff-only').check()
+    assert comparison.get_by_text('业务有效期', exact=True).count() == 2
+    assert comparison.get_by_text('别名', exact=True).count() == 0
+    assert not errors
+
+
 # 旧版三步上传面板（#doc-file / [data-upload-step] / #doc-retry-files）已由 PreparationView
 # 四步流程取代（panel.hidden=true 后不可交互）。三个旧 UI 测试自那时起必然失败，已删除：
 #   - 步骤间保留输入、项目切换清空 → 新流程的会话草稿机制，见 test_preparation_ui.py
@@ -972,3 +1058,75 @@ def test_direct_project_switch_hides_completed_batch_cards(redesign_page):
     page.evaluate("()=>{const s=document.getElementById('project');s.add(new Option('第二项目','q'));s.value='q';s.onchange();LibraryWorkspace.open('batches');}")
     assert not card.is_visible()
     assert errors==[]
+
+
+def test_ontology_canvas_and_directory_resize_with_window(redesign_page):
+    page, errors = redesign_page
+    classes = [{'id': f'urn:class:{i}', 'label_zh': f'类型 {i}'} for i in range(72)]
+    ontology = {'id': 'published', 'version': 2, 'summary': {'classes': classes, 'relations': [], 'attributes': []}}
+    page.route('**/api/projects/p/ontology', lambda route: route.fulfill(json=ontology))
+    page.click('[data-tab="ontology-model"]')
+    page.locator('.om-catalog-item').first.wait_for()
+    page.evaluate('OntologyModel.setInspector(true)')
+    sizes = []
+    for height in (891, 1200, 700):
+        page.set_viewport_size({'width': 1676, 'height': height})
+        layout = page.evaluate('''() => {
+            const main = document.querySelector('body > main');
+            const rect = selector => document.querySelector(selector).getBoundingClientRect();
+            return {
+                bottom: rect('.om-page').bottom,
+                padding: parseFloat(getComputedStyle(main).paddingBottom),
+                toolbar: rect('.om-canvas-bar').bottom,
+                stage: rect('.om-stage').height,
+                directory: rect('.om-catalog-list').height,
+                nextControl: rect('.om-catalog-governance').bottom,
+                hierarchy: rect('.om-hierarchy-directory').top
+            };
+        }''')
+        assert abs(layout['bottom'] + layout['padding'] - height) < 2, layout
+        assert abs(layout['toolbar'] - layout['bottom']) < 3, layout
+        assert layout['nextControl'] <= layout['hierarchy'] + 1, layout
+        sizes.append(layout)
+    assert abs(sizes[1]['stage'] - sizes[0]['stage'] - 309) < 2
+    assert sizes[1]['directory'] > sizes[0]['directory'] + 300
+    assert not errors
+
+
+def test_ledger_pagination_follows_mobile_rows_and_fits_desktop(redesign_page):
+    page, errors = redesign_page
+    records = [{'id': f'entity-{i}', 'kind': 'entity', 'type': 'Thing', 'text': f'台账示例{i}', 'version': 1}
+               for i in range(30)]
+    page.route('**/records/page', lambda route: route.fulfill(json={
+        'records': records, 'total': len(records), 'next_cursor': None
+    }))
+    page.click('[data-tab="records"]')
+    rows = page.locator('#records tbody tr')
+    rows.nth(len(records) - 1).wait_for(state='attached')
+    for width, height in ((1440, 800), (1440, 1100), (720, 840), (390, 844)):
+        page.set_viewport_size({'width': width, 'height': height})
+        layout = page.evaluate('''() => {
+            const table = document.querySelector('#records > .table-scroll');
+            const rect = selector => document.querySelector(selector).getBoundingClientRect();
+            return {
+                main: rect('body > main').bottom,
+                pagination: rect('#records .record-pages').top,
+                end: rect('#records .record-pages').bottom,
+                lastRow: rect('#records tbody tr:last-child').bottom,
+                table: table.clientHeight,
+                overflow: table.scrollHeight - table.clientHeight
+            };
+        }''')
+        assert abs(layout['main'] - height) < 2, layout
+        if width > 900:
+            assert layout['end'] <= height and layout['overflow'] > 0, layout
+            if height == 800:
+                short_table_height = layout['table']
+            else:
+                assert layout['table'] >= short_table_height + 299, layout
+        else:
+            assert layout['lastRow'] <= layout['pagination'] + 1, layout
+            assert layout['overflow'] <= 1, layout
+            page.locator('#records .record-pages').scroll_into_view_if_needed()
+            assert page.locator('#records .record-pages').bounding_box()['y'] < height
+    assert not errors

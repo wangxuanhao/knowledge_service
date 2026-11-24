@@ -262,11 +262,14 @@ class KnowledgeService:
             # Legacy facts may store a short published term, while SHACL paths
             # are stable IRIs. Only unique declared paths grant an exemption;
             # predicates from another ontology version grant no exemption here.
-            quarantine_paths=[]
-            for predicate in quarantine_conflicts.get('predicates',[]):
-                try:quarantine_paths.append(str(ontology.resolve(predicate,ontology.attributes)))
-                except UnknownOntologyTerm:continue
-            quarantine_context={**quarantine_conflicts,'predicates':quarantine_paths}
+            contexts = quarantine_conflicts if isinstance(quarantine_conflicts, list) else [quarantine_conflicts]
+            quarantine_context = []
+            for context in contexts:
+                quarantine_paths = []
+                for predicate in context.get('predicates', []):
+                    try:quarantine_paths.append(str(ontology.resolve(predicate,ontology.attributes)))
+                    except UnknownOntologyTerm:continue
+                quarantine_context.append({**context, 'predicates': quarantine_paths})
             acknowledge=lambda report:allow_quarantine_deficits(report,before_report,quarantine_context)
         report = ontology.validate_timeline(
             checkable, enforce_relationship_constraints=relation_constraint_mode == 'strict',
@@ -278,13 +281,15 @@ class KnowledgeService:
               operation='manual_write', assertions=None, pending_assertions=None,
               assertion_decisions=None, resolution_reviews=None, ledger=None,
               resolution_decisions=None,suppress_auto_assertions=False, recorded_at=None,
-              defer_milvus_sync=False, operation_context=None,conflict_actions=None,quarantine_conflicts=None):
+              defer_milvus_sync=False, operation_context=None,conflict_actions=None,quarantine_conflicts=None,
+              manual_actor=None):
         event(f'等待写入锁 · 待写记录 {len(records)}', 85)
         with self.lock:
             event('校验知识结构、来源与关系端点 · 开始')
             self.repository.get_project(project_id)
-            from .text_revision import try_entity_text_revision
-            scoped = None if (conflict_actions or quarantine_conflicts) else try_entity_text_revision(
+            from .formal_writes import FormalFactWriter, unchanged_source_attachment
+            from .text_revision import try_manual_revision
+            scoped = None if (conflict_actions or quarantine_conflicts) else try_manual_revision(
                 self, project_id, records, expected_version=expected_version,
                 revision=revision, completion=completion, expected_versions=expected_versions,
                 operation=operation, assertions=assertions, pending_assertions=pending_assertions,
@@ -293,8 +298,9 @@ class KnowledgeService:
                 suppress_auto_assertions=suppress_auto_assertions, recorded_at=recorded_at,
                 operation_context=operation_context, relation_constraint_mode=relation_constraint_mode,
                 shacl_mode=shacl_mode, shacl_review_out=shacl_review_out,
-                defer_milvus_sync=defer_milvus_sync)
+                defer_milvus_sync=defer_milvus_sync, manual_actor=manual_actor)
             if scoped is not None:
+                self.annotate_structure_pending(project_id, scoped)
                 return scoped
             prepared = []
             planning_snapshot = self.repository.formal_write_snapshot(project_id)
@@ -302,6 +308,7 @@ class KnowledgeService:
             ids = set()
             for raw in records:
                 row = RecordWrite.model_validate(raw).model_dump(exclude_none=True)
+                row['metadata'].pop('_manual_actor', None)
                 row.setdefault('id', str(uuid4()))
                 if row['id'] in ids:
                     raise ValueError('批次中存在重复 ID')
@@ -369,9 +376,13 @@ class KnowledgeService:
                 if row.get('source_id') and (not source or source['kind'] != 'document'):
                     raise ValueError('source_id 必须引用本项目中的文档')
                 if source:
-                    source_metadata = deepcopy({k:v for k,v in source.get('metadata', {}).items()
-                                                if k not in ('review_candidates','discovery_candidates')})
-                    row['metadata'] = {**source_metadata, **row['metadata']}
+                    attaching = (operation == 'manual_write'
+                                 and (revision or (row['id'] in (expected_versions or {})))
+                                 and unchanged_source_attachment(row, current.get(row['id'])))
+                    if not attaching:
+                        source_metadata = deepcopy({k:v for k,v in source.get('metadata', {}).items()
+                                                    if k not in ('review_candidates','discovery_candidates')})
+                        row['metadata'] = {**source_metadata, **row['metadata']}
                     row['metadata']['source_version_id'] = source.get('version_id')
             endpoint_ontologies={}
             for row in prospective.values():
@@ -483,7 +494,6 @@ class KnowledgeService:
             if completion:
                 doc, expected = completion
                 formal_expected[doc['id']] = expected
-            from .formal_writes import FormalFactWriter
             result = FormalFactWriter(self.repository).apply(
                 operation, project_id, assertions or [], formal_expected,
                 {'records': prepared, 'completion': completion,
@@ -491,7 +501,7 @@ class KnowledgeService:
                  'pending_assertions': pending_assertions or [],
                  'assertion_decisions': assertion_decisions or [],
                  'resolution_decisions':resolution_decisions or [],
-                 'conflict_actions':conflict_actions or [],
+                 'conflict_actions':conflict_actions or [], 'manual_actor':manual_actor,
                  'suppress_auto_assertions': suppress_auto_assertions}, recorded_at=recorded_at,
                 operation_context=operation_context, snapshot=planning_snapshot)
             accepted = result['accepted_records']
@@ -1007,8 +1017,6 @@ class KnowledgeService:
         try:
             derived = []
             chunk_records = []
-            saved_chunks = []
-            current_document = receipt
             processed_chunks = 0
             review_candidates = []
             discovery_candidates = []
@@ -1024,7 +1032,7 @@ class KnowledgeService:
                     chunks=split_document(request['text'], request)
                 event(f'切片完成 · 共 {len(chunks)} 片',12)
             run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
-                counts_patch={'chunks_total':len(chunks),'chunks_succeeded':len(chunks)})
+                counts_patch={'chunks_total':len(chunks)})
             for index, chunk in enumerate(chunks):
                 start, text = chunk['start_char'], chunk['text']
                 chunk_records.append(dict(id=f'{doc_id}:chunk:{index}', kind='chunk', text=text,
@@ -1048,32 +1056,6 @@ class KnowledgeService:
                     'effective_time_source':metadata['effective_time_source'],
                     'source_version_id':receipt['version_id'],
                     'status':'ready','indexed_at':indexed_at}
-            existing_chunks={}
-            retired_chunks=[]
-            if prior:
-                for chunk in chunk_records:
-                    try:existing_chunks[chunk['id']]=self.repository.get_record(project_id,chunk['id'])['version']
-                    except KeyError:existing_chunks[chunk['id']]=0
-                current_ids={chunk['id'] for chunk in chunk_records}
-                for old in self.repository.document_chunks(project_id,doc_id):
-                    if old['id'] in current_ids:continue
-                    tombstone={key:value for key,value in old.items() if key in RecordWrite.model_fields}
-                    tombstone['metadata']={**tombstone.get('metadata',{}),'_deleted':True}
-                    retired_chunks.append(tombstone)
-                    existing_chunks[old['id']]=old['version']
-            with self.lock:
-                indexed=self.write(
-                    project_id, [*chunk_records,*retired_chunks], expected_versions=existing_chunks if prior else None, operation='extract',
-                    operation_context=operation_context)
-                if retired_chunks:
-                    retired_ids={row['id'] for row in retired_chunks}
-                    indexed=[row for row in indexed if row['id'] not in retired_ids]
-                if checkpoint_context:checkpoint_context.map_chunks(project_id,indexed)
-                if request.get('_source_span_mapper'):request['_source_span_mapper'](indexed)
-            saved_chunks=indexed
-            run=self.repository.update_ingest_run(project_id,run['id'],run['version'],active_stage='extraction',
-                readiness_patch={'keyword_ready':True,'semantic_ready':True})
-            event(f'文档检索已就绪 · 切片 {len(saved_chunks)} 条 · 图谱抽取继续',14)
             if checkpoint_context and extraction_mode in ('ontology', 'discovery'):
                 checkpoint_context.update_progress('extracting', 15)
             if extraction_mode == 'ontology':
@@ -1312,79 +1294,104 @@ class KnowledgeService:
                             error=ValueError('ontology changed during extraction')
                             error.code='ontology_version_changed'
                             raise error
+                existing_chunks={chunk['id']:0 for chunk in chunk_records}
+                retired_chunks=[]
+                if prior:
+                    for chunk in chunk_records:
+                        try:existing_chunks[chunk['id']]=self.repository.latest_record_revision(project_id,chunk['id'])['version']
+                        except KeyError:existing_chunks[chunk['id']]=0
+                    current_ids={chunk['id'] for chunk in chunk_records}
+                    for old in self.repository.document_chunks(project_id,doc_id):
+                        if old['id'] in current_ids:continue
+                        tombstone={key:value for key,value in old.items() if key in RecordWrite.model_fields}
+                        tombstone['metadata']={**tombstone.get('metadata',{}),'_deleted':True}
+                        retired_chunks.append(tombstone)
+                        existing_chunks[old['id']]=old['version']
                 from ..domain.entity_identity import IdentityResolutionStale
                 original_derived=deepcopy(derived)
                 original_reviews=deepcopy(request.get('_resolution_reviews',[]))
                 for identity_attempt in range(3):
                     derived=deepcopy(original_derived)
                     request['_resolution_reviews']=deepcopy(original_reviews)
-                    expected_versions=None
+                    expected_versions=dict(existing_chunks)
                     if should_reconcile:
                         if checkpoint_context:
                             checkpoint_context.update_progress('merging', 80)
                         from .reconciliation import reconcile
                         with stage(f"实体消歧融合 · 语义自动合并 {bool(request.get('auto_merge'))} · 阈值 {request.get('merge_threshold',.88)}",80):
                             derived,revisions=reconcile(self,project_id,derived,request,receipt)
-                        expected_versions={r['id']:revisions.get(r['id'],0) for r in derived}
+                        expected_versions.update({r['id']:revisions.get(r['id'],0) for r in derived})
                         if checkpoint_context:
                             checkpoint_context.update_progress('committing', 85)
+                    else:
+                        expected_versions.update({row['id']:0 for row in derived})
                     shacl_reviews=[]
                     try:
-                        committed=self.write(project_id,derived,completion=(document,current_document['version']),expected_versions=expected_versions,
-                            relation_constraint_mode=request.get('relation_constraint_mode','review'),
-                            shacl_mode='review',shacl_review_out=shacl_reviews,operation='extract',
-                            resolution_reviews=request.get('_resolution_reviews',[]),pending_assertions=pending_assertions,
-                            operation_context=operation_context)
+                        with self.repository._formal_write_transaction():
+                            committed=self.write(project_id,[*chunk_records,*retired_chunks,*derived],
+                                completion=(document,receipt['version']),expected_versions=expected_versions,
+                                relation_constraint_mode=request.get('relation_constraint_mode','review'),
+                                shacl_mode='review',shacl_review_out=shacl_reviews,operation='extract',
+                                resolution_reviews=request.get('_resolution_reviews',[]),pending_assertions=pending_assertions,
+                                operation_context=operation_context,defer_milvus_sync=True)
+                            completed=committed[0]
+                            saved=[row for row in committed[1:] if not row.get('metadata',{}).get('_deleted')]
+                            chunks_by_id={row['id']:row for row in saved if row['kind']=='chunk'}
+                            saved_chunks=[chunks_by_id[chunk['id']] for chunk in chunk_records]
+                            if checkpoint_context:checkpoint_context.map_chunks(project_id,saved_chunks)
+                            if request.get('_source_span_mapper'):request['_source_span_mapper'](saved_chunks)
+                            if shacl_reviews:
+                                source_hash = extracted_source_hash
+                                derived_by_id = {r['id']: r for r in derived}
+                                seen=set()
+                                for violation in shacl_reviews:
+                                    key=(violation.get('record_id'),violation.get('path'),violation.get('constraint'),violation.get('message'))
+                                    if key in seen:continue
+                                    seen.add(key)
+                                    row = derived_by_id.get(violation.get('record_id'), {})
+                                    start=row.get('metadata', {}).get('start_char', 0)
+                                    review_candidates.append({
+                                        'id': str(uuid4()), 'status': 'pending', 'kind': 'validation',
+                                        'record_id': violation.get('record_id'), 'record_kind':row.get('kind'),
+                                        'text': row.get('text', ''),
+                                        'proposed_type': row.get('type', ''),
+                                        'reason': '本体约束异常已记录；知识已保存，请确认例外或标记整改',
+                                        'constraint':violation.get('constraint'), 'path':violation.get('path'),
+                                        'path_label':violation.get('path_label'), 'severity':violation.get('severity'),
+                                        'message':violation.get('message'), 'actual_value':violation.get('value'),
+                                        'valid_at':violation.get('valid_at'),
+                                        'ontology_id': violation.get('ontology_id') or row.get('ontology_id', ''),
+                                        'chunk_id': row.get('metadata', {}).get('chunk_id', ''),
+                                        'start_char': start,
+                                        'end_char': row.get('metadata', {}).get('end_char', start+len(row.get('text',''))),
+                                        'source_hash': source_hash,
+                                        'evidence': row.get('text', ''),
+                                        'source_version_id': receipt['version_id'],
+                                        'valid_from': request.get('valid_from'),
+                                        'valid_until': request.get('valid_until'),
+                                        'applicability': metadata['applicability'],
+                                        'published_at': metadata.get('published_at'),
+                                        'effective_time_source': metadata['effective_time_source'],
+                                        'created_at': utc_now()})
+                                event(f'SHACL 本体异常 {len(seen)} 条已加入审核；知识未被阻塞')
+                                completed['metadata'] = {**completed.get('metadata', {}), 'review_candidates': review_candidates}
+                                completed = self.repository._put_record_for_operation(project_id,
+                                    {k: v for k, v in completed.items() if k not in ('embedding', 'embedding_model',
+                                     'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id')},
+                                    expected_version=completed['version'], operation=operation_context)
+                            completed_run=self.repository.update_ingest_run(
+                                project_id,run['id'],run['version'],status='completed',active_stage='completed',
+                                readiness_patch={key:value for key,value in final_readiness.items() if key!='search_ready'},
+                                counts_patch={'chunks_succeeded':len(saved_chunks),
+                                    'assertions_pending':len(review_candidates),'records_accepted':len(saved)})
+                        run=completed_run
                         break
                     except IdentityResolutionStale:
                         if identity_attempt==2:raise
                         event('实体身份候选在写入前发生变化，重新解析后重试')
-                completed, graph_saved = committed[0], committed[1:]
-                saved = [*saved_chunks, *graph_saved]
-                if shacl_reviews:
-                    source_hash = extracted_source_hash
-                    derived_by_id = {r['id']: r for r in derived}
-                    seen=set()
-                    for violation in shacl_reviews:
-                        key=(violation.get('record_id'),violation.get('path'),violation.get('constraint'),violation.get('message'))
-                        if key in seen:continue
-                        seen.add(key)
-                        row = derived_by_id.get(violation.get('record_id'), {})
-                        start=row.get('metadata', {}).get('start_char', 0)
-                        review_candidates.append({
-                            'id': str(uuid4()), 'status': 'pending', 'kind': 'validation',
-                            'record_id': violation.get('record_id'), 'record_kind':row.get('kind'),
-                            'text': row.get('text', ''),
-                            'proposed_type': row.get('type', ''),
-                            'reason': '本体约束异常已记录；知识已保存，请确认例外或标记整改',
-                            'constraint':violation.get('constraint'), 'path':violation.get('path'),
-                            'path_label':violation.get('path_label'), 'severity':violation.get('severity'),
-                            'message':violation.get('message'), 'actual_value':violation.get('value'),
-                            'valid_at':violation.get('valid_at'),
-                            'ontology_id': violation.get('ontology_id') or row.get('ontology_id', ''),
-                            'chunk_id': row.get('metadata', {}).get('chunk_id', ''),
-                            'start_char': start,
-                            'end_char': row.get('metadata', {}).get('end_char', start+len(row.get('text',''))),
-                            'source_hash': source_hash,
-                            'evidence': row.get('text', ''),
-                            'source_version_id': receipt['version_id'],
-                            'valid_from': request.get('valid_from'),
-                            'valid_until': request.get('valid_until'),
-                            'applicability': metadata['applicability'],
-                            'published_at': metadata.get('published_at'),
-                            'effective_time_source': metadata['effective_time_source'],
-                            'created_at': utc_now()})
-                    event(f'SHACL 本体异常 {len(seen)} 条已加入审核；知识未被阻塞')
-                    completed['metadata'] = {**completed.get('metadata', {}), 'review_candidates': review_candidates}
-                    with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
-                        completed = self.repository._put_record_for_operation(project_id,
-                            {k: v for k, v in completed.items() if k not in ('embedding', 'embedding_model',
-                             'version', 'version_id', 'recorded_at', 'superseded_at', 'project_id')},
-                            expected_version=completed['version'], operation=operation_context)
+            self._drain_projections(project_id)
+            event(f'文档检索已就绪 · 切片 {len(saved_chunks)} 条',98)
             event(f'落库完成 · {len(saved)} 条派生记录 · 文档 {doc_id}',99)
-            run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='completed',
-                active_stage='completed',readiness_patch={key:value for key,value in final_readiness.items() if key!='search_ready'},
-                counts_patch={'assertions_pending':len(review_candidates),'records_accepted':len(saved)})
             return {'document': public(completed), 'records': [public(r) for r in saved],
                     'pending_reviews':len(review_candidates),
                     'discovery_candidates':sum(item.get('kind') in {'entity','relation','attribute'} for item in discovery_candidates),
@@ -1397,31 +1404,22 @@ class KnowledgeService:
             if isinstance(exc,OntologyValidationError):
                 failure_details={'validation_error_count':len(exc.errors),'validation_errors':exc.errors[:100]}
             failure_readiness=run['readiness'] if run else initial_readiness
-            rebuilding_saved_document=bool(metadata.get('reprocessing'))
-            cleanup_chunks=bool(saved_chunks) and processed_chunks==0 and extraction_mode!='documents' and not rebuilding_saved_document
-            if rebuilding_saved_document and prior:
-                previous_readiness=prior.get('metadata',{}).get('readiness',{})
-                failure_readiness={**failure_readiness,**{key:True for key in ('keyword_ready','semantic_ready') if previous_readiness.get(key)}}
-            if cleanup_chunks:
-                failure_readiness=initial_readiness
+            last_published = None
+            if metadata.get('reprocessing'):
+                last_published = next((revision for revision in reversed(self.repository.history(project_id,doc_id))
+                    if revision.get('metadata',{}).get('status') in ('ready','completed')), None)
             document['metadata'] = {**metadata, 'status': 'failed', 'active_stage':'failed',
                                     'readiness':failure_readiness,'failed_at': utc_now(),
                                     'error_type': type(exc).__name__,**failure_details}
+            if last_published:
+                # A failed reprocessing attempt owns its run status. Restore the
+                # published document and its candidate/evidence pointers.
+                document = {key: value for key,value in last_published.items() if key in RecordWrite.model_fields}
             try:
-                if cleanup_chunks:
-                    tombstones=[]
-                    for chunk in saved_chunks:
-                        tombstone={key:value for key,value in chunk.items() if key in RecordWrite.model_fields}
-                        tombstone['metadata']={**tombstone.get('metadata',{}),'_deleted':True}
-                        tombstones.append(tombstone)
-                    self.write(project_id,tombstones,completion=(document,current_document['version']),
-                        expected_versions={chunk['id']:chunk['version'] for chunk in saved_chunks},operation='extract',
-                        operation_context=operation_context)
-                else:
-                    with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
-                        self.repository._put_record_for_operation(
-                            project_id, document, expected_version=current_document['version'],
-                            operation=operation_context)
+                with self.repository._formal_write_transaction() if checkpoint_context else nullcontext():
+                    self.repository._put_record_for_operation(
+                        project_id, document, expected_version=receipt['version'],
+                        operation=operation_context)
             except ValueError as conflict:
                 if '版本冲突' not in str(conflict):
                     raise
@@ -1431,7 +1429,6 @@ class KnowledgeService:
                 public_error=classify_error(exc)
                 run=self.repository.update_ingest_run(project_id,run['id'],run['version'],status='failed',
                     active_stage='failed',
-                    readiness_patch={'keyword_ready':False,'semantic_ready':False} if cleanup_chunks else None,
                     counts_patch={'chunks_failed':max(0,len(chunk_records)-processed_chunks)},
                     failure={'type':type(exc).__name__,'code':public_error.code,'message':public_error.message,
                              'retryable':public_error.retryable})

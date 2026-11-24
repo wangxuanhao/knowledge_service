@@ -28,6 +28,7 @@ from ..domain.applicability import (
     DIMENSIONS, dimension_mode, dimension_values, normalize_applicability,
     scope_identity,
 )
+from ..domain.ontology_publication import OntologyPublicationConflict
 from .snapshot_validation import validate_restore_snapshot
 from .connection import (
     DeadlockDetected, LockNotAvailable, SerializationFailure)
@@ -96,16 +97,6 @@ class OntologyNotPublished(Exception):
     def __init__(self, project_id):
         super().__init__(project_id)
         self.project_id = project_id
-
-
-class OntologyPublicationConflict(ValueError):
-    """Stable conflict raised by the atomic ontology publication boundary."""
-
-    def __init__(self, code, message, *, details=None, retryable=False):
-        self.code = code
-        self.details = dict(details or {})
-        self.retryable = retryable
-        super().__init__(message)
 
 
 class FormalWriteConflict(ValueError):
@@ -635,10 +626,15 @@ class Repository:
             return self._put(project_id, record, 0)
 
     @contextmanager
-    def read_snapshot(self):
+    def read_snapshot(self, *, disable_jit=False):
         """Keep a compound read on one connection and transaction snapshot."""
         with self._transaction(repeatable_read_only=True):
+            restore_jit = disable_jit and self._db.execute('SHOW jit').fetchone()[0] == 'on'
+            if restore_jit:
+                self._db.execute('SET LOCAL jit = off')
             yield
+            if restore_jit:
+                self._db.execute('SET LOCAL jit = on')
 
     @contextmanager
     def _serialized_project_write(self, conflict):
@@ -944,8 +940,11 @@ class Repository:
             snapshot['token'], snapshot['project_id'], snapshot['recorded_at'])
 
     def _put(self, project_id, record, expected_version=None, recorded_at=None,
-             operation=None):
+             operation=None, *, manual_actor=None):
         record = self._validate_record(record)
+        record['metadata'].pop('_manual_actor', None)
+        if manual_actor and record['kind'] in ('entity', 'relation', 'attribute'):
+            record['metadata']['_manual_actor'] = manual_actor
         if expected_version is not None and (type(expected_version) is not int or expected_version < 0):
             raise ValueError('期望版本必须是非负整数')
         old = self._db.execute(
@@ -1638,9 +1637,10 @@ class Repository:
             ).fetchone()[0]
 
     # ------------------------------------------------------------------ 断言（转发到 AssertionStore）
-    def _create_assertion(self, project_id, item, *, recorded_at=None):
+    def _create_assertion(self, project_id, item, *, recorded_at=None, initial_acceptance=None):
         # 供 FormalFactWriter 等内部调用方在已有事务内直接落库（跳过公开方法的独立事务）
-        return self._assertions._create(project_id, item, recorded_at=recorded_at)
+        return self._assertions._create(project_id, item, recorded_at=recorded_at,
+                                        initial_acceptance=initial_acceptance)
 
     def _transition_assertion(self, project_id, assertion_id, expected_version, status,
                               reason, actor, canonical_record_id=None, reprocess=False,
@@ -1781,6 +1781,9 @@ class Repository:
     def list_merge_operations(self, project_id):
         return self._reviews.list_merge_operations(project_id)
 
+    def merge_operation_snapshots(self, project_id, operation_id):
+        return self._reviews.merge_operation_snapshots(project_id, operation_id)
+
     # ------------------------------------------------------------------ 本体与制品（主存储内）
     @staticmethod
     def _publish_fingerprint(value):
@@ -1838,7 +1841,7 @@ class Repository:
             version = stored if (
                 isinstance(stored, int) and not isinstance(stored, bool) and stored > 0
             ) else index
-            items.append({'id': row['id'], 'version': version,
+            items.append({'id': row['id'], 'created_at': row['created_at'], 'version': version,
                           'version_reused': version in seen_versions})
             seen_versions.add(version)
         return items
@@ -1846,7 +1849,7 @@ class Repository:
     def _ontology_version_meta(self, project_id):
         """版本号解析只依赖 id/metadata；历史 turtle 文本不参与计算。"""
         rows = self._db.execute(
-            'SELECT id,metadata FROM ontologies WHERE project_id=? ORDER BY created_at,id',
+            'SELECT id,created_at,metadata FROM ontologies WHERE project_id=? ORDER BY created_at,id',
             (project_id,)).fetchall()
         return self._parse_ontology_version_meta(rows)
 

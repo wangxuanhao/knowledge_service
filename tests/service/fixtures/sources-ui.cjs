@@ -41,6 +41,7 @@ const documentRow=(id,status='completed')=>({id,text:'原文 '+id,derived_count:
 
 function setup({documents=[documentRow('one'),documentRow('two','failed')],writer=true,acceptedAssertions=[],acceptedReadError=null,rendered=null,sourceRead=null}={}){
   const document={createTextNode(text){const node=new Element('#text',this);node.textContent=text;return node;},createElement(tag){const node=new Element(tag,this);if(tag==='template')node.content=new Element('#fragment',this);return node;},getElementById(id){return descendants(this.body).find(node=>node.id===id)||null;},querySelector(selector){return this.body.querySelector(selector);},querySelectorAll(selector){return this.body.querySelectorAll(selector);},addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);},listeners:{},async dispatch(name,event){await Promise.all((this.listeners[name]||[]).map(fn=>fn(event)));}};
+  document.createDocumentFragment=()=>new Element('#fragment',document);
   document.body=document.createElement('body');document.activeElement=document.body;
   const make=(tag,id,parent=document.body)=>{const node=document.createElement(tag);node.id=id;parent.append(node);return node;};
   const page=make('section','tab-sources'),panel=make('div','sources-panel',page),layout=make('div','sources-layout',panel);layout.className='source-layout';

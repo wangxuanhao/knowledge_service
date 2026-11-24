@@ -244,8 +244,18 @@ def test_entity_resolution_requires_identical_scope():
     class Repository:
         def current_records(self, *args, **kwargs):
             return [row]
+
+        def get_ontology(self, _project):
+            return {'turtle': '''
+                @prefix owl: <http://www.w3.org/2002/07/owl#> .
+                <http://example.test/Business> a owl:Class .'''}
+
     mention = {**row, 'id': 'mt', 'metadata': {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}}}
-    assert EntityResolver(Repository(), None).resolve('p', mention, review_threshold=.7, merge_threshold=.9).status == 'separate'
+    resolver = EntityResolver(Repository(), None)
+    assert resolver.resolve('p', mention, review_threshold=.7, merge_threshold=.9).status == 'separate'
+    matching = {**mention, 'metadata': row['metadata']}
+    aligned = resolver.resolve('p', matching, review_threshold=.7, merge_threshold=.9)
+    assert aligned.status == 'aligned' and aligned.canonical_id == row['id']
 
 
 @pytest.mark.parametrize('object_type', ['DataEntity', 'Status'])

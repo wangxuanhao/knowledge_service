@@ -9,6 +9,7 @@ test('idle search keeps progressive controls out of the content area',async()=>{
   const steps=ui.get('source-search-steps'),actions=ui.document.querySelector('.source-search__actions');
   assert.equal(steps.hidden,true);assert.equal(actions.hidden,true);
   await search(ui,'two');assert.equal(steps.hidden,false);assert.equal(actions.hidden,false);
+  assert.equal(ui.get('source-search-refine').disabled,false);
   await ui.get('source-search-clear').click();await settle();
   assert.equal(steps.hidden,true);assert.equal(actions.hidden,true);
 });

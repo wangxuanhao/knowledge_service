@@ -619,6 +619,10 @@ class Ontology:
                         reference_ids.add(row['id'])
                 except UnknownOntologyTerm:
                     pass
+        # Other applicability buckets can stay identical at a time boundary.
+        # Cache only exact sets of these unchanged local rows that passed validation.
+        passing_sets = set()
+        cache_row_limit = remaining_cache_rows = 50_000
         for instant in sorted(instants):
             active = [r for r in rows if (not r['valid_from'] or r['valid_from'] <= instant)
                       and (not r['valid_until'] or instant < r['valid_until'])]
@@ -632,11 +636,18 @@ class Ontology:
             active.extend(row for row in rows if row['id'] in endpoints & reference_ids - active_ids)
             from ..domain.validation_scope import validation_contexts
             for contextual,context in validation_contexts(active):
+                membership = frozenset(map(id, contextual)) if len(contextual) <= cache_row_limit else None
+                if membership in passing_sets:
+                    continue
                 result = self.validate(contextual,enforce_relationship_constraints=enforce_relationship_constraints)
-                if not result['conforms']:
-                    report={**result, 'valid_at': instant,'applicability_context':context}
-                    if acknowledge_report is not None and acknowledge_report(report):continue
-                    return report
+                if result['conforms']:
+                    if membership is not None and len(membership) <= remaining_cache_rows:
+                        passing_sets.add(membership)
+                        remaining_cache_rows -= len(membership)
+                    continue
+                report={**result, 'valid_at': instant,'applicability_context':context}
+                if acknowledge_report is not None and acknowledge_report(report):continue
+                return report
         return {'conforms': True, 'errors': [], 'violations':[], 'segments_checked': len(instants)}
 
     def query(self, records, query):

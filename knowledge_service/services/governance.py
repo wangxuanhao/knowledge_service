@@ -7,6 +7,7 @@ from uuid import uuid4
 from ..models import RecordWrite
 from ..domain.applicability import scope_identity
 from ..domain.entity_identity import (compatible_identity, require_projection_ready, source_boundary)
+from ..repository.attribute_conflicts import ConflictReads
 from .service import public
 from ..core.time import utc_now
 
@@ -19,6 +20,7 @@ class Governance:
     def __init__(self, service):
         self.service = service
         self.repo = service.repository
+        self._conflict_reads = ConflictReads(self.repo)
 
     def _rows(self,p):
         return {r['id']:r for r in self.repo.current_records(p)}
@@ -190,8 +192,7 @@ class Governance:
                  'relations':[public(row) for row in sorted(
                      self._affected_relations(rows,drop['id']),key=lambda r:r['id'])],
                  'conflicts':sorted(conflicts,key=lambda c:(c['predicate'],c['record_ids']))}
-        from ..repository.attribute_conflicts import ConflictReads
-        payload['assertions']=ConflictReads(self.repo).support_versions(p,[row['id'] for row in attributes])
+        payload['assertions']=self._conflict_reads.support_versions(p,[row['id'] for row in attributes])
         encoded=json.dumps(payload,ensure_ascii=False,allow_nan=False,sort_keys=True,separators=(',',':'))
         return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 
@@ -350,9 +351,22 @@ class Governance:
                         member_ids=sorted(conflict_ids),preview_fingerprint=fingerprint) if confirmed_identity and conflicts else None,
                     defer_milvus_sync=defer_milvus_sync)
                 if confirmed_identity:
-                    from ..repository.attribute_conflicts import ConflictReads
-                    result['conflict_sets']=[ConflictReads(self.repo).read(p,a['id'],{}) for a in conflict_actions]
+                    result['conflict_sets']=[self.conflict_read(p,a['id'],{}) for a in conflict_actions]
                 return result
+
+    def conflict_page(self, project_id, scope, *, limit, cursor, entity_id):
+        return self._conflict_reads.page(project_id, scope, limit=limit, cursor=cursor, entity_id=entity_id)
+
+    def conflict_read(self, project_id, set_id, scope):
+        return self._conflict_reads.read(project_id, set_id, scope)
+
+    def conflict_member(self, project_id, set_id, record_id, scope, *, expected_version_id):
+        return self._conflict_reads.member(project_id, set_id, record_id, scope,
+                                           expected_version_id=expected_version_id)
+
+    def conflict_sources(self, project_id, set_id, record_id, scope, *, expected_version_id, limit, cursor):
+        return self._conflict_reads.sources(project_id, set_id, record_id, scope,
+                                            expected_version_id=expected_version_id, limit=limit, cursor=cursor)
 
     def delete(self,p,record_id,expected_version):
         with self.service.lock:
@@ -379,6 +393,20 @@ class Governance:
     def operations(self,p):
         return [public(r) for r in self.repo.current_records(p) if r.get('metadata',{}).get('_audit')]
 
+    def operation_detail(self,p,operation_id):
+        audit = self.repo.latest_record_revision(p, 'audit:' + operation_id)
+        metadata = audit.get('metadata', {})
+        if not metadata.get('_audit') or metadata.get('operation_id') != operation_id:
+            raise KeyError(operation_id)
+        snapshots = self.repo.merge_operation_snapshots(p, operation_id)
+        if snapshots is None:
+            return {'before': metadata.get('before') or [], 'after': [], 'redirects': {}}
+        return {
+            'before': snapshots['before_state'],
+            'after': [row for row in snapshots['after_state'] if not row.get('metadata', {}).get('_audit')],
+            'redirects': snapshots['redirects'],
+        }
+
     def duplicate_groups(self,p):
         """同名同类型的实体分组 —— 台账顶部「疑似重复」数字与"点进去直接合并"的入口。
 
@@ -400,10 +428,11 @@ class Governance:
         return [{'name':members[0]['text'],'type':key[1],'members':members}
                 for key,members in sorted(groups.items()) if len(members)>1]
 
-    def scan_duplicates(self,p,*,limit=20,cursor=None):
+    def scan_duplicates(self,p,*,limit=20,cursor=None,document_id=None,document_version_id=None,document_mode=None):
         from ..repository.duplicate_entities import DuplicateReads
         with self.repo.independent_read_view() as reader:
-            return DuplicateReads(reader).scan(p,limit=limit,cursor=cursor)
+            return DuplicateReads(reader).scan(p,limit=limit,cursor=cursor,document_id=document_id,
+                document_version_id=document_version_id,document_mode=document_mode)
 
     def preview_duplicate_group(self,p,key):
         from .duplicate_governance import DuplicateGovernance
@@ -411,6 +440,21 @@ class Governance:
         with self.service.lock,self.repo.independent_read_view() as reader:
             scoped=copy(self);scoped.repo=reader
             return DuplicateGovernance(scoped).preview(p,key)
+
+    def preview_duplicate_groups(self, p, keys):
+        from copy import copy
+        from .duplicate_governance import DuplicateGovernance
+        with self.repo.independent_read_view() as reader:
+            scoped = copy(self)
+            scoped.repo = reader
+            return DuplicateGovernance(scoped).preview_batch(p, keys)
+
+    def duplicate_members(self,p,key,*,limit=10,after_id=None):
+        from .duplicate_governance import DuplicateGovernance
+        from copy import copy
+        with self.repo.independent_read_view() as reader:
+            scoped=copy(self);scoped.repo=reader
+            return DuplicateGovernance(scoped).members(p,key,limit=limit,after_id=after_id)
 
     def duplicate_sources(self,p,key,preview_fingerprint,entity_id,expected_version_id,*,limit=10,cursor=None):
         from .duplicate_governance import DuplicateGovernance
@@ -421,7 +465,21 @@ class Governance:
 
     def confirm_duplicate_groups(self,p,groups,*,actor):
         from .duplicate_governance import DuplicateGovernance
-        return DuplicateGovernance(self).batch(p,groups,actor=actor)
+        with self.service.lock:
+            return DuplicateGovernance(self).batch(p,groups,actor=actor)
+
+    def preview_duplicate_partition(self, p, key, assignments, expected_versions):
+        from copy import copy
+        from .duplicate_partitions import DuplicatePartitions
+        with self.repo.independent_read_view() as reader:
+            scoped = copy(self)
+            scoped.repo = reader
+            return DuplicatePartitions(scoped).plan(p, key, assignments, expected_versions).preview()
+
+    def confirm_duplicate_partition(self, p, key, assignments, expected_versions, preview_fingerprint, *, actor):
+        from .duplicate_partitions import DuplicatePartitions
+        with self.service.lock:
+            return DuplicatePartitions(self).confirm(p, key, assignments, expected_versions, preview_fingerprint, actor)
 
     def undo_merge(self,p,operation_id):
         with self.service.lock:

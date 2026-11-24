@@ -97,6 +97,36 @@ def test_source_spans_are_project_scoped_and_immutable(tmp_path):
     assert service.collect_unreferenced_objects()==[]
     repo.close()
 
+def test_source_lists_only_latest_successful_fragment_per_record(tmp_path):
+    repo = Repository(target(tmp_path / 'published-spans'))
+    project_id = repo.create_project('Published spans')['id']
+    service = SourceDocumentService(repo, SourceObjectStore(tmp_path / 'objects'))
+    source = service.persist(project_id, 'doc', b'Requirement', 'rule.md')
+    document = repo.put_record(project_id, {'id': 'doc', 'kind': 'document', 'text': 'Requirement'})
+    span = dict(block_id=source['blocks'][0]['block_id'], chunk_start_char=0,
+                chunk_end_char=11, block_start_char=0, block_end_char=11)
+
+    def save_chunk(status):
+        run = repo.create_ingest_run(project_id, document['id'], document['version_id'])
+        run = repo.update_ingest_run(project_id, run['id'], run['version'], status='running')
+        chunk = repo.put_record(project_id, {'id': 'chunk', 'kind': 'chunk', 'text': 'Requirement',
+                                           'source_id': 'doc', 'metadata': {'run_id': run['id']}})
+        service.store.add_spans(project_id, source['id'], chunk['version_id'], [span])
+        repo.update_ingest_run(project_id, run['id'], run['version'], status=status)
+        return chunk['version_id']
+
+    save_chunk('failed')
+    assert service.get(project_id, source['id'])['chunks'] == []
+    earlier_success = save_chunk('completed')
+    latest_success = save_chunk('completed')
+    save_chunk('failed')
+    assert [chunk['version_id'] for chunk in service.get(project_id, source['id'])['chunks']] == [latest_success]
+    pinned = service.get(project_id, source['id'], chunk_version_id=earlier_success)
+    assert [chunk['version_id'] for chunk in pinned['chunks']] == [earlier_success]
+    assert service.locate(project_id, source['id'], earlier_success)['block_id'] == span['block_id']
+    repo.close()
+
+
 def test_docx_zip_signature_keeps_original_download_bytes(tmp_path):
     import io,zipfile
     repo=Repository(target(tmp_path/'docx-source'))

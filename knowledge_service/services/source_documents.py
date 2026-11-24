@@ -189,7 +189,10 @@ class SourceDocumentService:
         # Each fixed Markdown has its own download name. Object bytes retain the full ZIP.
         return [self.persist(project_id,document_id_factory(entry) if document_id_factory else str(uuid4()),data,entry['path'],text=entry['text'],assets=entry['assets']) for entry in package['documents']]
 
-    def get(self,project_id,version_id): return self.store.get_version(project_id,version_id)
+    def get(self,project_id,version_id,*,chunk_version_id=None):
+        if chunk_version_id is None:
+            return self.store.get_version(project_id,version_id)
+        return self.store.get_version(project_id,version_id,chunk_version_id=chunk_version_id)
     def rendered(self,project_id,version_id):
         version=self.get(project_id,version_id)
         assets=sorted(version['assets'],key=lambda a:(a.get('provenance',{}).get('source_image_ordinal',1_000_000),a.get('source_start_line') or 0,a['id']))

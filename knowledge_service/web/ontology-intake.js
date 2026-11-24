@@ -44,7 +44,7 @@
     let generation=0,previewContext=null,sessionReady=false,activeSessionKey=null;
     const pendingByProject=new Map();
     const sessions=new Map();
-    const sessionKey=scope=>JSON.stringify([getActor(),getContext().project,scope.documentId||'',scope.batchId||'',scope.runId||'',...(scope.candidateIds||[]).slice().sort()]);
+    const sessionKey=scope=>JSON.stringify([getActor(),getContext().project,scope.documentId||'',scope.batchId||'',scope.runId||'',Boolean(scope.reviewDraft),...(scope.candidateIds||[]).slice().sort()]);
     const recoveryKey=(project,actor=getActor())=>'knowledge:ontology-intake:pending:v1:'+encodeURIComponent(actor)+':'+encodeURIComponent(project);
     function readPending(project){
       const key=recoveryKey(project);if(pendingByProject.has(key))return pendingByProject.get(key);
@@ -101,7 +101,7 @@
       else if(!state.documentsComplete)state.documents=loadedDocuments();
       // Defaults apply only to new groups, never overwrite an explicit collapse preference.
       for(const document of state.documents)if(!(document.document_id in state.expandedDocuments)&&state.documents.length===1)state.expandedDocuments[document.document_id]=true;
-      const pinned=state.scope.candidateIds||[];
+      const pinned=state.scope.reviewDraft?[]:state.scope.candidateIds||[];
       const selectable=new Set(state.items.filter(item=>!awaitingDraft(item)).map(item=>item.id));
       state.selected=[...new Set([...state.selected,...rows.filter(item=>pinned.includes(item.id)).map(item=>item.id)])].filter(id=>selectable.has(id));
       state.mappings=Object.fromEntries(Object.entries(state.mappings).filter(([id])=>state.selected.includes(id)));
@@ -131,7 +131,7 @@
         const saved=sessions.get(sessionKey(scope)),serial=++generation;
         Object.assign(state,{open:true,scope:{...scope},items:[],terms:[],selected:[],mappings:{},
           target:context.draftId||'',targetRevision:context.revision??null,draftDestination:context.draftId?'existing':'',existingTarget:context.draftId||'',existingRevision:context.revision??null,total:0,offset:0,documents:[],documentsComplete:false,documentOffsets:{},documentErrors:{},expandedDocuments:clone(saved?.expandedDocuments||{}),preview:null,receipt:null,receiptSummary:null,pending:null,error:null,bulkMapped:null});
-        state.filters=saved?.filters||{status:'pending',document:'',kind:'',type:''};state.detailId=saved?.detailId||null;state.scopeNote=null;
+        state.filters=saved?.filters||{status:scope.reviewDraft?'draft':'pending',document:'',kind:'',type:''};state.detailId=saved?.detailId||null;state.scopeNote=null;
         previewContext=null;await work(async()=>{
           await list();
           while(saved&&serial===generation&&state.open&&state.offset<Math.min(saved.offset,state.total)&&state.offset<10000){
@@ -368,12 +368,27 @@
       const detail=node('section','oi-detail');detail.id='oi-detail-inspector';detail.tabIndex=-1;detail.setAttribute('aria-label','候选详情');detail.append(node('h4',null,'候选详情'));
       if(!item){detail.append(node('p','subtle','选择列表中的候选查看证据与类型映射。'));return detail;}
       detail.append(node('strong','oi-detail-name',describeCandidate(item)),node('p','oi-source','来源：'+sourceName(item)));
+      const start=Date.parse(item.valid_from),end=Date.parse(item.valid_until),now=Date.now();
+      const hasStart=Number.isFinite(start),hasEnd=Number.isFinite(end);
+      let status='生效时间待核对';
+      if(hasStart&&hasEnd&&start>=end)status='有效期冲突待核对';
+      else if(hasEnd&&end<=now)status='已失效 · 历史参考';
+      else if(hasStart)status=start>now?'尚未生效':'已到登记的生效时间';
+      const date=value=>root.DisplayTime?.format(value,value)||value;
+      const dates=[hasStart?'生效 '+date(item.valid_from):'',hasEnd?'失效 '+date(item.valid_until):''].filter(Boolean);
+      detail.append(node('p','subtle',['来源有效期',status,...dates].join(' · ')));
       if(item.materialized)detail.append(node('p','oi-dependency-note','已写入正式知识 · 本次可明确选择为依赖并复用，仍需确认准确正式术语映射。'));
       if(item.dependency_candidate){const labels=(item.required_by||[]).map(id=>s.items.find(row=>row.id===id)).filter(Boolean).map(describeCandidate);
         detail.append(node('p','subtle',`关联依赖：${labels.slice(0,3).join('；')||'所选关系或属性'}${labels.length>3?' 等 '+labels.length+' 条':''}。选择此实体后才会进入本次确认范围。`));}
       const links=item.linked_drafts||[];detail.append(node('p','subtle',links.length?'已关联 '+links.length+' 份草案；加入草案不等于已写入知识。':'待核对，尚未加入草案。'));
       if(awaitingDraft(item))detail.append(node('p','oi-dependency-note','已加入草案，发布前不能重复加入。请查看关联草案继续审核。'));
-      for(const link of links.filter(link=>link.status==='draft_created'))detail.append(button('查看关联草案',async()=>{const project=context().project;await root.OntologyModel.selectDraft(link.draft_id);if(context().project===project)drawer.close();}));
+      for(const link of links.filter(link=>link.status==='draft_created')){
+        if(link.confirmed_mapping?.target_iri){
+          const mapping=link.confirmed_mapping;
+          detail.append(node('p','oi-mapping-confirmed',(link.draft_id===context().draftId?'本草案复用':'关联草案复用')+' · '+termName(s,mapping.target_iri,mapping.label,mapping.target_kind)));
+        }
+        detail.append(button('查看关联草案',async()=>{const project=context().project;await root.OntologyModel.selectDraft(link.draft_id);if(context().project===project)drawer.close();}));
+      }
       if(item.evidence){const evidence=node('details','oi-evidence');evidence.open=true;evidence.append(node('summary',null,'来源证据'),node('pre',null,typeof item.evidence==='string'?item.evidence:JSON.stringify(item.evidence,null,2)));detail.append(evidence);}
       if(s.selected.includes(item.id)){
         const label=node('label','oi-mapping-label','确认已有类型（可选；直接入库时必填）'),mapping=node('select');mapping.setAttribute('aria-label','确认正式术语映射：'+(item.text||item.id));
@@ -564,7 +579,11 @@
         receipt.append(button('重新读取待处理候选',()=>controller.open(scope)));host.append(receipt);return;}
       if(s.preview){renderPreview(s,locked);return;}
       const pendingCount=s.documents.reduce((sum,item)=>sum+(item.pending_count||0),0);
-      host.append(node('p','oi-document-summary',s.documentsComplete?`来自 ${s.documents.filter(item=>item.pending_count>0).length} 份资料，共 ${pendingCount} 条候选内容待核对`:`已读取 ${s.documents.length} 份资料，${pendingCount} 条候选内容待核对 · 资料总数待核对`));
+      const scopedCount=s.scope.reviewDraft?s.items.filter(item=>s.scope.candidateIds?.includes(item.id)).length:0;
+      const documentSummary=s.scope.reviewDraft?`已读取 ${scopedCount} / ${s.scope.candidateIds?.length||0} 条关联候选`
+        :s.documentsComplete?`来自 ${s.documents.filter(item=>item.pending_count>0).length} 份资料，共 ${pendingCount} 条候选内容待核对`
+        :`已读取 ${s.documents.length} 份资料，${pendingCount} 条候选内容待核对 · 资料总数待核对`;
+      host.append(node('p','oi-document-summary',documentSummary));
       if(s.documents.some(item=>item.dependency_count))host.append(node('p','oi-filter-note','待核对清单包含可复用的已入库关联实体；侧栏只统计新待核对候选。'));
       const visible=visibleItems(s),title=node('div','oi-section-heading');title.append(node('h3',null,'01 按资料选择候选'),node('span',null,`当前列表 ${visible.length} 条 · 全部已选 ${s.selected.length} 条 · 已加载 ${s.items.length} / ${s.scope.candidateIds?.length?s.items.length:s.total}`));host.append(title);renderFilters(s,locked);
       const selectable=visible.filter(item=>!awaitingDraft(item));
@@ -574,7 +593,7 @@
       const suggested=button(`批量采用已有类型建议（${suggestions.length} 条）`,()=>controller.useSuggestedMappings());suggested.disabled=locked||!suggestions.length;tools.append(suggested);
       const dependencies=s.items.filter(item=>item.kind==='entity'&&!awaitingDraft(item)&&!s.selected.includes(item.id)&&(item.required_by||[]).some(id=>s.selected.includes(id)));
       if(dependencies.length){const supplement=button(`补选关联实体（${dependencies.length} 条）`,()=>controller.selectMany(dependencies.map(item=>item.id),true));supplement.disabled=locked;tools.append(supplement);}
-      host.append(tools);
+      if(!s.scope.reviewDraft)host.append(tools);
       const confirmed=s.selected.filter(id=>s.mappings[id]).length,missing=s.selected.length-confirmed;
       const mappingSummary=node('div','oi-mapping-summary');
       const feedback=node('p','oi-mapping-confirmed',s.bulkMapped===null?'':`本次确认 ${s.bulkMapped} 条复用映射`);
@@ -610,9 +629,11 @@
         heading.append(toggle,node('small',null,`${filtered?'已加载匹配':status==='draft'?'已加入草案':status==='all'?'候选':'待核对'} ${count} 条 · 已选 ${selected.length} 条${mapped?' · 已确认复用 '+mapped+' 条':''}`));container.append(heading);
         const content=node('div','oi-document-body');content.id='oi-document-body-'+encodeURIComponent(id);content.hidden=!expanded;content.setAttribute('role','region');content.setAttribute('aria-labelledby',toggle.id);container.append(content);list.append(container);
         if(!expanded)continue;
-        const candidates=group.filter(item=>!awaitingDraft(item)),allSelected=candidates.length>0&&candidates.every(item=>s.selected.includes(item.id)),pick=button(allSelected?`取消本资料已加载候选（${candidates.length} 条）`:`选择本资料已加载候选（${candidates.length} 条）`,()=>controller.selectMany(candidates.map(item=>item.id),!allSelected));pick.disabled=locked||!candidates.length;content.append(pick,node('small','oi-document-loaded',`已加载 ${allLoaded.length} / ${document.total} 条`));
+        const candidates=group.filter(item=>!awaitingDraft(item)),allSelected=candidates.length>0&&candidates.every(item=>s.selected.includes(item.id)),pick=button(allSelected?`取消本资料已加载候选（${candidates.length} 条）`:`选择本资料已加载候选（${candidates.length} 条）`,()=>controller.selectMany(candidates.map(item=>item.id),!allSelected));pick.disabled=locked||!candidates.length;
+        if(!s.scope.reviewDraft)content.append(pick);
+        content.append(node('small','oi-document-loaded',`已加载 ${allLoaded.length} / ${document.total} 条`));
 
-        for(const item of group){const row=node('article','oi-candidate'+(s.selected.includes(item.id)?' is-selected':'')),label=node('label','oi-candidate-select'),input=node('input');input.type='checkbox';input.checked=s.selected.includes(item.id);input.disabled=locked||awaitingDraft(item);input.id='oi-pick-'+s.items.indexOf(item);input.setAttribute('aria-label','选择候选：'+describeCandidate(item));
+        for(const item of group){const row=node('article','oi-candidate'+(s.selected.includes(item.id)?' is-selected':'')),label=node('label','oi-candidate-select'),input=node('input');input.type='checkbox';input.checked=s.selected.includes(item.id);input.disabled=locked||!!s.scope.reviewDraft||awaitingDraft(item);input.id='oi-pick-'+s.items.indexOf(item);input.setAttribute('aria-label','选择候选：'+describeCandidate(item));
           input.onchange=()=>run(()=>controller.select(item.id,input.checked));label.append(input,node('span','sr-only','选择候选'));row.append(label);
           const open=button(describeCandidate(item),()=>{s.detailId=item.id;render();});open.className='oi-open-detail';open.id='oi-detail-'+s.items.indexOf(item);open.setAttribute('aria-pressed',String(s.detailId===item.id));row.append(open,node('small','oi-kind',kindLabels[item.kind]||'候选'));
           row.append(node('small','oi-row-status'+(s.mappings[item.id]?' oi-row-mapped':''),s.mappings[item.id]?'复用 · '+termName(s,s.mappings[item.id]):item.materialized?'已入库 · 依赖复用':awaitingDraft(item)?'已加入草案 · 待发布':'待核对'));content.append(row);
@@ -629,6 +650,11 @@
       if(s.offset<s.total){const more=button(`加载下一页候选（已加载 ${s.items.length} / ${s.total}）`,()=>controller.more());more.classList.add('oi-load-more');more.disabled=locked;list.append(more);}
       else if(s.items.length)list.append(node('p','oi-list-complete','已加载全部候选'));
       layout.append(list,renderDetail(active,s,locked));host.append(layout);list.scrollTop=oldScroll;
+      if(s.scope.reviewDraft){
+        if(focused)doc.getElementById(focused)?.focus({preventScroll:true});
+        drawer.body.scrollTop=bodyScroll;
+        return;
+      }
       if(!s.items.length){host.append(node('p','subtle',s.busy?'正在读取候选…':'当前范围没有可处理的发现候选。结构待定统计还可能包含旧知识，请核对其类型或手动补充定义。'));
         if(!s.busy)host.append(button('回到建模页新增定义',()=>{drawer.close();const menu=doc.getElementById('om-definition-menu');if(menu){menu.open=true;menu.querySelector('summary')?.focus();}}));}
       renderGoals(s,locked);

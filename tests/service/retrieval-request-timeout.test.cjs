@@ -79,7 +79,7 @@ function streamFixture(fetch){
   const f=fixture({fetch,busy:false,preparing:false,sessionManager:null,current:'p',serial:0,controller:null,
     qaHistory:[],ScopeFields:{requireRetrievalScope(){}},summary:{textContent:''},progress:{textContent:''},
     live:{textContent:''},send:{disabled:false},input:{focus(){}},provenance:{close(){}},document:{createElement:node},
-    endpoint:s=>'/api/projects/p'+s,addTurn:()=>turn,markDraft(){},persist(){},
+    endpoint:s=>'/api/projects/p'+s,$c:()=>null,addTurn:()=>turn,markDraft(){},persist(){},
     addFailure:(_turn,message)=>failures.push(message),TextDecoder,chat:{splitSseBuffer:()=>({events:[],rest:''})}});
   vm.runInContext(declaration(read('workbench.js'),'stream')+';this.stream=stream;',f.context);
   return {...f,turn,failures};

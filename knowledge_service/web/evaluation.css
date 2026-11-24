@@ -447,3 +447,8 @@ body main #tab-evaluation :is(.rex-run,.rex-receipt){font-size:13px;padding:10px
 body main #tab-evaluation .rex-evidence button{white-space:normal;overflow-wrap:anywhere}
 @media(max-width:1000px){body main #tab-evaluation .rex-layout{grid-template-columns:1fr}}
 @media(max-width:600px){body main #tab-evaluation .rex-fields{grid-template-columns:1fr}}
+
+body main #tab-evaluation .eval-gold-header { align-items:center; margin:0 0 8px; background:transparent; }
+body main #tab-evaluation .eval-gold-header :is(h2,label) { font:inherit; font-size:15px; font-weight:600; margin:0; }
+.eval-input-guide { margin:8px 0 12px; }
+.eval-input-guide summary { width:fit-content; margin:0; padding:4px 0; font-size:12px; }

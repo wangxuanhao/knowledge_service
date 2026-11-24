@@ -11,12 +11,9 @@ from ..repository.connection import DatabaseError
 from ..domain.applicability import (
     dimension_mode, dimension_values, normalize_applicability,
 )
+from ..domain.search_projection import PROJECTION_SCHEMA_VERSIONS
 
 LOG = logging.getLogger('knowledge_service.retrieval')
-
-# Native projection readers must explicitly opt into the schema they understand.
-# A missing cursor is deliberately stale; authority remains PostgreSQL.
-PROJECTION_SCHEMA_VERSIONS = {'milvus': 5, 'neo4j': 3}
 
 
 def has_vector(row):

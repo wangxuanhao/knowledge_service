@@ -9,7 +9,11 @@
     const heading=document.createElement('div');heading.className='retrieval-page-heading';
     const title=header.querySelector(':scope > h2');
     if(title)heading.append(title);
-    const project=document.createElement('span');project.className='retrieval-project-name';heading.append(project);
+    const project=document.createElement('output');
+    project.className='retrieval-project-name';
+    project.setAttribute('for','project');
+    project.setAttribute('aria-label','当前项目');
+    heading.append(project);
     const graphStatus=get('graph-workspace-state');
     if(graphStatus)heading.append(graphStatus);
     const searchOptions=header.querySelector('.search-options');
@@ -23,8 +27,14 @@
         summary.append(label);
       }
     }
-    const syncProject=()=>{project.textContent=get('project')?.selectedOptions?.[0]?.textContent||'';};
-    get('project')?.addEventListener('change',syncProject);syncProject();
+    function syncProject(){
+      const option=get('project')?.selectedOptions?.[0];
+      const name=option?.value ? option.textContent : '';
+      project.hidden=!name;
+      project.title=name;
+      if(project.textContent!==name)project.textContent=name;
+    }
+    syncProject();
     header.prepend(heading);
 
     const query=get('query'),searchButton=get('search'),communityMode=get('community-search-mode');
@@ -64,7 +74,7 @@
       return true;
     }
     for(const button of kindButtons)button.addEventListener('click',()=>select(button.dataset.retrievalKind));
-    window.RetrievalWorkspace=Object.freeze({select,routeQuery,get mode(){return page.dataset.retrievalMode;}});
+    window.RetrievalWorkspace=Object.freeze({select,routeQuery,syncProject,get mode(){return page.dataset.retrievalMode;}});
 
     const modes=stage.querySelector('.full-graph-mode');
     if(modes)stage.querySelector('.graph-stage-heading').prepend(modes);

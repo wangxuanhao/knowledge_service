@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .audit_identity import audit_actor, audit_identity
 
-from ..repository.core import OntologyPublicationConflict
+from ..domain.ontology_publication import OntologyPublicationConflict
 from ..services.ontology_drafts import OntologyDrafts
 from ..services.ontology_drafts_core import OntologyDraftError
 

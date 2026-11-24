@@ -66,7 +66,8 @@ test('opened content filter rail discovers business metadata for current retriev
     {page:'qa',purpose:'retrieval',mode:'keyword',knownAt:'2025-01-01',expected:1}]){
     const values={'scope-purpose':sample.purpose,'search-mode':sample.mode,'qa-mode':sample.mode,'scope-known-at':sample.knownAt||''};
     let requests=0;const original={filters:unsupported,known_at:sample.knownAt||null},before=JSON.stringify(original);
-    const environment={current:'p',get:id=>({value:values[id]||''}),details:{open:true},cb:{facets:[],conditions:[]},scope:()=>original,window:{ScopeFields:fields,WorkspaceContext:{page:sample.page,isContentPage:()=>true}},endpoint:value=>value,api:async()=>{requests++;return {fields:[{field:'metadata.region'}],records:1};},renderFacetChoices(){},renderCB(){},JSON};
+    const metadataLookup=require('../../knowledge_service/web/workspace-context.js').createLookup();
+    const environment={current:'p',get:id=>({value:values[id]||''}),details:{open:true},cb:{facets:[],conditions:[]},scope:()=>original,window:{ScopeFields:fields,WorkspaceContext:{page:sample.page,isContentPage:()=>true}},endpoint:value=>value,api:async()=>{requests++;return {fields:[{field:'metadata.region'}],records:1};},renderFacetChoices(){},renderCB(){},metadataLookup,displayedMetadataKey:null,JSON};
     vm.createContext(environment);vm.runInContext(declaration(source,'usesPostgresFields')+'\n'+declaration(source,'discoverMetadata')+';this.discover=discoverMetadata;',environment);
     await environment.discover();assert.equal(requests,sample.expected,JSON.stringify(sample));assert.equal(JSON.stringify(original),before);
   }

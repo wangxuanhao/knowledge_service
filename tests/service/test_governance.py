@@ -53,6 +53,13 @@ def test_alias_merge_and_restore_preserve_history(system):
     assert restored['restored'] == 3
     current = {r['id']:r for r in service.scoped(p,{})}
     assert current['r']['subject_id'] == 'b' and 'b' in current
+    snapshots = governance.operation_detail(p, merged['operation_id'])
+    assert snapshots['redirects'] == {'b': 'a'}
+    before = {row['id']: row for row in snapshots['before']}
+    after = {row['id']: row for row in snapshots['after']}
+    assert set(before) == set(after) == {'a', 'b', 'r'}
+    assert before['r']['subject_id'] == 'b' and after['r']['subject_id'] == 'a'
+    assert after['b']['metadata']['_deleted'] is True
 
 
 def test_merge_conflicts_and_time_incompatibility(system):

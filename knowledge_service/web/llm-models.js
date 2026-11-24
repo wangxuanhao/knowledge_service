@@ -21,11 +21,10 @@ async function open(){
  await gate;if(!canAccess())return;
  dismissDialog?.();window.KnowledgeTabs?.open(destination,{trigger:false});window.WorkspaceContext?.enter(destination);
  host=document.getElementById('tab-'+destination);if(!host)return;
- const page=node('section','llm-page'),head=node('header','llm-head'),intro=node('div');intro.append(node('h2','','模型管理'),node('p','llm-sub','保存 OpenAI 兼容模型配置，选择平台统一使用的默认模型。'));
- head.append(intro,button('新增模型',()=>edit(),false));summary=node('section','llm-active');summary.setAttribute('aria-label','当前默认模型');
+ const page=node('section','llm-page');summary=node('section','llm-active');summary.setAttribute('aria-label','当前默认模型');
  message=node('p','llm-flash');message.setAttribute('aria-live','polite');
- const listHead=node('div','llm-list-head');count=node('span','llm-sub');listHead.append(node('h3','','已保存模型'),count,button('刷新',()=>load()));
- list=node('div','llm-list');page.append(head,summary,message,listHead,list,node('p','llm-note','默认模型适用于平台的抽取、问答与本体建议。切换后，新操作使用新配置，进行中的任务继续使用启动时的模型。'));host.replaceChildren(page);
+ const listHead=node('div','llm-list-head');count=node('span','llm-sub');listHead.append(node('h2','','已保存模型'),count,button('刷新',()=>load()),button('新增模型',()=>edit(),false));
+ list=node('div','llm-list');page.append(summary,message,listHead,list,node('p','llm-note','默认模型适用于平台的抽取、问答与本体建议。切换后，新操作使用新配置，进行中的任务继续使用启动时的模型。'));host.replaceChildren(page);
  await load();
 }
 async function load(){
@@ -41,7 +40,7 @@ function render(data){
  else summary.append(node('h3','','尚未配置默认模型'),node('p','','新增并设为默认后，平台即可使用该模型。'));
  if(!active&&data.environment_available)summary.append(node('p','','检测到环境配置，刷新后可查看生效状态。'));
  list.replaceChildren();const items=data.items||[];count.textContent=items.length+' 个配置';
- if(!items.length)list.append(node('p','llm-empty','还没有保存的模型。点击「新增模型」添加第一套配置。'));
+ if(!items.length)list.append(node('p','llm-empty','暂无已保存的配置。'));
  for(const item of items){
   const row=node('article','llm-profile'),identity=node('div','llm-identity'),title=node('div','llm-profile-title');title.append(node('h4','',item.name));
   if(item.is_active)title.append(node('span','llm-badge','默认'));

@@ -85,7 +85,7 @@ function editor(){
   const store=workspace.createStore(),controls=new Map();
   const get=id=>{if(!controls.has(id))controls.set(id,{id,value:'',checked:false,hidden:false,disabled:false,open:false,children:[],
     listeners:{},classList:{toggle(){}},addEventListener(type,fn){this.listeners[type]=fn;},setAttribute(){},focus(){},prepend(){},replaceChildren(){this.children=[];},append(node){this.children.push(node);}});return controls.get(id);};
-  const context={store,get page(){return page;},isContentPage:workspace.isContentPage,read:p=>store.read(p,page),register:value=>{bridge=value;value.restore();}};
+  const context={store,createLookup:workspace.createLookup,get page(){return page;},isContentPage:workspace.isContentPage,read:p=>store.read(p,page),register:value=>{bridge=value;value.restore();}};
   const environment={window:{DisplayTime:require(path.join(web,'display-time.js')),WorkspaceContext:context,TemporalScope:temporal,ScopeFields:fields,KnowledgeTabs:{open:value=>{page=value;bridge.restore();}},
     ApplicabilityUI:{readQueryScope:()=>({applicability:{platforms:{mode:'specific',values:['平台甲']}}})}},
     document:{getElementById:get,createElement:()=>({setAttribute(){}}),addEventListener(){},dispatchEvent(){}},
@@ -159,7 +159,7 @@ test('failed QA stream retry reuses its captured body and full scope after filte
   let replay;const sent=[],records=[],turn={dataset:{},replaceChildren(){},append(){}};
   const env={busy:false,preparing:false,sessionManager:null,current:'p',serial:0,scope:()=>({valid_at:'2030-01-01'}),qaHistory:records,summary:{textContent:''},progress:{textContent:''},live:{textContent:''},send:{disabled:false},
     window:{ScopeFields:fields,RequestDeadline:require(path.join(web,'request-deadline.js'))},provenance:{close(){}},AbortController,
-    document:{createElement:()=>({dataset:{}})},markDraft(){},persist(){},addFailure:(_target,_message,callback)=>{replay=callback;},endpoint:x=>x,
+    document:{createElement:()=>({dataset:{}})},$c:()=>null,markDraft(){},persist(){},addFailure:(_target,_message,callback)=>{replay=callback;},endpoint:x=>x,
     fetch:async(_url,init)=>{sent.push(JSON.parse(init.body));throw Error('offline');},Error};
   vm.createContext(env);vm.runInContext(declaration(read('workbench.js'),'stream')+';this.stream=stream;',env);
   await env.stream(body,turn,0,scope);assert.deepEqual(plain(records[0].scope),scope);await replay();

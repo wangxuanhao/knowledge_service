@@ -91,6 +91,7 @@
     }
     function controls(){
       const state=loader?.state||'idle',active=['loading','paused'].includes(state),busy=state==='loading'||!!loader?.automatic;
+      section.dataset.loadState=state;
       control('load').disabled=active||state==='complete';
       control('next').disabled=!active||busy;control('auto').disabled=!active||busy;
       control('pause').disabled=!busy||!!loader?.pauseRequested;control('cancel').disabled=!active;

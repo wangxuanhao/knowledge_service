@@ -1245,6 +1245,8 @@ def test_ontology_scope_reaches_graph_redraw_expand_and_mindmap(workbench):
         page.click('#graph-detail [data-action="mindmap"]')
     assert page.locator('#tab-mindmap').is_visible()
     page.wait_for_function("[...document.querySelector('#mindmap-root').options].some(row=>row.value==='a')")
+    if page.locator('#mindmap-settings').is_hidden():
+        page.click('#mindmap-toggle-settings')
     page.select_option('#mindmap-root', 'a')
     with page.expect_response(lambda response: response.url.endswith('/mindmap')):
         page.click('#draw-mindmap')
@@ -1647,7 +1649,8 @@ def test_knowledge_chat_keyboard_ime_and_scope_change(workbench):
         "document.querySelectorAll('#qa-transcript .qa-turn').length === 0 && "
         "document.querySelector('#qa-active-session-title').textContent === '新会话'")
     assert page.locator('#qa-transcript .qa-turn').count() == 0
-    assert '项目已切换' in page.locator('#status').inner_text()
+    assert page.locator('#status .ks-notice__text').inner_text() == '项目已切换：问答范围'
+    assert page.locator('.retrieval-project-name').text_content() == '问答范围'
     assert workbench.paths.count(f'/api/projects/{workbench.project}/qa/stream') == 1
     assert page.locator('#qa-hero').is_visible()
     assert (page.locator('#qa-live').text_content() or '') == ''
@@ -1876,6 +1879,7 @@ def test_knowledge_chat_provenance_running_safe_done_and_history(workbench):
 
     literal = '<img src=x onerror="window.__xss=1"> [E1] [E99]'
     _emit(page, 'delta', {'text': literal})
+    page.wait_for_function('text => document.querySelector(".qa-answer").textContent === text', arg=literal)
     assert page.locator('.qa-answer').inner_text() == literal
     assert page.locator('.qa-answer button').count() == 0
     with page.expect_response(lambda response: _conversation_save(

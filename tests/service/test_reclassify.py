@@ -517,10 +517,22 @@ def test_reclassify_endpoints_are_read_only_until_confirmed(tmp_path):
         operation_id = applied.json()['operation_id']
         assert applied.json()['migrated'] == 1
 
+        detail_url = f'/api/projects/{p}/operations/{operation_id}'
+        detail = client.get(detail_url)
+        assert detail.status_code == 200, detail.text
+        snapshots = detail.json()
+        assert [row['id'] for row in snapshots['after']] == ['e1']
+        assert snapshots['before'][0]['ontology_id'] == v1['id']
+        assert snapshots['after'][0]['ontology_id'] == _rows(service, p)['e1']['ontology_id']
+        assert snapshots['after'][0]['version'] == 2
+        other_project = repo.create_project('另一个项目')['id']
+        assert client.get(f'/api/projects/{other_project}/operations/{operation_id}').status_code == 404
+
         undo = client.post(f'/api/projects/{p}/operations/{operation_id}/undo')
         assert undo.status_code == 200, undo.text
         assert undo.json()['restored'] == 1
         assert _rows(service, p)['e1']['ontology_id'] == v1['id']
+        assert client.get(detail_url).json() == snapshots
 
 
 def test_user_facing_text_carries_no_markdown_markers(system):

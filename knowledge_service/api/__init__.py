@@ -24,8 +24,8 @@ from pydantic import ValidationError
 import httpx
 
 from ..core.config import load_environment
+from ..core.database_errors import InterfaceError, OperationalError
 from ..utils.diagnostics import redact
-from ..repository.connection import InterfaceError, OperationalError
 from .error_responses import database_unavailable_response
 from ..bootstrap import (
     DocumentParseError,
@@ -38,6 +38,7 @@ from ..bootstrap import (
     OntologyPublicationConflict,
     Repository,
     UserStore,
+    cached_document_encoder,
     configured_encoder,
     encoder_dimension,
     install_neo4j,
@@ -230,9 +231,9 @@ def create_app(dsn=None, encoder=None, upload_temp=None, auth_disabled=None):
     milvus_errors = []
     milvus_store = _build_milvus_store(encoder, diagnostics=milvus_errors)
     service = KnowledgeService(repository, encoder, milvus_store=milvus_store)
-    from ..integrations.embedding_cache import CachedDocumentEncoder
-    service.document_encoder = CachedDocumentEncoder(encoder,
-        (Path(upload_temp) if upload_temp else ROOT / 'data' / 'cache') / 'embeddings' / repository.storage_namespace)
+    cache_root = Path(upload_temp) if upload_temp else ROOT / 'data' / 'cache'
+    service.document_encoder = cached_document_encoder(
+        encoder, cache_root / 'embeddings' / repository.storage_namespace)
     service.vector_connector = lambda: _build_milvus_store(encoder)
     service.runtime_capabilities = RuntimeCapabilities(
         encoder=encoder,

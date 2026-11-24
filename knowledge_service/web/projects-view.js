@@ -99,8 +99,6 @@
       await projects();
       $('project').value = id;
       $('project').dispatchEvent(new Event('change'));
-      const name = $('project').selectedOptions[0]?.textContent || id;
-      status('已切换到项目：' + name);
       const chosen=projectsCache.find(item=>item.id===id);window.KnowledgeTabs.open((chosen?.counts?.documents||0)>0?'qa':'sources');
     }catch(e){
       status(e.message, true);
@@ -242,19 +240,25 @@
       const projects = projectsCache;
       root.innerHTML = `
         <div class="projects-header">
-          <div>
-            <h2>项目管理</h2>
-            <p class="subtle">共 ${projects.length} 个项目 · 创建、重命名或删除项目</p>
-          </div>
-          <div class="row"><button id="new-project">＋ 创建项目</button></div>
+          <h2>项目列表 <small id="projects-visible-count" aria-live="polite">${projects.length}</small></h2>
+          <input id="projects-find" type="search" placeholder="查找项目名称" aria-label="查找项目">
+          <button id="new-project">＋ 创建项目</button>
         </div>
-        <input id="projects-find" placeholder="查找项目名称" aria-label="查找项目" style="margin-bottom:16px;width:100%">
         ${projects.length
-          ? `<div class="projects-grid">${projects.map(projectCard).join('')}</div>`
+          ? `<div class="projects-grid">${projects.map(projectCard).join('')}</div><p class="projects-empty" id="projects-no-matches" hidden>没有符合名称的项目</p>`
           : `<div class="projects-empty"><div class="projects-empty-icon">📂</div><div class="projects-empty-title">暂无项目</div><div class="projects-empty-text">点击“＋ 创建项目”创建第一个知识项目</div></div>`}
       `;
       $('new-project').onclick = openCreate;
-      $('projects-find').oninput=()=>{const query=$('projects-find').value.trim().toLowerCase();root.querySelectorAll('.project-card').forEach(card=>{card.hidden=!card.querySelector('h3').textContent.toLowerCase().includes(query);});};
+      $('projects-find').oninput=()=>{
+        const query=$('projects-find').value.trim().toLowerCase();
+        let visible=0;
+        for(const card of root.querySelectorAll('.project-card')){
+          card.hidden=!card.querySelector('h3').textContent.toLowerCase().includes(query);
+          if(!card.hidden)visible++;
+        }
+        $('projects-visible-count').textContent=query?visible+' / '+projects.length:String(projects.length);
+        if(projects.length)$('projects-no-matches').hidden=visible>0;
+      };
       root.querySelectorAll('[data-switch]').forEach(b=>b.onclick=()=>switchProject(b.dataset.switch));
       root.querySelectorAll('[data-rename]').forEach(b=>b.onclick=()=>openRename(b.dataset.rename));
       root.querySelectorAll('[data-delete]').forEach(b=>b.onclick=()=>openDelete(b.dataset.delete));

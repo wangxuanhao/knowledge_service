@@ -31,11 +31,6 @@ function labelOf(type){ const local=typeof term==='function'?term(type):String(t
 const typeHint=type=>{const primary=labelOf(type),local=typeof term==='function'?term(type):String(type||'').split(/[\/#]/).pop();return primary===local?esc(primary):`${esc(primary)} <span class="subtle">${esc(local)}</span>`;};
 const recordName=id=>{const row=typeof wb!=='undefined'&&wb.records?wb.records.get(id):null;return row?row.text:(id||'(未加载)');};
 let statusTimer;
-// 提示条＝实体卡片，不再是一条压在页面中间的半透明细条。
-// 用户反馈（原话）："提示内容位置不合适，这种的都重新设计下 这些搞成实体框 在上面提示下啊，
-// 提示框样式你优化下"。旧样式是 fixed 居中压在标题栏上、12px 灰字、几乎看不见边界；
-// 现在：页面流内（不遮任何内容）+ 实心白底卡片 + 左侧色条 + 图标 + 关闭按钮，
-// 文案用正文色、可换行，长句子（比如带完整 UUID 的版本号）读得清。
 function noticeCard(message,{tone='info',onClose=null}={}){
   const card=document.createElement('div');
   card.className='ks-notice'+(tone&&tone!=='info'?` is-${tone}`:'');
@@ -91,8 +86,35 @@ async function api(path,body,method='POST',options){
 function endpoint(suffix){if(!current)throw Error('请先选择或创建项目');return '/api/projects/'+encodeURIComponent(current)+suffix;}
 function scope(){return window.WorkspaceContext?WorkspaceContext.read(current):{known_at:iso('known-at'),filters:json('filters'),include_unknown:true};}
 function bind(id,fn){let sequence=0;$(id).onclick=async()=>{const ticket=++sequence,project=current,button=$(id);button.disabled=true;status('处理中…');try{await fn();if(ticket===sequence&&project===current&&$('status').textContent==='处理中…')status('完成');}catch(error){if(ticket===sequence&&project===current)status(error.message,true);}finally{if(ticket===sequence){button.disabled=false;if(id==='preview-source'||id==='preview-chunks')window.LibraryWorkspace?.queueChanged?.();}}};}
-async function projects(){const result=await api('/api/projects?include_counts=false',undefined,'GET');$('project').innerHTML='<option value="">选择项目</option>'+result.projects.map(p=>`<option value="${esc(p.id)}" data-ontology-mode="${esc(p.metadata?.ontology_mode||'ontology')}">${esc(p.name)}</option>`).join('');if(current)$('project').value=current;}
-$('project').onchange=()=>{window.WorkspaceDrawers?.close({restoreFocus:false});window.RecordCreate?.close({restoreFocus:false});current=$('project').value;window.LibraryWorkspace?.projectChanged(current);window.IngestBatches?.projectChanged();for(const id of ['hits','records','history','search-summary'])$(id).textContent='';window.clearKnowledgeChat?.({notify:true});for(const id of ['revision','revision-id'])$(id).value='';$('revision-version').value=1;status('项目已切换');};
+async function projects(){
+  const result=await api('/api/projects?include_counts=false',undefined,'GET');
+  const select=$('project');
+  select.innerHTML='<option value="">选择项目</option>'+result.projects.map(p=>
+    `<option value="${esc(p.id)}" data-ontology-mode="${esc(p.metadata?.ontology_mode||'ontology')}">${esc(p.name)}</option>`
+  ).join('');
+  if(current)select.value=current;
+  window.RetrievalWorkspace?.syncProject();
+}
+// Capture the previous project before the change handlers update current.
+$('project').addEventListener('change',event=>{
+  const option=event.currentTarget.selectedOptions[0];
+  if(current && option?.value && option.value!==current)status('项目已切换：'+option.textContent);
+},{capture:true});
+$('project').onchange=()=>{
+  const selected=$('project').value;
+  if(current && !selected)status('');
+  window.WorkspaceDrawers?.close({restoreFocus:false});
+  window.RecordCreate?.close({restoreFocus:false});
+  current=selected;
+  window.RetrievalWorkspace?.syncProject();
+  window.ProjectVectorIndex?.refresh({refresh:true});
+  window.LibraryWorkspace?.projectChanged(current);
+  window.IngestBatches?.projectChanged();
+  for(const id of ['hits','records','history','search-summary'])$(id).textContent='';
+  window.clearKnowledgeChat?.({notify:true});
+  for(const id of ['revision','revision-id'])$(id).value='';
+  $('revision-version').value=1;
+};
 function activateTab(name,button=null){
   if(name==='ingest'&&window.LibraryWorkspace){window.LibraryWorkspace.open('upload',{trigger:button});return;}
   window.WorkspaceDrawers?.close({restoreFocus:false});

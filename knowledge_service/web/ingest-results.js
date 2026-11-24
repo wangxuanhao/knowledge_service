@@ -456,6 +456,7 @@
       status: 'completed', progress: 100, stage: '正在读取结果…', error: '', asserts: null, resultError: false};
     jobs.set(key, d);open();render();
     try {
+      if (context.loadItem) item = await context.loadItem();
       const documentId = item.document_id || item.result?.document?.id || item.result?.document_id;
       if (!d.projectId || !documentId) throw Error('批次结果缺少项目或文档 ID');
       d.documentId = documentId;

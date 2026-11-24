@@ -7,9 +7,8 @@ from pydantic import BaseModel, Field
 
 from .audit_identity import audit_actor
 from ..services.source_documents import SourceDocumentService, SourceDocumentUnavailable, SourceOCRError
-from ..integrations.video_asr import ASRError
-from ..integrations.pdf_preview import PDFPreviewError
-from ..services.source_pdf_preview import SourcePDFPreviewService
+from ..services.source_pdf_preview import PDFPreviewError, SourcePDFPreviewService
+from ..services.video_asr import ASRError
 
 
 class IgnoreImage(BaseModel):
@@ -32,8 +31,8 @@ def install(app, service):
                 'code': 'source_object_unavailable', 'message': str(exc)}) from exc
 
     @router.get('/{version_id}')
-    def metadata(project_id: str, version_id: str):
-        result = sources.get(project_id, version_id)
+    def metadata(project_id: str, version_id: str, chunk_version_id: str | None = None):
+        result = sources.get(project_id, version_id, chunk_version_id=chunk_version_id)
         return {key: value for key, value in result.items() if key != 'storage_key'}
 
     @router.get('/{version_id}/rendered', response_class=HTMLResponse)

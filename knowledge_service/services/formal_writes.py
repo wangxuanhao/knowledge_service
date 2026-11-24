@@ -33,6 +33,26 @@ def _writable(record):
         'project_id', 'version', 'version_id', 'recorded_at', 'superseded_at'}}
 
 
+def _canonical_record(record):
+    canonical = copy.deepcopy(record)
+    if canonical['kind'] in {'entity', 'relation', 'attribute'}:
+        canonical.pop('source_id', None)
+        canonical['metadata'] = {
+            key: value for key, value in canonical.get('metadata', {}).items()
+            if key not in SOURCE_METADATA and key not in {'_identity_resolution_checked', '_manual_actor'}}
+    return canonical
+
+
+def unchanged_source_attachment(record, saved):
+    if (not record.get('source_id') or record['kind'] not in {'entity', 'relation', 'attribute'}
+            or not saved or not saved.get('version_id')):
+        return False
+    metadata = saved.get('metadata', {})
+    if any(metadata.get(key) for key in ('_deleted', '_quarantined', '_unsupported')):
+        return False
+    return _fingerprint(_canonical_record(record)) == _fingerprint(_canonical_record(_writable(saved)))
+
+
 def _assertion_comparable(item):
     return {key: item.get(key) for key in (
         'id', 'kind', 'document_id', 'document_version_id', 'chunk_id',
@@ -101,6 +121,8 @@ class _Planner:
             'record': copy.deepcopy(record),
             'expected_version': expected_version,
         }
+        if self.operation == 'manual_write' and (actor := self.policy.get('manual_actor')):
+            action['manual_actor'] = actor
         self.actions.append(action)
         self.result_refs.append({'token': token})
         previous = self.records.get(record['id'])
@@ -159,17 +181,7 @@ class _Planner:
             raise ValueError('版本冲突：事实键已变更')
         active['canonical_record_id'] = target
 
-    @staticmethod
-    def _canonical_record(record):
-        canonical = copy.deepcopy(record)
-        if canonical['kind'] in {'entity', 'relation', 'attribute'}:
-            canonical.pop('source_id', None)
-            canonical['metadata'] = {
-                key: value for key, value in canonical.get('metadata', {}).items()
-                if key not in SOURCE_METADATA and key != '_identity_resolution_checked'}
-        return canonical
-
-    def _source_assertion(self, record, expected_version, ordinal):
+    def _source_assertion(self, record, expected_version, ordinal, *, attached_version_id=None):
         metadata = record.get('metadata', {})
         raw_terms = [str(record.get(key, '')) for key in
                      ('subject_id', 'type', 'object_id', 'text')]
@@ -178,7 +190,18 @@ class _Planner:
             raw_terms.extend(typed_value)
         document_version_id = metadata.get('source_version_id')
         chunk_id = metadata.get('chunk_id')
-        if document_version_id and chunk_id:
+        start_char = metadata.get('start_char')
+        end_char = metadata.get('end_char')
+        if type(start_char) is int and end_char is None:
+            end_char = start_char + len(record.get('text', ''))
+        quote = metadata.get('passage') or metadata.get('evidence') or record.get('text')
+        if attached_version_id:
+            assertion_id = 'ast_' + _fingerprint([
+                'source_attachment', self.snapshot['storage_namespace'], attached_version_id,
+                record['source_id'], document_version_id, chunk_id, metadata.get('source_hash'),
+                start_char, end_char, quote,
+            ])
+        elif document_version_id and chunk_id:
             assertion_id = occurrence_id(
                 self.snapshot['storage_namespace'], document_version_id, chunk_id,
                 record['kind'], ordinal, raw_terms)
@@ -186,22 +209,31 @@ class _Planner:
             assertion_id = manual_assertion_id(
                 self.snapshot['storage_namespace'], self.operation, record,
                 expected_version)
-        start_char = metadata.get('start_char')
-        end_char = metadata.get('end_char')
-        if type(start_char) is int and end_char is None:
-            end_char = start_char + len(record.get('text', ''))
         return {
             'id': assertion_id, 'kind': record['kind'],
             'document_id': record.get('source_id'),
             'document_version_id': document_version_id,
             'chunk_id': chunk_id, 'source_hash': metadata.get('source_hash'),
             'start_char': start_char, 'end_char': end_char,
-            'quote': (metadata.get('passage') or metadata.get('evidence')
-                      or record.get('text')),
+            'quote': quote,
             'payload': {key: value for key, value in record.items()
                         if key not in {'embedding', 'embedding_model'}},
-            'actor': 'formal-writer',
+            'actor': (self.policy.get('manual_actor') if self.operation == 'manual_write' else None)
+                     or 'formal-writer',
         }
+
+    def _already_attached(self, proposed, record_id, version_id):
+        fields = ('kind', 'document_id', 'document_version_id', 'chunk_id',
+                  'source_hash', 'start_char', 'end_char', 'quote')
+        for assertion in self.assertions.values():
+            if (assertion['status'] != 'accepted' or assertion.get('canonical_record_id') != record_id
+                    or any(assertion.get(key) != proposed.get(key) for key in fields)):
+                continue
+            events = self.event_ids_by_decision.get((assertion['id'], assertion['decision_version']), ())
+            if any(version_id in self.mapping_versions.get((assertion['id'], event, record_id), ())
+                   for event in events):
+                return True
+        return False
 
     def _queue_assertion_accept(self, item, canonical_id, record_ref):
         assertion = copy.deepcopy(item)
@@ -314,9 +346,23 @@ class _Planner:
             and row.get('metadata', {}).get('_deleted')
             and row.get('metadata', {}).get('merged_into')}
         for ordinal, original in enumerate(self.records_input):
-            record = self._canonical_record(original)
+            record = _canonical_record(original)
             expected_version = self.expected.get(record['id'])
             canonical_id = record['id']
+            saved = self.records.get(canonical_id)
+            if (self.operation == 'manual_write' and expected_version is not None
+                    and (saved['version'] if saved else 0) != expected_version):
+                raise ValueError('版本冲突：记录已变更')
+            if (self.operation == 'manual_write' and expected_version is not None
+                    and unchanged_source_attachment(original, saved)):
+                record_ref = self._return_existing(canonical_id)
+                self.canonical_by_input[original['id']] = canonical_id
+                if not self.policy.get('suppress_auto_assertions'):
+                    assertion = self._source_assertion(
+                        original, expected_version, ordinal, attached_version_id=record_ref['version_id'])
+                    if not self._already_attached(assertion, canonical_id, record_ref['version_id']):
+                        auto.append((assertion, canonical_id, record_ref))
+                continue
             selected_ref = None
             if record['kind'] in {'relation', 'attribute'}:
                 old_key = self._active_key_for_record(record['id'])
@@ -727,9 +773,9 @@ class _Planner:
         new_bindings=set()
         for action in self.actions:
             kind=action['kind']
-            if kind=='assertion_accept':
+            if kind=='assertion_accept' and action['mode']!='replay':
                 touched.add(action['canonical_record_id'])
-                if action['mode']!='replay':new_bindings.add(action['assertion']['id'])
+                new_bindings.add(action['assertion']['id'])
             elif kind=='assertion_transition' and action['status']=='accepted':
                 touched.add(action['canonical_record_id']);new_bindings.add(action['id'])
             elif kind=='assertion_move' and action['status_after']=='accepted':

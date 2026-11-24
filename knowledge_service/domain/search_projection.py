@@ -12,6 +12,10 @@ from .search_filter_catalog import INT64_MAX, INT64_MIN, TOP_LEVEL_FIELDS
 from ..core.time import normalize_time
 
 
+# Native projection readers opt into the schema they understand.
+PROJECTION_SCHEMA_VERSIONS = {'milvus': 5, 'neo4j': 3}
+
+
 class ProjectionFieldMismatch(ValueError):
     """Current page fields exceeded the immutable project build manifest."""
     requires_rebuild = True

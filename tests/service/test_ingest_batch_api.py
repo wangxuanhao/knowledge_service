@@ -20,6 +20,46 @@ def test_capabilities_and_batch_file_contract(tmp_path):
         assert first.json()['id']==again.json()['id']
         page=client.get(f'/api/projects/{project}/ingest-batches/{bid}/items?limit=1').json()
         assert page['total']==1 and 'next_cursor' in page
+        assert 'batch' not in page
+        detail=client.get(f'/api/projects/{project}/ingest-batches/{bid}/items',
+                          params={'include_batch':True,'item_id':first.json()['id']})
+        assert detail.status_code==200, detail.text
+        assert detail.json()['batch']['id']==bid
+        assert detail.json()['batch']['counts']['queued']==1
+        assert detail.json()['items']==page['items']
+        other=client.post('/api/projects',json={'name':'other','ontology_mode':'documents'}).json()['id']
+        assert client.get(f'/api/projects/{other}/ingest-batches/{bid}/items?include_batch=true').status_code==404
+
+
+def test_batch_item_summary_preserves_legacy_links_without_full_result(tmp_path):
+    import json
+    from knowledge_service.integrations.embeddings import HashingEncoder
+
+    app = create_app(tmp_path / 'batch-summary', encoder=HashingEncoder())
+    repo = app.state.service.repository
+    project = repo.create_project('批次摘要')['id']
+    batch = repo.ingest_batches.create_batch(project, {})
+    item = repo.ingest_batches.add_item(project, batch['id'], 'legacy.md', b'x', 'hash', 'legacy', 10, 100)
+    saved = {'document': {'id': 'doc-old', 'text': 'x' * 100_000, 'metadata': {'run_id': 'run-old'}},
+             'records': [{'text': 'y' * 100_000}]}
+    with repo._transaction():
+        repo._db.execute("UPDATE ingest_batch_items SET status='succeeded', document_id='', result=?::jsonb WHERE id=?",
+                         (json.dumps(saved), item['id']))
+
+    client = TestClient(app)
+    url = f'/api/projects/{project}/ingest-batches/{batch["id"]}/items'
+    summary = client.get(url, params={'summary_only': True, 'include_batch': True, 'status': 'completed'})
+    assert summary.status_code == 200, summary.text
+    payload = summary.json()
+    assert payload['batch']['counts']['completed'] == payload['total'] == 1
+    (row,) = payload['items']
+    assert (row['id'], row['document_id'], row['run_id'], row['status']) == (
+        item['id'], 'doc-old', 'run-old', 'completed')
+    assert 'result' not in row and 'options_json' not in row
+    assert len(summary.content) < 3_000
+    detail = client.get(url, params={'item_id': item['id'], 'limit': 1})
+    assert detail.status_code == 200, detail.text
+    assert detail.json()['items'][0]['result'] == saved
 
 
 def test_zip_documents_ocr_spans_and_package_are_fixed(tmp_path):

@@ -11,12 +11,14 @@ from knowledge_service.services.graph_sessions import GraphSessions
 class Repository:
     def __init__(self):
         self.snapshots = 0
+        self.snapshot_options = []
         self.watermark = 7
         self.artifacts = {}
         self.projections = SimpleNamespace(project_watermark=lambda _: self.watermark)
 
     @contextmanager
-    def read_snapshot(self):
+    def read_snapshot(self, *, disable_jit=False):
+        self.snapshot_options.append(disable_jit)
         self.snapshots += 1
         try:
             yield
@@ -91,6 +93,15 @@ class ConnectedGraphPages(unittest.TestCase):
         self.repo.watermark += 1
         with self.assertRaisesRegex(ValueError, '变化'):
             self.page()
+
+    def test_business_scope_disables_jit_for_manifest_and_pages(self):
+        scope = {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}}
+        manifest = self.service.create('p', scope, actor_id='owner')
+        page = self.service.page('p', manifest['id'], 'connected', actor_id='owner')
+
+        self.assertEqual(self.repo.snapshot_options, [False, True, True])
+        self.assertEqual(manifest['scope'], scope)
+        self.assertEqual([row['id'] for row in page['entities']], ['a', 'b'])
 
     def test_connected_pages_are_bounded_and_never_emit_dangling_edges(self):
         for invalid in (0, 501, True, 1.5):

@@ -22,7 +22,7 @@
     const titles=['上传核对','配置资料','解析与检查','确认处理'];
     const tabs=titles.map((text,i)=>{const b=makeButton(`${i+1}  ${text}`,()=>go(i));nav.append(b);return b;});
     const stages=titles.map((_,i)=>{const e=node('section',undefined,'preparation-stage');e.dataset.preparationStep=i;return e;});
-    const instruction=node('p','上传仅暂存和校验。配置完成并点击“开始解析”后，才运行文字识别或视频转写。','subtle');
+    const instruction=node('p','文件先暂存，配置后可开始解析。','subtle');
     const input=node('input');input.type='file';input.id='preparation-files';input.multiple=true;
     const drop=node('label',undefined,'preparation-drop');drop.htmlFor=input.id;
     drop.append(node('strong','选择文件，或拖放到这里'),node('span','每个文件对应一份资料。'),input);
@@ -41,7 +41,7 @@
     limits.hidden=true;
     const drafts=node('details',undefined,'preparation-drafts');drafts.append(node('summary','未提交的文件与解析进度'));
     const draftList=node('div');drafts.append(node('p','查看提交前的解析进度，或继续配置文件。已提交的任务在「处理批次」。','subtle'),draftList);drafts.ontoggle=()=>{if(drafts.open&&active)loadDrafts().catch(error=>{if(active)showError(error);});};
-    stages[0].append(instruction,drop,zipHelp,limits,uploadList,drafts);
+    stages[0].append(drop,instruction,zipHelp,limits,uploadList,drafts);
     const configTools=node('div',undefined,'preparation-toolbar');
     const all=makeButton('全选',()=>{items().filter(i=>i.status!=='published').forEach(i=>selected.add(i.id));render();});
     const none=makeButton('清除选择',()=>{selected.clear();render();});
@@ -91,7 +91,7 @@
       if(editing||busy||uploading)throw Error('请先完成当前上传或保存设置。');
       if(!session)return;const target=session,ticket=generation;await restorePreparation(target);if(ticket!==generation)return;const finished=clearSubmittedSession(target);if(!finished)restoreSettings();render();schedule();message(finished?'文件均已提交，可继续添加新文件；进度请到“处理批次”查看。':'已刷新未完成文件，请核对设置后继续。');
     }));
-    container.append(nav,notice,refreshTools,...stages,footer,overlay);host.append(container);
+    container.append(nav,notice,...stages,refreshTools,footer,overlay);host.append(container);
     const items=()=>(viewData.items||[]).filter(item=>item.status!=='published');
     const processing=()=>P.processingCopy(viewData.publication_settings?.extraction_mode||D.getElementById('extraction-mode')?.value||'documents');
     const retryable=item=>['failed','cancelled','stale'].includes(item.status);

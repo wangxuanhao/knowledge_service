@@ -1,9 +1,55 @@
 """Source confirmations and ingestion history stay distinct in the real drawer."""
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from test_workspace_redesign_ui import redesign_page
+
+
+def test_source_load_more_appends_only_new_directory_rows(redesign_page):
+    page, errors = redesign_page
+
+    def sources(route):
+        query = parse_qs(urlparse(route.request.url).query)
+        start = int(query.get('cursor', ['0'])[0])
+        end = min(1000, start + 50)
+        route.fulfill(json={'documents': [
+            {'id': f'd-{index}', 'metadata': {'title': f'资料 {index}', 'status': 'completed'}}
+            for index in range(start, end)
+        ], 'total': 1000, 'next_cursor': str(end) if end < 1000 else None,
+            'counts': {'all': 1000, 'ready': 1000, 'processing': 0, 'failed': 0}})
+
+    page.route('**/api/projects/p/sources?*', sources)
+    page.evaluate("() => window.KnowledgeTabs.open('sources')")
+    for count in range(50, 950, 50):
+        page.wait_for_function("count => document.querySelectorAll('#source-list .source-item').length === count", arg=count)
+        page.locator('#source-load-more').evaluate('button => button.click()')
+    page.wait_for_function("document.querySelectorAll('#source-list .source-item').length === 950")
+    page.evaluate("""() => {
+      const list = document.getElementById('source-list');
+      const originalRows = [...list.children];
+      let added = 0, removed = 0;
+      const start = performance.now();
+      const observer = new MutationObserver(entries => {
+        for (const entry of entries) {
+          added += entry.addedNodes.length;
+          removed += entry.removedNodes.length;
+        }
+        if (list.children.length !== 1000) return;
+        observer.disconnect();
+        window.sourceAppendMetrics = {added, removed, retained: originalRows.filter(row => row.isConnected).length,
+          elapsed_ms: performance.now() - start};
+      });
+      observer.observe(list, {childList: true});
+      document.getElementById('source-load-more').click();
+    }""")
+    page.wait_for_function('window.sourceAppendMetrics')
+    metrics = page.evaluate('window.sourceAppendMetrics')
+    print('Sources append:', metrics)
+    assert (metrics['added'], metrics['removed'], metrics['retained']) == (50, 0, 950)
+    assert page.locator('#source-list .source-item').last.locator('b').inner_text() == '资料 999'
+    assert errors == []
 
 
 @pytest.mark.parametrize('width,height', [(1440, 950), (390, 844)])
@@ -23,7 +69,7 @@ def test_published_source_facts_are_visible_beside_discovery_history(redesign_pa
     page.route('**/api/projects/p/assertions**', lambda route: route.fulfill(json={'assertions': [{
         'document_id': 'd', 'kind': 'entity', 'status': 'accepted', 'canonical_record_id': 'formal-fact',
     }]}))
-    page.click('[data-tab="sources"]')
+    page.evaluate("() => window.KnowledgeTabs.open('sources')")
     page.locator('#source-list .source-item').first.click()
     page.locator('.source-detail-tabs button').filter(has_text='处理记录').click()
     page.wait_for_function("document.querySelector('.source-graph-status')?.textContent.includes('已确认入图事实：1 条')")

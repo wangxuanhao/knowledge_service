@@ -6,12 +6,13 @@
   const host=$('records'), tab=$('tab-records');let rows=[],total=0,request=0,page=0,view='entity',loadedScope=null;
   const visible=()=>!tab.hidden&&!tab.classList.contains('hidden');
   const pageCounts=new Map();let pager=null,loading=false,searchTimer=null,operationsRequest=0,operationsState='idle';
+  const pendingDeletes=new Set();
   const openCreator=(kind,options)=>{if(window.RecordCreate?.open)return window.RecordCreate.open(kind,options);status('知识创建组件未加载，请刷新页面重试。',true);};
   // 分页资料与按需打开的台账工具共享当前项目：
   //   ontology  本体版本表（本体归属列：这条知识挂在哪一版本体上）
   //   assertions 关联断言（血缘数量与审核状态，不把全部关联都称为有效支撑）
   //   operations 可撤销的操作（撤销入口）
-  let ontology=null,assertions=null,operations=[];
+  let ontology=null,assertions=null,operations=[],rowEnrichments=[];
   // 图谱里点「在台账查看」→ 跳回台账定位到那一行。跨页签跳转要先记下目标，等 load() 把
   // 数据取回来再滚动高亮（rows 在 load 完成前是空的，立刻定位会扑空）。
   let pendingLedgerFocus=null,exactLedgerId=null;
@@ -36,7 +37,8 @@
     attribute:['属性','所属实体','本体归属','知识修订','关联断言','操作'],
     chunk:['原文片段','来源文档','知识修订','关联断言','操作'],
   };
-  const header=node('div','ledger-toolbar');
+  const header=libraryPanel.querySelector('.records-actions-row')||node('div');
+  header.classList.add('ledger-toolbar');
   const intro=node('p','ledger-intro','在这里查找和维护已入库的知识。调整类型定义请前往「本体建模层」。');
   const tabs=node('div','ledger-tabs');tabs.id='ledger-tabs';tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','知识类别');
   const operations_section=node('section','ledger-operations');operations_section.id='ledger-operations';
@@ -58,7 +60,7 @@
     if(window.TaskReview?.open)return window.TaskReview.open({trigger:reviewButton});
     status('知识审核组件未加载，请刷新页面重试。',true);
   },'knowledge-review-drawer');
-  const governanceButton=tool('ledger-open-governance','查重与合并',()=>openDrawer(governanceDrawer,governanceButton),'ledger-governance-drawer');
+  const governanceButton=tool('ledger-open-governance','查重与合并',()=>openDuplicateReview(),'ledger-governance-drawer');
   const operationsButton=tool('ledger-open-operations','可撤销的操作',()=>openOperations(operationsButton),'ledger-operations-drawer');
   const modelButton=tool('ledger-open-model','本体检查',()=>openDrawer(modelDrawer,modelButton),'ledger-model-drawer');
   const makeDrawer=(id,title,description,content,options)=>{
@@ -79,7 +81,8 @@
   const modelActions=node('div','ledger-tool-actions');modelActions.append(modelCheck,pendingButton);
   model_section.append(modelActions,modelFeedback,stale_notice,pendingFeedback);
   entries.append(reviewButton,governanceButton,operationsButton,modelButton);
-  header.append(intro,entries);host.before(header,tabs);
+  header.append(entries);host.before(header,tabs);
+  host.after(intro);
   const bar=document.createElement('div');bar.className='record-library-tools';
   bar.innerHTML='<label>搜索记录<input id="record-search" placeholder="名称、正文、别名或记录编号"></label><button type="button" id="record-search-submit" class="secondary record-search-submit">查询</button>'
     +'<label class="record-kind-search">知识类别<select id="record-kind">'
@@ -100,7 +103,21 @@
   const governance=[...tab.querySelectorAll('.panel')].find(p=>p.querySelector('#resolve-text'));
   const reviews_section=node('section','ledger-resolution-reviews');reviews_section.hidden=true;
   const duplicateFeedback=node('p','ledger-tool-feedback');duplicateFeedback.id='ledger-duplicate-feedback';duplicateFeedback.setAttribute('role','status');
-  let governanceDrawer,renderDuplicateGroups;
+  let governanceDrawer,showDuplicateReview,renderDuplicateGroups;
+  function openDuplicateReview(source=null){
+    if(!openDrawer(governanceDrawer,governanceButton))return false;
+    window.EntityGovernance?.setDocumentScope?.(source);
+    showDuplicateReview();
+    return true;
+  }
+  window.openDocumentDuplicateReview=({projectId,id,version_id,title})=>{
+    if(projectId!==current||!id||!version_id)return false;
+    if(!governanceDrawer||!window.EntityGovernance?.setDocumentScope||!window.KnowledgeTabs){
+      status('查重与合并组件尚未加载，请刷新页面重试。',true);return false;
+    }
+    window.KnowledgeTabs.open('records');
+    return openDuplicateReview({id,version_id,title});
+  };
   if(governance){
     const content=node('div','record-governance');
     const switcher=node('div','ledger-tool-actions');switcher.setAttribute('aria-label','实体治理方式');
@@ -112,8 +129,9 @@
       if(show&&!reviews_section.firstChild&&window.EntityGovernance)
         void window.EntityGovernance.mount(reviews_section,{reload:load});
     }
-    switcher.append(manualButton,resolutionButton);content.append(switcher,governance,reviews_section);
-    governanceDrawer=makeDrawer('ledger-governance-drawer','查重与合并','按名称或别名查找实体、合并重复项，或处理待复核候选。',content,{dismissOnBackdrop:false,onClose:()=>showResolution(false)});
+    showDuplicateReview=()=>showResolution(true);
+    switcher.append(resolutionButton,manualButton);content.append(switcher,governance,reviews_section);
+    governanceDrawer=makeDrawer('ledger-governance-drawer','查重与合并','按资料或全项目找重复实体，核对差异和影响后确认合并。',content,{dismissOnBackdrop:false,onClose:()=>showResolution(false)});
     showResolution(false);
     const controls=governance.querySelector('.entity-governance-bar'),control=id=>$(id).closest('label')||$(id);
     const step=(number,title,description,ids,risk=false)=>{const section=document.createElement('section');section.className='governance-step'+(risk?' governance-step-risk':'');section.innerHTML=`<header><b>${number}</b><div><h3>${title}</h3><small>${description}</small></div></header>`;ids.map(control).forEach(item=>section.append(item));return section;};
@@ -318,6 +336,11 @@
         };
         box.append(locate);
       }
+      if(row.kind!=='chunk'&&!row.metadata?._deleted&&!loadedScope?.known_at&&window.Auth?.isAdmin?.()){
+        const remove=node('button','danger admin-only','删除');remove.type='button';
+        remove.setAttribute('aria-haspopup','dialog');
+        remove.onclick=()=>openDeleteRow(row,remove);box.append(remove);
+      }
       // 撤销：这条记录是某次操作（合并/删除/撤销）改过的，就能连那次操作一起撤掉 —— 接口早就有了，以前 UI 点不到。
       const operationId=row.metadata&&row.metadata._operation_id;
       if(operationId){
@@ -336,11 +359,14 @@
     const pending=state.state==='pending';
     const badge=node('span','ledger-pending-badge'+(pending?'':' is-cleared'),
       pending?'结构待定':'结构待定已解除');
-    badge.title=pending
+    badge.title=pendingBadgeTitle(state);
+    return badge;
+  }
+  function pendingBadgeTitle(state){
+    const description=state.state==='pending'
       ?`类型「${(state.terms||[]).join('、')||'（未命名）'}」在本体里还没有${state.via?.length?'（因为端点 '+(state.via||[]).map(nameOf).join('、')+' 的概念还没有）':''}。这条知识已收下：能查、能看原文、能被引用，但不作为正式证据；去「本体建模层」把概念建出来并发布，标记自动解除。`
       :`本体里已经有这些概念了（${(state.marked||[]).join('、')}），标记自动解除，不需要人工清理。`;
-    badge.title+=' 当前治理状态按当前本体判断，不代表已迁移或通过绑定本体校验。';
-    return badge;
+    return description+' 当前治理状态按当前本体判断，不代表已迁移或通过绑定本体校验。';
   }
   function migrationBadge(row,release){
     if(!release||release.isCurrent)return null;
@@ -359,8 +385,10 @@
   }
   function appendExcerpt(cell,excerpt,fullText=excerpt.textContent){
     const detail=node('details','record-fulltext');detail.hidden=true;
-    detail.append(node('summary',null,'查看全文'),node('div','record-fulltext-content',fullText));
+    const content=node('div','record-fulltext-content',fullText);
+    detail.append(node('summary',null,'查看全文'),content);
     cell.append(excerpt,detail);
+    return content;
   }
   function syncExcerptVisibility(){
     const details=[...host.querySelectorAll('.record-fulltext')]
@@ -378,39 +406,92 @@
   // Recheck actual wrapping after container resizing or stylesheet/font layout changes.
   const excerptObserver=window.ResizeObserver?new window.ResizeObserver(syncExcerptVisibility):null;
   excerptObserver?.observe(host);
+  function updateText(element,text){
+    if(element.textContent===text)return false;
+    element.textContent=text;return true;
+  }
+  function renderSupport(cell,row){
+    const summary=supportBreakdown(row);
+    if(summary===null){cell.textContent=assertions?'关联断言读取失败；可刷新重试':'读取中…';return;}
+    const {total:count,counts,incomplete}=summary,strong=node('b',null,(incomplete?'已读 ':'')+(count?String(count):'0'));
+    const statusText=[['accepted','已采纳'],['pending','待审核'],['superseded','已失效'],['rejected','已拒绝'],['other','其他状态']]
+      .filter(([key])=>counts[key]).map(([key,label])=>`${label} ${counts[key]}`).join(' · ');
+    cell.title=incomplete?'候选血缘未完整读取，不能据此判断是否没有来源。':count?'这些断言与该知识存在血缘关联；审核状态见下方。是否支持当前修订需在来源详情中核对。':'未找到关联断言，可能是人工写入或旧数据未归位。';
+    cell.replaceChildren(strong,node('small',null,'条关联断言'));
+    if(statusText)cell.append(node('small',null,statusText));
+    if(incomplete)cell.append(node('small','error','候选血缘未完整读取，计数不完整'));
+  }
   function cells(row){
+    const labelUpdates=[];
     const entityLink=id=>{
       if(!id)return node('span',null,'未关联实体');
       const link=node('button','secondary',nameOf(id));link.type='button';
       link.dataset.ledgerEntity=id;link.title='在台账查看实体：'+id;
       link.onclick=()=>window.focusLedgerRecord({id,kind:'entity'});
+      labelUpdates.push(()=>updateText(link,nameOf(id)));
       return link;
     };
-    const ownershipCell=()=>{const cell=node('td');const label=node('b',null,ownership(row));label.title=ownershipDetail(row);cell.append(label);return cell;};
-    const supportCell=()=>{const cell=node('td'),summary=supportBreakdown(row);
-      if(summary===null){cell.textContent=assertions?'关联断言读取失败；可刷新重试':'读取中…';return cell;}
-      const {total:count,counts,incomplete}=summary,strong=node('b',null,(incomplete?'已读 ':'')+(count?String(count):'0'));
-      const statusText=[['accepted','已采纳'],['pending','待审核'],['superseded','已失效'],['rejected','已拒绝'],['other','其他状态']]
-        .filter(([key])=>counts[key]).map(([key,label])=>`${label} ${counts[key]}`).join(' · ');
-      cell.title=incomplete?'候选血缘未完整读取，不能据此判断是否没有来源。':count?'这些断言与该知识存在血缘关联；审核状态见下方。是否支持当前修订需在来源详情中核对。':'未找到关联断言，可能是人工写入或旧数据未归位。';
-      cell.append(strong,node('small',null,'条关联断言'));
-      if(statusText)cell.append(node('small',null,statusText));
-      if(incomplete)cell.append(node('small','error','候选血缘未完整读取，计数不完整'));
-      return cell;};
-    const versionCell=()=>{const cell=node('td'),release=ontology?.byId.get(row.ontology_id);
-      cell.append(node('b',null,'修订 r'+row.version),node('small',null,ownershipSummary(row)),
-        node('small',null,window.DisplayTime.format(row.recorded_at)));
-      const migration=migrationBadge(row,release);if(migration)cell.append(migration);return cell;};
+    const typeLabel=(tag,fallback='')=>{
+      const label=node(tag),read=()=>typeHint(row.type)||fallback;
+      let html=read();label.innerHTML=html;
+      labelUpdates.push(()=>{
+        const next=read();if(next===html)return false;
+        html=next;label.innerHTML=html;return true;
+      });
+      return label;
+    };
+    const referencedExcerpt=(cell,excerpt)=>{
+      const content=appendExcerpt(cell,excerpt);
+      labelUpdates.push(()=>updateText(content,excerpt.textContent));
+    };
+    const appendPendingBadge=cell=>{
+      const badge=pendingBadge(row);if(!badge)return;
+      cell.append(badge);
+      if(row.structure_pending.via?.length)labelUpdates.push(()=>{
+        const title=pendingBadgeTitle(row.structure_pending);
+        if(badge.title!==title)badge.title=title;
+        return false;
+      });
+    };
+    const finish=(first,second)=>{
+      const version=node('td'),ownershipText=node('small'),support=node('td');
+      const ownershipCell=view==='chunk'?null:node('td'),ownershipLabel=ownershipCell?node('b'):null;
+      ownershipCell?.append(ownershipLabel);
+      version.append(node('b',null,'修订 r'+row.version),ownershipText,node('small',null,window.DisplayTime.format(row.recorded_at)));
+      let migration;
+      const refreshMigration=()=>{
+        const next=migrationBadge(row,ontology?.byId.get(row.ontology_id));
+        if(next?.textContent===migration?.textContent)return;
+        migration?.remove();migration=next;
+        if(migration)version.append(migration);
+      };
+      const refreshOntology=()=>{
+        if(ownershipLabel){
+          updateText(ownershipLabel,ownership(row));
+          ownershipLabel.title=ownershipDetail(row);
+        }
+        updateText(ownershipText,ownershipSummary(row));refreshMigration();
+      };
+      const refreshSupport=()=>renderSupport(support,row);
+      refreshOntology();refreshSupport();
+      rowEnrichments.push({refreshOntology,refreshSupport,refreshMigration,labelUpdates});
+      return ownershipCell?[first,second,ownershipCell,version,support]:[first,second,version,support];
+    };
     if(view==='chunk'){
       const text=node('td');const excerpt=node('div','record-excerpt',String(row.text||''));
       appendExcerpt(text,excerpt);
       const detail=document.createElement('details');detail.innerText='';detail.append(node('summary',null,'编号与有效期'),node('small',null,`${row.id}\n${window.DisplayTime.format(row.valid_from,"未知")} → ${window.DisplayTime.format(row.valid_until,"未知")}`));
       text.append(detail);
-      const source=node('td');const sourceRow=wb.records.get(row.source_id)||rows.find(item=>item.id===row.source_id);
+      const source=node('td');
+      const sourceName=()=>{
+        const sourceRow=wb.records.get(row.source_id)||rows.find(item=>item.id===row.source_id);
+        return sourceRow?(sourceRow.metadata?.title||sourceRow.text||row.source_id):(row.source_id||'—');
+      };
       const sourceText=node('div','record-excerpt');
-      sourceText.append(node('b',null,sourceRow?(sourceRow.metadata?.title||sourceRow.text||row.source_id):(row.source_id||'—')));
-      appendExcerpt(source,sourceText);
-      return [text,source,versionCell(),supportCell()];
+      const name=node('b',null,sourceName());sourceText.append(name);
+      labelUpdates.push(()=>updateText(name,sourceName()));
+      referencedExcerpt(source,sourceText);
+      return finish(text,source);
     }
     /* 属性视角：一条属性记录 = 某个实体 + 属性名 + 值 + 数据类型（不是实体、也不是关系）。
        列也不同（第二列是「所属实体」而不是「本体类型」），所以在这里单独一支。 */
@@ -418,25 +499,25 @@
       const first=node('td');
       const shown=row.value===undefined?'':(typeof row.value==='string'?row.value:JSON.stringify(row.value));
       const excerpt=node('div','record-excerpt');
-      const label=node('b');label.innerHTML=typeHint(row.type)||esc(row.type||'（未命名属性）');
+      const label=typeLabel('b',esc(row.type||'（未命名属性）'));
       excerpt.append(label,document.createTextNode(' = '+shown));
       appendExcerpt(first,excerpt,String(shown));
       const detail=document.createElement('details');
       detail.append(node('summary',null,'编号、数据类型与有效期'),
         node('small',null,`${row.id}\n数据类型 ${row.datatype||'—'} · ${window.DisplayTime.format(row.valid_from,"未知")} → ${window.DisplayTime.format(row.valid_until,"未知")}`));
       first.append(detail);
-      const badge=pendingBadge(row);if(badge)first.append(badge);
+      appendPendingBadge(first);
       const subject=node('td');
       const subjectText=node('div','record-excerpt');subjectText.append(entityLink(row.subject_id));
-      appendExcerpt(subject,subjectText);subject.append(node('small',null,'所属实体'));
-      return [first,subject,ownershipCell(),versionCell(),supportCell()];
+      referencedExcerpt(subject,subjectText);subject.append(node('small',null,'所属实体'));
+      return finish(first,subject);
     }
     const first=node('td');
     if(view==='relation'){
       const excerpt=node('div','record-excerpt');
-      const predicate=node('span');predicate.innerHTML=typeHint(row.type);
+      const predicate=typeLabel('span');
       excerpt.append(entityLink(row.subject_id),' —[',predicate,']→ ',entityLink(row.object_id));
-      appendExcerpt(first,excerpt);
+      referencedExcerpt(first,excerpt);
       const detail=document.createElement('details');detail.append(node('summary',null,'原文上下文'),node('small',null,String(row.text||'')));
       first.append(detail);
     }else{
@@ -445,28 +526,31 @@
       const detail=document.createElement('details');detail.append(node('summary',null,'编号与有效期'),node('small',null,`${row.id}\n${window.DisplayTime.format(row.valid_from,"未知")} → ${window.DisplayTime.format(row.valid_until,"未知")}`));
       first.append(detail);
     }
-    const badge=pendingBadge(row);if(badge)first.append(badge);
-    const typeCell=node('td'),typeLabel=node('small');
+    appendPendingBadge(first);
+    const typeCell=node('td');
     // The shared typeHint helper returns HTML with escaped labels and identifiers.
-    typeLabel.innerHTML=typeHint(row.type)||'—';
-    typeCell.append(node('span','record-kind-tag',kinds[row.kind]||row.kind),typeLabel);
-    return [first,typeCell,ownershipCell(),versionCell(),supportCell()];
+    typeCell.append(node('span','record-kind-tag',kinds[row.kind]||row.kind),typeLabel('small','—'));
+    return finish(first,typeCell);
   }
   function render(){
+    rowEnrichments=[];
     const state=pager?.snapshot()||{},pages=Number.isFinite(total)?Math.max(1,Math.ceil(total/50)):'—';
     $('record-count').textContent=`共 ${total??'未知'} 条 · 本页 ${rows.length} 条`;
     renderTabs();
     if(!rows.length){host.innerHTML='<div class="record-empty">当前范围没有匹配记录<p>查询已在服务端覆盖当前全部范围；可切换视角或调整条件。</p></div>';return;}
     const visible=rows;
-    const head=COLUMNS[view].map(label=>`<th>${label}</th>`).join('');
+    const head=COLUMNS[view].map(label=>`<th scope="col">${label}</th>`).join('');
     host.innerHTML='<div class="table-scroll"><table class="record-library ledger-'+view+'"><thead><tr>'+head+'</tr></thead><tbody></tbody></table></div>'
       +'<div class="record-pages"><button id="records-prev" class="secondary">上一页</button><span>'
       +`${page+1} / ${pages} 页 · 每页最多 50 条`+'</span><button id="records-next" class="secondary">下一页</button></div>';
     const body=host.querySelector('tbody');
     visible.forEach((row,index)=>{
           const tr=node('tr');tr.dataset.recordId=row.id;   // 给「在台账查看/定位」一个稳定锚点（CSS.escape 兜底 id 里的特殊字符）
-          cells(row).forEach(cell=>tr.append(cell));
-          const actions=node('td');actions.append(actionsCell(row,index));tr.append(actions);
+          const actions=node('td');actions.append(actionsCell(row,index));
+          [...cells(row),actions].forEach((cell,column)=>{
+            cell.dataset.label=COLUMNS[view][column];
+            tr.append(cell);
+          });
           body.append(tr);
         });
     syncExcerptVisibility();
@@ -491,13 +575,13 @@
       operations_section.append(node('p','ledger-empty','这个项目还没有可撤销的合并或删除操作。做过一次合并或删除之后，这里会出现「撤销」按钮。'));
       return;
     }
-    operations.forEach(operation=>{
+    operations.forEach((operation,index)=>{
       const row=node('div','ledger-operation'+(operation.metadata?.operation==='undo'?' is-reversal':''));
       const kind=operation.metadata?.operation||'操作';
       const label={'merge':'合并实体','delete':'软删除','undo':'撤销过的一次操作','revise':'修订',
         'reclassify':'迁到新本体'}[kind]||kind;
       const note=kind==='undo'?'再撤销 = 把这次撤销回退（等于重新做一次被撤销的操作）':'';
-      const info=node('div');
+      const heading=node('div','ledger-operation-heading'),info=node('div','ledger-operation-summary');
       info.append(node('b',null,label),
         node('small',null,`${window.DisplayTime.format(operation.recorded_at)} · 影响 ${(operation.metadata?.before||[]).length} 条记录${note?' · '+note:''}`));
       const undo=node('button','secondary admin-only','撤销');undo.type='button';
@@ -505,9 +589,244 @@
       undo.title='把这次操作影响到的记录整批恢复到操作之前（版本 +1，历史仍可查）';
       undo.disabled=!operation.metadata?.operation_id;
       undo.onclick=()=>undoOperation(operation.metadata?.operation_id);
-      row.append(info,undo);
+      const [detail,body]=operationDetailControl(operation,index);
+      const actions=node('div','ledger-operation-actions');actions.append(detail,undo);
+      heading.append(info,actions);row.append(heading,body);
       operations_section.append(row);
     });
+  }
+  function operationDetailControl(operation,index){
+    const p=current,serial=operationsRequest,id=operation.metadata?.operation_id;
+    const button=node('button','secondary','查看详情'),body=node('div','ledger-operation-details');
+    button.type='button';body.id='ledger-operation-detail-'+index;body.hidden=true;
+    button.setAttribute('aria-controls',body.id);button.setAttribute('aria-expanded','false');
+    let loaded=false,loading=false;
+    const accepts=()=>body.isConnected&&p===current&&serial===operationsRequest&&operationsDrawer?.dialog.open;
+    const load=async()=>{
+      if(!accepts()||loading)return;
+      const before=operation.metadata?.before||[];
+      if(!id){renderOperationDetail(body,{before});loaded=true;return;}
+      loading=true;
+      const progress=node('p',null,'正在读取操作详情…');progress.setAttribute('role','status');body.replaceChildren(progress);
+      try{
+        const base='/api/projects/'+encodeURIComponent(p);
+        const result=await api(base+'/operations/'+encodeURIComponent(id),undefined,'GET').catch(error=>{
+          if(error.status!==404||error.message!=='Not Found')throw error;
+          return readOperationHistory(base,id,before,operation.metadata?.operation,accepts);
+        });
+        if(accepts()){renderOperationDetail(body,result,{projectId:p,accepts});loaded=true;}
+      }catch(error){
+        if(!accepts())return;
+        const message=node('p','error','操作详情读取失败：'+error.message);message.setAttribute('role','alert');
+        const retry=node('button','secondary','重试读取详情');retry.type='button';retry.onclick=load;
+        const fallback=node('div');renderOperationDetail(fallback,{before},{missingAfter:'操作后快照暂不可读取。'});
+        body.replaceChildren(message,retry,fallback);
+      }finally{loading=false;}
+    };
+    button.onclick=()=>{
+      const expanded=body.hidden;body.hidden=!expanded;
+      button.textContent=expanded?'收起详情':'查看详情';button.setAttribute('aria-expanded',String(expanded));
+      if(expanded&&!loaded)void load();
+    };
+    return [button,body];
+  }
+  async function readOperationHistory(base,id,before,kind,accepts){
+    const after=[],batchSize=6;
+    for(let offset=0;offset<before.length&&accepts();offset+=batchSize){
+      const snapshots=await Promise.all(before.slice(offset,offset+batchSize).map(async old=>{
+        try{
+          const data=await api(base+'/records/'+encodeURIComponent(old.id)+'/history',undefined,'GET');
+          // History is ascending. Later edits can preserve the original operation marker.
+          return (data.versions||[]).find(row=>row.version>(old.version??0)&&row.metadata?._operation_id===id);
+        }catch(error){if(error.status!==404)throw error;}
+      }));
+      after.push(...snapshots.filter(Boolean));
+    }
+    const redirects=kind==='merge'?Object.fromEntries(after
+      .filter(row=>row.kind==='entity'&&row.metadata?._deleted&&row.metadata.merged_into)
+      .map(row=>[row.id,row.metadata.merged_into])):{};
+    return {before,after,redirects};
+  }
+  async function readOriginalOperationSources(projectId,requests,accepts){
+    const base='/api/projects/'+encodeURIComponent(projectId)+'/assertions/';
+    const batchSize=6;
+    for(let offset=0;offset<requests.length&&accepts();offset+=batchSize){
+      await Promise.all(requests.slice(offset,offset+batchSize).map(async ({assertionId,target,fallback})=>{
+        try{
+          const result=await api(base+encodeURIComponent(assertionId)+'/evidence',undefined,'GET');
+          if(!accepts())return;
+          const document=result.document;
+          target.textContent=(document?.source_content==='full_version'&&document.title)||fallback||'该记录的原始出处不可用。';
+          const location=result.source_location;
+          if(location?.document_version_id&&window.SourceReader){
+            const open=node('button','secondary','查看原文');open.type='button';
+            open.onclick=()=>{if(accepts())void window.SourceReader.open({projectId,versionId:location.document_version_id,location,assertionId});};
+            target.after(open);
+          }
+        }catch{
+          if(accepts())target.textContent=fallback||'原始出处读取失败。';
+        }
+      }));
+    }
+  }
+  function renderOperationDetail(body,{before=[],after=[],redirects={}},
+      {missingAfter='操作后快照未保存。',projectId,accepts}={}){
+    const prior=new Map(before.map(row=>[row.id,row])),saved=new Map(after.map(row=>[row.id,row]));
+    const recordIds=new Set([...prior.keys(),...saved.keys()]);
+    const titleOf=id=>(prior.get(id)||saved.get(id))?.text||id;
+    const nameOf=id=>{
+      const name=titleOf(id);
+      return name&&name!==id?`${name}（${id}）`:id;
+    };
+    const revision=row=>row.version==null?'修订号未知':`r${row.version}`;
+    const state=row=>{
+      if(row.metadata?._deleted)return row.metadata.merged_into?'已停用':'已软删除';
+      return row.metadata?._quarantined?'待属性冲突审核':'未停用';
+    };
+    const metadataKeys=new Set(['_operation_id','_deleted','_quarantined','applicability','aliases','merged_into','superseded_by_attribute','merge_backend','merge_advice']);
+    const extraMetadata=row=>Object.fromEntries(Object.entries(row.metadata||{}).filter(([key])=>!metadataKeys.has(key)));
+    const valueText=value=>value==null||value===''?'—':Array.isArray(value)&&value.every(item=>typeof item==='string')
+      ?value.join('、')||'—':typeof value==='object'?JSON.stringify(value,null,2):String(value);
+    const time=value=>window.DisplayTime.format(value,'—');
+    const applicability=row=>row.applicability??row.metadata?.applicability;
+    const scopeText=value=>window.ApplicabilityUI?.describe?.({applicability:value})||valueText(value);
+    const fields=[
+      ['状态',state],['名称 / 正文',row=>row.text],['类型',row=>row.type],['本体归属',row=>row.ontology_id],
+      ['起点',row=>row.kind==='relation'?row.subject_id:null,nameOf],['终点',row=>row.object_id,nameOf],
+      ['所属实体',row=>row.kind==='attribute'?row.subject_id:null,nameOf],
+      ['属性值',row=>row.value],['数据类型',row=>row.datatype],['来源',row=>row.source_id,nameOf],
+      ['适用范围',applicability,scopeText],['生效时间',row=>row.valid_from,time],['失效时间',row=>row.valid_until,time],
+      ['合并后使用',row=>row.metadata?.merged_into,nameOf],['替代属性',row=>row.metadata?.superseded_by_attribute,nameOf],
+      ['别名',row=>row.metadata?.aliases||[]],['属性数据',row=>row.properties||{}],['其他元数据',extraMetadata],
+    ];
+    body.replaceChildren();
+    const mergedInto=new Map(),sourceRequests=[];
+    for(const [from,to] of Object.entries(redirects)){
+      if(!mergedInto.has(to))mergedInto.set(to,new Set());
+      mergedInto.get(to).add(from);
+    }
+    for(const [to,duplicates] of mergedInto){
+      const keptTitle=titleOf(to);
+      const otherTitles=[...new Set([...duplicates].map(titleOf))].filter(title=>title!==keptTitle);
+      const impacts=[`停用 ${duplicates.size} 条重复记录${otherTitles.length?`（${otherTitles.join('、')}）`:''}`];
+      let relations=0,attributes=0,pendingAttributes=0;
+      for(const next of after){
+        if(next.metadata?._deleted)continue;
+        const old=prior.get(next.id);
+        const movedSubject=duplicates.has(old?.subject_id)&&next.subject_id===to;
+        const movedObject=duplicates.has(old?.object_id)&&next.object_id===to;
+        if(next.kind==='relation'&&(movedSubject||movedObject))relations++;
+        if(next.kind==='attribute'&&movedSubject){
+          if(next.metadata?._quarantined)pendingAttributes++;
+          else attributes++;
+        }
+      }
+      if(relations)impacts.push(`转接 ${relations} 条关系`);
+      if(attributes)impacts.push(`归入 ${attributes} 条属性`);
+      if(pendingAttributes)impacts.push(`${pendingAttributes} 条属性待审核`);
+      const hasSameName=[...duplicates].some(id=>titleOf(id)===keptTitle);
+      const heading=hasSameName&&!otherTitles.length?`合并了 ${duplicates.size+1} 条同名记录「${keptTitle}」`:`合并后继续使用「${keptTitle}」`;
+      body.append(node('p','ledger-operation-direction',heading),
+        node('p','ledger-operation-context',impacts.join(' · ')));
+      if(hasSameName){
+        const sources=node('ul','ledger-operation-source-roles');
+        for(const id of [to,...duplicates]){
+          const entry=node('li'),role=id===to?'合并后继续使用':'停用的重复记录';
+          const metadata=prior.get(id)?.metadata;
+          const fallback=metadata?.document_title||metadata?.source_file;
+          const assertionId=metadata?.discovery_candidate_id||metadata?.discovery_candidate_ids?.[0];
+          const canRead=projectId&&typeof assertionId==='string'&&assertionId;
+          const title=node('span','ledger-operation-source-title',canRead?'正在读取原始出处…':fallback||'该记录没有留档原始出处。');
+          entry.append(node('b',null,titleOf(id)===keptTitle?role:`${role} · ${titleOf(id)}`),title);
+          if(canRead)sourceRequests.push({assertionId,target:title,fallback});
+          sources.append(entry);
+        }
+        body.append(sources);
+      }
+    }
+    if(!recordIds.size){body.append(node('p','subtle','这条操作没有保存记录快照。'));return;}
+    body.append(node('p','ledger-operation-diff-caption',after.length?'操作前 → 操作后':missingAfter));
+    const list=node('ul','ledger-operation-records');
+    for(const id of recordIds){
+      const old=prior.get(id),next=saved.get(id),record=old||next;
+      const entry=node('li');
+      const kind=kinds[record.kind]||(record.kind==='document'?'文档':record.kind||'记录');
+      const versions=old&&next?`${revision(old)} → ${revision(next)}`:revision(record);
+      const type=record.type&&labelOf(record.type);
+      const scope=window.ApplicabilityUI?.describe?.(record);
+      const source=record.metadata?.document_title||record.metadata?.source_file;
+      const context=[type,scope,source&&`来源「${source}」`].filter(Boolean).join(' · ');
+      entry.append(node('b',null,record.text||id));
+      if(context)entry.append(node('p','ledger-operation-context',context));
+      entry.append(node('small',null,`${kind} · ${id} · ${versions}`));
+      if(old&&next){
+        const changes=node('dl','ledger-operation-changes');
+        for(const [label,read,format=valueText] of fields){
+          const from=read(old),to=read(next);
+          if(JSON.stringify(from??null)===JSON.stringify(to??null))continue;
+          const pair=node('dd');
+          pair.append(node('span',null,format(from)??'—'),node('span','ledger-operation-arrow','→'),node('span',null,format(to)??'—'));
+          changes.append(node('dt',null,label),pair);
+        }
+        entry.append(changes.childElementCount?changes:node('small',null,'仅生成新修订。'));
+      }else if(after.length){
+        entry.append(node('small',null,old?'这条记录的操作后快照不可用。':'这条记录的操作前快照不可用。'));
+      }
+      list.append(entry);
+    }
+    body.append(list);
+    if(sourceRequests.length)void readOriginalOperationSources(projectId,sourceRequests,accepts);
+  }
+  function openDeleteRow(row,button){
+    const p=current,key=JSON.stringify([p,row.id]);
+    const previous=$('ledger-delete-confirmation');
+    if(previous?.open||!p||!visible()||!rows.includes(row)||pendingDeletes.has(key)||!window.Auth?.isAdmin?.()||scope()?.known_at)return;
+    previous?.remove();
+    const serial=request,stamp=JSON.stringify(readCriteria()),ticket=window.WorkspaceContext?.ticket(p,'records');
+    const label=String(row.text||'').trim().replace(/\s+/g,' ')||row.id;
+    const name=label.length>70?label.slice(0,70)+'…':label;
+    const impact=row.kind==='entity'?'该实体的关联关系和属性也会一并删除。':'';
+    const dialog=node('dialog');dialog.id='ledger-delete-confirmation';
+    dialog.setAttribute('aria-labelledby','ledger-delete-title');
+    dialog.setAttribute('aria-describedby','ledger-delete-target ledger-delete-impact');
+    dialog.innerHTML='<h2 id="ledger-delete-title"></h2><p id="ledger-delete-target"></p><p id="ledger-delete-impact"></p>'
+      +'<p class="ledger-delete-error" role="alert" hidden></p><div class="ledger-delete-actions">'
+      +'<button type="button" class="secondary" autofocus>取消</button><button type="button" class="danger">确认删除</button></div>';
+    dialog.querySelector('h2').textContent=`删除${kinds[row.kind]}？`;
+    dialog.querySelector('#ledger-delete-target').textContent=name;
+    dialog.querySelector('#ledger-delete-impact').textContent=impact+'可在「可撤销的操作」中恢复。';
+    const feedback=dialog.querySelector('[role="alert"]'),cancel=dialog.querySelector('.secondary'),confirm=dialog.querySelector('.danger');
+    const showError=message=>{feedback.textContent=message;feedback.hidden=false;};
+    cancel.onclick=()=>dialog.close();
+    dialog.addEventListener('close',()=>dialog.remove(),{once:true});
+    dialog.addEventListener('cancel',event=>{if(pendingDeletes.has(key))event.preventDefault();});
+    confirm.onclick=async()=>{
+      if(!dialog.open||confirm.disabled||pendingDeletes.has(key))return;
+      if(!guard(serial,p,stamp,ticket)||!window.Auth?.isAdmin?.()||scope()?.known_at){
+        showError('项目、查询范围或操作权限已变化，请取消后重新选择记录。');confirm.disabled=true;return;
+      }
+      feedback.hidden=true;pendingDeletes.add(key);button.disabled=cancel.disabled=confirm.disabled=true;
+      confirm.textContent='正在删除…';
+      try{
+        const result=await api('/api/projects/'+encodeURIComponent(p)+'/delete',{record_id:row.id,expected_version:row.version});
+        if(dialog.open)dialog.close();
+        if(p!==current)return;
+        let refreshFailed;
+        try{
+          refreshFailed=window.KnowledgeChanges
+            ?await window.KnowledgeChanges.notify({projectId:p,records:result.records||[],kind:'delete'})
+            :visible()&&(await loadPage())===false;
+        }catch{refreshFailed=true;}
+        if(p===current)status(`已删除 ${result.deleted} 条记录，可在「可撤销的操作」中恢复。`+
+          (refreshFailed?' 部分视图刷新失败，请重试刷新。':''));
+      }catch(error){
+        if(dialog.open)showError('删除失败：'+error.message);
+        else if(p===current)status('删除失败：'+error.message,true);
+      }finally{
+        pendingDeletes.delete(key);button.disabled=cancel.disabled=confirm.disabled=false;confirm.textContent='确认删除';
+      }
+    };
+    document.body.append(dialog);dialog.showModal();
   }
   async function undoOperation(operationId){
     if(!operationId)return;
@@ -583,12 +902,12 @@
   async function loadPage(direction){
     if(!visible())return false;
     clearTimeout(searchTimer);const serial=++request,p=current,criteria=readCriteria(),stamp=JSON.stringify(criteria),ticket=window.WorkspaceContext?.ticket(p,'records');
-    if(!p){pager?.invalidate();rows=[];total=0;pageCounts.clear();renderTabs();$('record-count').textContent='';host.innerHTML='<div class="record-empty">请先在左侧选择项目</div>';return;}
+    if(!p){pager?.invalidate();rows=[];rowEnrichments=[];total=0;pageCounts.clear();renderTabs();$('record-count').textContent='';host.innerHTML='<div class="record-empty">请先在左侧选择项目</div>';return;}
     if(!window.RecordCreate?.createPager){host.textContent='记录分页组件未加载，请刷新页面重试。';return false;}
     pager??=window.RecordCreate.createPager(body=>api('/api/projects/'+encodeURIComponent(current)+'/records/page',body));
     loading=true;host.setAttribute('aria-busy','true');$('record-count').textContent='正在查询…';
     try{
-      if(!direction){pageCounts.clear();renderTabs();rows=[];assertions=null;host.innerHTML='<div class="record-empty" role="status">正在读取服务端分页…</div>';}
+      if(!direction){pageCounts.clear();renderTabs();rows=[];rowEnrichments=[];assertions=null;host.innerHTML='<div class="record-empty" role="status">正在读取服务端分页…</div>';}
       const result=await (direction==='next'?pager.next():direction==='previous'?pager.previous():pager.load(criteria));
       if(!guard(serial,p,stamp,ticket)||!result)return;
       rows=result.records;const {kinds,query,record_ids,...recordScope}=criteria;loadedScope=JSON.parse(JSON.stringify(recordScope));total=result.total;page=result.page;pageCounts.set(view,total);assertions=null;
@@ -598,19 +917,35 @@
       wb.records=new Map(rows.map(row=>[row.id,row]));loading=false;syncKindSelect();render();
       const accepts=()=>guard(serial,p,stamp,ticket);
       if(!accepts())return;
-      const versionsRequest=!ontology?api('/api/projects/'+encodeURIComponent(p)+'/ontologies',undefined,'GET').catch(()=>null):Promise.resolve(null);
-      const countsRequest=direction||record_ids?Promise.resolve([]):Promise.all(VIEW_ORDER.filter(kind=>kind!==view).map(async kind=>{
-        try{const count=await api('/api/projects/'+encodeURIComponent(p)+'/records/page',{...criteria,kinds:[kind],cursor:null,limit:1});return [kind,count.total];}catch{return [kind,null];}
-      }));
-      const [versions,lineage,counts,references]=await Promise.all([versionsRequest,pageAssertions(p,rows,accepts),countsRequest,pageReferences(p,rows,criteria,accepts)]);
+      const readVersions=!ontology;
+      const versionsRequest=readVersions?api('/api/projects/'+encodeURIComponent(p)+'/ontologies?metadata_only=true',undefined,'GET').catch(()=>null):Promise.resolve(null);
+      if(!direction&&!record_ids){
+        const otherKinds=VIEW_ORDER.filter(kind=>kind!==view);
+        void api('/api/projects/'+encodeURIComponent(p)+'/records/counts',{...criteria,kinds:otherKinds}).then(result=>{
+          if(!accepts())return;
+          for(const kind of otherKinds){
+            const count=result.counts?.[kind];
+            if(Number.isFinite(count))pageCounts.set(kind,count);
+          }
+          renderTabs();
+        }).catch(()=>{/* The visible category still has its server total. */});
+      }
+      const [versions,lineage,references]=await Promise.all([versionsRequest,pageAssertions(p,rows,accepts),pageReferences(p,rows,criteria,accepts)]);
       if(!guard(serial,p,stamp,ticket))return;
       if(versions)ontology=buildOntology(versions.versions||[]);
-      assertions=lineage;for(const [kind,count] of counts)if(Number.isFinite(count))pageCounts.set(kind,count);
+      assertions=lineage;
       for(const record of references)wb.records.set(record.id,record);
-      renderOntologyFilter();render();
+      if(readVersions)renderOntologyFilter();
+      let labelsChanged=false;
+      for(const row of rowEnrichments){
+        if(versions)row.refreshOntology();
+        row.refreshSupport();
+        for(const update of row.labelUpdates)labelsChanged=update()||labelsChanged;
+      }
+      if(labelsChanged)syncExcerptVisibility();
       if(pendingLedgerFocus){const id=pendingLedgerFocus;pendingLedgerFocus=null;locateLedgerRow(id);}
       return true;
-    }catch(error){if(guard(serial,p,stamp,ticket)){$('record-count').textContent='';host.textContent='读取失败：'+error.message+'；可点击“刷新列表”重试。';status(error.message,true);}return false;}
+    }catch(error){if(guard(serial,p,stamp,ticket)){rowEnrichments=[];$('record-count').textContent='';host.textContent='读取失败：'+error.message+'；可点击“刷新列表”重试。';status(error.message,true);}return false;}
     finally{if(serial===request){loading=false;host.setAttribute('aria-busy','false');}}
   }
   async function load(){
@@ -668,7 +1003,8 @@
         }
       }
       if(kind==='reclassify'){
-        reclassifyPlan=typeof data.stale_records==='number'?data:null;renderStaleNotice();if(rows.length)render();
+        reclassifyPlan=typeof data.stale_records==='number'?data:null;renderStaleNotice();
+        for(const row of rowEnrichments)row.refreshMigration();
         feedback.textContent=!reclassifyPlan?'暂时读不到本体归属信息。':data.stale_records?'':'当前没有待迁移的旧本体归属记录。';
       }
     }catch(error){
@@ -713,11 +1049,13 @@
   document.addEventListener('workspace:page-changed',()=>{
     // Every visit has its own request generation, including a leave-and-return
     // before the old response finishes or navigation without a menu click.
+    $('ledger-delete-confirmation')?.close?.();
     request++;pager?.invalidate();clearTimeout(searchTimer);loading=false;host.setAttribute('aria-busy','false');
   });
   $('project').addEventListener('change',()=>{
+    $('ledger-delete-confirmation')?.close?.();
     request++;operationsRequest++;pager?.invalidate();clearTimeout(searchTimer);
-    rows=[];total=0;ontology=null;assertions=null;operations=[];pendingLedgerFocus=exactLedgerId=null;reclassifyPlan=undefined;
+    rows=[];rowEnrichments=[];total=0;ontology=null;assertions=null;operations=[];pendingLedgerFocus=exactLedgerId=null;reclassifyPlan=undefined;
     $('record-search').value='';
     if(governance){
       for(const id of ['resolve-text','keep-id','drop-id','alias-name'])$(id).value='';

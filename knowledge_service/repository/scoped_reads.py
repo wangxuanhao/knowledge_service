@@ -23,6 +23,18 @@ KINDS = {'document', 'entity', 'relation', 'attribute', 'chunk'}
 FIELDS = 'project_id,id,version,version_id,recorded_at,superseded_at,payload'
 
 
+def uses_fact_scope(scope):
+    return (scope.get('valid_at') is not None and not scope.get('_reference_mode')
+            or scope.get('_platform_match') is not None
+            or any(value['mode'] == 'specific'
+                   for value in normalize_applicability(scope.get('applicability')).values()))
+
+
+def business_scope_snapshot(repository, scope):
+    """Keep LLVM compilation off for the extra fact-qualification subqueries."""
+    return repository.read_snapshot(disable_jit=True) if uses_fact_scope(scope) else nullcontext()
+
+
 def _snapshot_read(operation):
     """Use one isolated repository view for an entire bounded operation."""
     def context(reads):
@@ -190,10 +202,7 @@ class ScopedReads:
                 *known_params, *own_params, *legacy_params, *known_params]
         entity_scope = qualified
         entity_params = [*known_params, *scope_params]
-        needs_fact_scope=(scope.get('valid_at') is not None and not scope.get('_reference_mode')
-            or scope.get('_platform_match') is not None
-            or any(value['mode']=='specific' for value in normalize_applicability(scope.get('applicability')).values()))
-        if not scope.get('_qualifying_fact') and needs_fact_scope:
+        if not scope.get('_qualifying_fact') and uses_fact_scope(scope):
             fact_scope = {**scope, '_qualifying_fact': True}
             # These predicates select the requested entity; its supporting
             # business fact need only match the time, ontology and applicability.
@@ -213,6 +222,14 @@ class ScopedReads:
     def _base(self, project, scope, alias='r'):
         scope = scope or {}
         clauses, params = [f'{alias}.project_id=?', f'NOT {alias}.read_quarantined'], [project]
+        kinds = scope.get('_read_kinds')
+        if kinds is None or 'chunk' in kinds:
+            # Older ingest workers could persist chunks before an interrupted run finished.
+            clauses.append(f"""({alias}.read_kind<>'chunk' OR NOT EXISTS (
+                SELECT 1 FROM ingest_runs ingest
+                WHERE ingest.project_id={alias}.project_id AND ingest.status<>'completed'
+                  AND ingest.id={alias}.payload::jsonb#>>'{{metadata,run_id}}'
+            ))""")
         known = normalize_time(scope.get('known_at'))
         if scope.get('_source_artifact'):
             if known is not None:
@@ -342,6 +359,22 @@ class ScopedReads:
         sql, params = self._qualified(project, scope or {}, kinds=kinds, query=query)
         with self.repo._lock:
             return self.repo._db.execute('SELECT count(*) FROM record_versions r WHERE ' + sql, params).fetchone()[0]
+
+    @_snapshot_read
+    def counts_by_kind(self, project, scope, *, kinds=None, query=''):
+        self.repo.get_project(project)
+        kinds = sorted(KINDS) if kinds is None else list(dict.fromkeys(kinds))
+        if not kinds:
+            return {}
+        # Preserve the single-kind predicate and index plan for each count.
+        selects, params = [], []
+        for kind in kinds:
+            sql, values = self._qualified(project, scope, kinds=[kind], query=query)
+            selects.append('SELECT ?::text AS kind, count(*) AS total FROM record_versions r WHERE ' + sql)
+            params.extend([kind, *values])
+        with self.repo._lock:
+            rows = self.repo._db.execute(' UNION ALL '.join(selects), params).fetchall()
+        return {row['kind']: row['total'] for row in rows}
 
     @_snapshot_read
     def mentioned_entities(self, project, scope, query, *, limit=8):

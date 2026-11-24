@@ -111,12 +111,15 @@
     const attrs=node.attributes||[],inherited=node.inheritedAttributes||[];
     const rows=[...attrs.slice(0,4),...inherited.slice(0,Math.max(0,4-attrs.length))];
     const more=attrs.length+inherited.length-rows.length;
-    const height=76+Math.max(1,rows.length)*21+(more?18:0);
+    const parents=(node.parents||[]).length;
+    const footer=inherited.length?`继承 ${inherited.length} 项属性 · ${parents} 个父类`:
+      node.state==='pending'?'待纳入本体':parents>1?`${parents} 个父类`:'';
+    const height=42+rows.length*21+(more?18:0)+(footer?20:0);
     const color=node.state==='pending'?C.amber:(node.parents||[]).length?C.teal:C.cyan;
     const text=(x,y,value,size=11,fill='#567263',anchor='start')=>`<text x="${x}" y="${y}" font-size="${size}" fill="${fill}" text-anchor="${anchor}">${xml(value)}</text>`;
     let svg=`<svg xmlns="${NS}" width="${NODE_W}" height="${height}" viewBox="0 0 ${NODE_W} ${height}"><rect width="${NODE_W}" height="${height}" rx="7" fill="#ffffff"/><path d="M7 1.5H${NODE_W-7}" stroke="${color}" stroke-width="3"/><g font-family="Microsoft YaHei, Segoe UI, sans-serif">`;
-    svg+=text(11,25,'◇',17,color)+text(32,24,trimText(node.label||shortIri(node.id),11),13,C.ink);
-    svg+=`<path d="M0 37H${NODE_W}" stroke="#e6ece6"/>`;
+    svg+=text(12,26,trimText(node.label||shortIri(node.id),11),15,C.ink);
+    if(rows.length || footer)svg+=`<path d="M0 37H${NODE_W}" stroke="#e6ece6"/>`;
     rows.forEach((attr,i)=>{
       const y=56+i*21,datatype=attr.datatype||attr.dtype||'未限定';
       const inheritedRow=i>=attrs.length;
@@ -124,10 +127,8 @@
       const detail=inheritedRow?'继承 · '+trimText(datatype,8):trimText(datatype,12);
       svg+=text(NODE_W-10,y,detail,10,'#657e70','end');
     });
-    if(!rows.length)svg+=text(11,57,node.state==='pending'?'待纳入本体的候选':'未声明适用本类的属性',11,'#657e70');
     if(more)svg+=text(11,56+rows.length*21,`另有 ${more} 项属性`,10,'#657e70');
-    const parents=(node.parents||[]).length;
-    svg+=text(11,height-13,inherited.length?`继承 ${inherited.length} 项属性 · ${parents} 个父类`:parents?`${parents} 个父类 · 无继承属性`:'顶层类',10,'#8c9c90');
+    if(footer)svg+=text(11,height-7,footer,11,'#567263');
     return {image:'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg+'</g></svg>'),height};
   }
 
@@ -825,7 +826,7 @@
   // ---- 工具条 / 图例 / 空态 -------------------------------------------------
   function buildBar(stage) {
     const bar = mkEl('div', 'om-canvas-bar');
-    const stats = mkEl('span', 'om-canvas-stats', '实体类 0 · 继承线 0 · 关系类型 0（画得出线 0）');
+    const stats = mkEl('span', 'om-canvas-stats');
     const hint = mkEl('span', 'om-canvas-hint', '');
 
     // 「新建类」是 P1 重写时漏掉的入口：以前整页只有「改父类（连线）」，而它要求先选中
@@ -841,8 +842,18 @@
     btnCancel.hidden = true;
 
     bar.append(stats, hint, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
-    const help = mkEl('div', 'om-canvas-help', '点击聚焦并追踪直接关系 · 拖动调整位置 · 滚轮缩放 · 点击空白取消聚焦');
-    stage.appendChild(help);
+    const zoom=mkEl('div','om-canvas-zoom');
+    zoom.setAttribute('role','group');zoom.setAttribute('aria-label','画布缩放');
+    for(const [symbol,name,factor] of [['−','缩小画布',.8],['+','放大画布',1.25]]){
+      const control=mkButton(symbol,()=>{
+        const cy=M.cy;if(!cy || !cy.elements().length)return;
+        cy.stop(true,false);
+        cy.zoom({level:Math.max(cy.minZoom(),Math.min(cy.maxZoom(),cy.zoom()*factor)),
+          renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
+      },'',name);
+      control.setAttribute('aria-label',name);zoom.appendChild(control);
+    }
+    stage.appendChild(zoom);
     stage.appendChild(bar);
     Object.assign(M.els, { bar, stats, hint, btnParent, btnRelation, btnCancel });
   }
@@ -855,7 +866,7 @@
     toggle.type = 'button';
     toggle.setAttribute('aria-expanded', 'false');
     toggle.setAttribute('aria-haspopup', 'true');
-    toggle.title = '做什么：展开「线/颜色代表什么」的说明。不做什么：不改任何数据。';
+    toggle.title = '查看连线、节点和操作说明';
 
     const body = mkEl('div', 'om-canvas-legend-body');
     const items = [
@@ -870,6 +881,7 @@
       row.appendChild(mkEl('span', '', text));
       body.appendChild(row);
     }
+    body.appendChild(mkEl('small','','点节点聚焦，拖动调整位置，点击空白取消聚焦。'));
 
     function setOpen(open) {
       box.classList.toggle('is-open', open);
@@ -923,7 +935,7 @@
     const summary = (M.ctx && M.ctx.S && M.ctx.S.summary) || null;
     const relTotal = summary ? (summary.relations || []).filter(r => r.active !== false).length : null;
     e.stats.textContent = `实体类 ${classes} · 继承线 ${inh}`
-      + (relTotal === null ? ` · 关系线 ${rel}` : ` · 关系类型 ${relTotal}（画得出线 ${rel}）`)
+      + (relTotal === null ? ` · 关系线 ${rel}` : ` · 关系类型 ${relTotal} · 关系线 ${rel}`)
       + (pend ? ` · 待收下 ${pend}` : '');
     let hint = '';
     // 历史版本是只读预览：编辑入口一律锁住，并把"去哪才能改"写在工具条上

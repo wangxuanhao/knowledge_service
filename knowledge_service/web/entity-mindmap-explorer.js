@@ -21,7 +21,8 @@
     const fullscreenButton=get('mindmap-fullscreen'),stage=get('mindmap-stage');
     const listeners=[];
     let index=null,generation=0,destroyed=false,frame=null,exporting=false,hasTrace=false;
-    let overviewVisible=toggle?.getAttribute('aria-pressed')!=='false',mapTransform=null,matches=[],activeResult=-1;
+    const compactScreen=window.matchMedia('(max-width: 700px)');
+    let overviewPreference=null,overviewVisible=!compactScreen.matches,mapTransform=null,matches=[],activeResult=-1;
     const text=(element,value)=>{if(element)element.textContent=value;};
     const label=value=>String(labelOf(value)||value||'实体');
     const name=node=>String(node.name||'未命名实体');
@@ -205,6 +206,15 @@
     function updateData(){
       if(destroyed)return;
       generation++;exporting=false;const tree=view.getTree();index=tree?model.indexTree(tree):null;
+      const settings=get('mindmap-settings'),settingsButton=get('mindmap-toggle-settings');
+      if(settings&&settingsButton){
+        if(tree&&settings.contains(document.activeElement))settingsButton.focus({preventScroll:true});
+        settings.hidden=!!tree;
+        settingsButton.setAttribute('aria-expanded',String(!tree));
+        text(settingsButton,tree?'展开设置':'收起设置');
+      }
+      text(get('mindmap-heading-title'),tree?.name||'实体关系脑图');
+      text(get('mindmap-heading-description'),tree?'根实体 · '+label(tree.type):'以一个实体为起点，逐层探索知识之间的联系');
       if(!tree)setFullscreen(false);
       resetSearch();resetTrace(tree?TRACE_NOTE:'',false);makeEndpoints();text(exportStatus,'');syncButtons();
       if(overview)overview.hidden=true;map?.replaceChildren();mapTransform=null;scheduleOverview();
@@ -219,7 +229,11 @@
     listen(document,'pointerdown',event=>{if(event.target!==search&&!results?.contains(event.target))hideResults();});
     [from,to].forEach(select=>listen(select,'change',()=>resetTrace()));
     listen(run,'click',trace);listen(clear,'click',()=>resetTrace('已清除路径高亮 · '+TRACE_NOTE));
-    listen(toggle,'click',()=>{overviewVisible=!overviewVisible;syncButtons();if(!overviewVisible&&overview)overview.hidden=true;scheduleOverview();});
+    listen(compactScreen,'change',()=>{
+      if(overviewPreference!==null)return;
+      overviewVisible=!compactScreen.matches;syncButtons();scheduleOverview();
+    });
+    listen(toggle,'click',()=>{overviewPreference=overviewVisible=!overviewVisible;syncButtons();if(!overviewVisible&&overview)overview.hidden=true;scheduleOverview();});
     listen(map,'click',event=>{
       if(!mapTransform||!hasTree()||!overviewVisible)return;
       const box=map.getBoundingClientRect();if(!box.width||!box.height)return;

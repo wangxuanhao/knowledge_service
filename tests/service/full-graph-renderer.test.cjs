@@ -19,6 +19,23 @@ test('complete graph buffers include every entity independently of label budget'
   assert.equal(data.positions.length,300000);
   assert.equal(data.records[149999].id,'e149999');
 });
+
+test('progressive full graph positions fill a disc without shifting earlier pages',()=>{
+  const {GraphDataset}=load(),rows=Array.from({length:2400},(_,i)=>({id:'entity-'+i}));
+  const data=new GraphDataset();data.addNodes(rows.slice(0,300));
+  const first=Array.from(data.positions);data.addNodes(rows.slice(300));
+  assert.deepEqual(Array.from(data.positions.slice(0,first.length)),first);
+  const quadrants=[0,0,0,0];let inner=0,outer=0;
+  for(let i=0;i<data.positions.length;i+=2){
+    const x=data.positions[i],y=data.positions[i+1],radius=Math.hypot(x,y);
+    assert.ok(radius<=.951,'every entity lies inside the circular footprint');
+    if(radius<.475)inner++;
+    if(radius>.8)outer++;
+    quadrants[(x<0?1:0)+(y<0?2:0)]++;
+  }
+  assert.ok(inner>480&&inner<720,'the center has density proportional to its area');
+  assert.ok(outer>550&&quadrants.every(count=>count>480),'the outer disc fills out in every direction');
+});
 test('edges preserve record identity, reject missing endpoints and deduplicate pages',()=>{
   const {GraphDataset}=load();const data=new GraphDataset();
   data.addNodes([{id:'a',text:'甲'},{id:'b',text:'乙'}]);
@@ -116,12 +133,19 @@ test('display zoom uses the canvas center and preserves entity positions',()=>{
 // Record WebGL buffer ownership and validate enabled vertex arrays at draw time.
 // Browser checks separately exercise the real GLSL pixels and CPU frame time.
 function bufferGL(){
-  let next=0,bound=null,program=null,copyError=0;
-  const buffers=new Map(),attributes=new Map(),enabled=new Set(),uploads=[],subUploads=[],draws=[],deleted=[],uniforms=new Map(),copies=[],deletedTextures=[];
+  let next=0,bound=null,program=null,copyError=0,framebuffer=null;
+  const buffers=new Map(),attributes=new Map(),enabled=new Set(),uploads=[],subUploads=[],draws=[],deleted=[],uniforms=new Map(),copies=[],deletedTextures=[],framebufferClears=[];
   const gl={ARRAY_BUFFER:1,STATIC_DRAW:2,FLOAT:3,UNSIGNED_BYTE:4,LINES:5,POINTS:6,TRIANGLE_STRIP:7,VERTEX_SHADER:8,FRAGMENT_SHADER:9,COMPILE_STATUS:10,LINK_STATUS:11,MAX_TEXTURE_SIZE:12,FRAMEBUFFER:13,FRAMEBUFFER_COMPLETE:14,RENDERER:15,TRIANGLES:16,RGB:6407,RGBA:6408};
   Object.assign(gl,{
-    createBuffer:()=>({id:++next}),bindBuffer:(_,buffer)=>{bound=buffer;},bufferData:(_,data)=>{buffers.set(bound,new data.constructor(data));uploads.push({buffer:bound,data:new data.constructor(data)});},deleteBuffer:buffer=>deleted.push(buffer),
-    bufferSubData:(_,offset,data)=>{buffers.get(bound).set(data,offset/4);subUploads.push({buffer:bound,offset,data:Array.from(data)});},
+    createBuffer:()=>({id:++next}),bindBuffer:(_,buffer)=>{bound=buffer;},bufferData:(_,data)=>{
+      buffers.set(bound,typeof data==='number'?new Uint8Array(data):new data.constructor(data));
+      uploads.push({buffer:bound,data:typeof data==='number'?data:new data.constructor(data)});
+    },deleteBuffer:buffer=>deleted.push(buffer),
+    bufferSubData:(_,offset,data)=>{
+      const destination=buffers.get(bound);assert.ok(offset+data.byteLength<=destination.byteLength,'upload fits the allocated buffer');
+      new Uint8Array(destination.buffer).set(new Uint8Array(data.buffer,data.byteOffset,data.byteLength),offset);
+      subUploads.push({buffer:bound,offset,data:Array.from(data),bytes:data.byteLength});
+    },
     createShader:()=>({}),shaderSource(){},compileShader(){},getShaderParameter:()=>true,attachShader(){},linkProgram(){},deleteShader(){},getProgramParameter:()=>true,createProgram:()=>({id:++next}),useProgram:value=>{program=value;},
     getAttribLocation:(_,name)=>({a_position:0,a_target:1,a_corner:2})[name]??1,getUniformLocation:(_,name)=>name,enableVertexAttribArray:index=>enabled.add(index),disableVertexAttribArray:index=>enabled.delete(index),vertexAttrib3f(){},
     vertexAttribPointer:(index,size,type,normalized,stride,offset)=>attributes.set(index,{buffer:bound,size,type,normalized,stride,offset}),
@@ -137,10 +161,12 @@ function bufferGL(){
     copyTexImage2D:(target,level,format,x,y,width,height)=>{copies.push({format,width,height});if(format!==gl.RGB)copyError=1282;},getError:()=>{const error=copyError;copyError=0;return error;}
   });
   for(const name of ['enable','blendFunc','blendFuncSeparate','bindTexture','texImage2D','texParameteri','bindFramebuffer','framebufferTexture2D','viewport','clearColor','clear','uniform1i','uniform1f','uniform2f','uniform3f','uniform4f','activeTexture','generateMipmap','deleteTexture','deleteFramebuffer','deleteProgram'])gl[name]=()=>{};
+  gl.bindFramebuffer=(_,value)=>{framebuffer=value;};
+  gl.clear=()=>{if(framebuffer)framebufferClears.push(framebuffer);};
   gl.uniform4f=(location,...values)=>uniforms.set(location,values);
   gl.uniform1i=gl.uniform1f=(location,value)=>uniforms.set(location,value);
   gl.uniform2f=(location,...values)=>uniforms.set(location,values);gl.deleteTexture=texture=>deletedTextures.push(texture);
-  return {gl,buffers,uploads,subUploads,draws,deleted,copies,deletedTextures};
+  return {gl,buffers,uploads,subUploads,draws,deleted,copies,deletedTextures,framebufferClears};
 }
 
 function bufferScene(withAppearance=true){
@@ -148,6 +174,82 @@ function bufferScene(withAppearance=true){
   const renderer=Object.assign(Object.create(Renderer.prototype),{gl:recording.gl,dataset:new GraphDataset(),camera:new Camera(),selected:-1,showEdges:true,dpr:1,width:800,height:600,canvas:{width:800,height:600},durations:[],requestDraw(){},drawLabels(){}});
   renderer.setupGL();return {renderer,GraphDataset,...recording};
 }
+
+function denseScene(){
+  const scene=bufferScene(),dataset=scene.renderer.dataset;
+  dataset.addNodes(Array.from({length:6000},(_,i)=>({id:'dense-'+i,type:i<4600?'A':'B'})));
+  dataset.addEdges(Array.from({length:6000},(_,i)=>({id:'edge-'+i,type:'knows',subject_id:'dense-0',object_id:'dense-'+i})));
+  scene.renderer.sync();return scene;
+}
+
+test('dense append uploads only new entity and relation vertices while spare space remains',()=>{
+  const {renderer:r,buffers,uploads,subUploads,draws,gl}=denseScene(),d=r.dataset;
+  uploads.length=0;subUploads.length=0;draws.length=0;
+  d.addNodes([{id:'new',type:'A'}],new Float32Array([.5,-.25]));
+  d.addEdges([{id:'new-edge',subject_id:'new',object_id:'dense-0'}]);r.sync();
+  assert.equal(uploads.length,0,'an append fits the existing vertex allocations');
+  assert.equal(subUploads.reduce((n,row)=>n+row.bytes,0),27,'one position, one color, and two endpoints');
+  const nodeBuffer=buffers.get(r.nodeBuffer),edgeBuffer=buffers.get(r.edgeBuffer);
+  assert.deepEqual(Array.from(new Float32Array(nodeBuffer.buffer,6000*8,2)),[.5,-.25]);
+  assert.deepEqual(Array.from(new Float32Array(edgeBuffer.buffer,6000*16,4)),[.5,-.25,...Array.from(d.positions.slice(0,2))]);
+  const cacheDraw=draws.find(draw=>draw.mode===gl.LINES);
+  assert.deepEqual([cacheDraw.first,cacheDraw.count],[12000,2],'the world texture receives the new segment');
+  r.onSelect=()=>{};assert.ok(r.locate('new'));r.draw();
+  assert.equal(r.drawnNodes,6001);assert.equal(r.drawnEdges,6001);
+});
+
+test('switching dense filters reuses their projections and buffers and catches up appended members',()=>{
+  const {renderer:r,uploads,subUploads,deleted}=denseScene(),canonical=r.dataset,allBuffer=r.nodeBuffer;
+  r.setTypeFilter('A');const a=r.displayDataset,aBuffer=r.nodeBuffer;
+  r.setPredicateFilter('knows');const knows=r.displayDataset,knowsBuffer=r.nodeBuffer;
+  uploads.length=0;subUploads.length=0;
+  r.setPredicateFilter(null);
+  assert.ok(r.displayDataset===a);assert.equal(r.nodeBuffer,aBuffer);
+  r.setTypeFilter(null);assert.ok(r.displayDataset===canonical);assert.equal(r.nodeBuffer,allBuffer);
+  assert.equal(uploads.length+subUploads.length,0,'returning to warmed scenes reuses GPU vertex data');
+  canonical.addNodes([{id:'new-a',type:'A'},{id:'new-b',type:'B'}]);
+  canonical.addEdges([{id:'known',type:'knows',subject_id:'dense-0',object_id:'new-a'},{id:'other',type:'other',subject_id:'dense-0',object_id:'new-a'}]);r.sync();
+  r.setTypeFilter('A');r.setPredicateFilter('knows');
+  assert.ok(r.displayDataset===knows);assert.equal(r.nodeBuffer,knowsBuffer);
+  assert.equal(knows.nodeIndex.has('new-a'),true);assert.equal(knows.nodeIndex.has('new-b'),false);
+  assert.equal(knows.edges.at(-1).id,'known');assert.equal(knows.edgeIndex.has('other'),false);
+  r.setPredicateFilter('other');assert.ok(deleted.includes(aBuffer),'a third dense filter releases the least recently used buffers');
+  r.setTypeFilter(null);r.setPredicateFilter(null);
+  assert.equal(r.nodeBuffer,allBuffer,'filter eviction keeps the canonical buffers');
+});
+
+test('the first edge in an empty dense projection clears the preceding scene from the world texture',()=>{
+  const {renderer:r,framebufferClears}=denseScene();
+  r.setPredicateFilter('new-predicate');assert.equal(r.displayDataset.edgeCount,0);
+  const previous=framebufferClears.length;
+  r.dataset.addEdges([{id:'new-predicate-edge',type:'new-predicate',subject_id:'dense-0',object_id:'dense-1'}]);r.sync();
+  assert.equal(r.cachedRelations,1);
+  assert.equal(framebufferClears.length,previous+1,'the previous scene cannot bleed into an empty filter as it grows');
+});
+
+test('a filter started on a small first page releases its dense buffers after switching away',()=>{
+  const {renderer:r,deleted}=bufferScene(),d=r.dataset;
+  d.addNodes(Array.from({length:1200},(_,i)=>({id:'first-'+i,type:'A'})));r.sync();r.setTypeFilter('A');
+  d.addNodes(Array.from({length:3000},(_,i)=>({id:'later-'+i,type:'A'})));r.sync();
+  const buffer=r.nodeBuffer;r.setTypeFilter(null);
+  assert.ok(deleted.includes(buffer),'the earlier uncached filter cannot outlive its selection');
+});
+
+test('dense buffer growth and context restoration preserve manually moved relation endpoints',()=>{
+  const {renderer:r,buffers,uploads}=denseScene(),d=r.dataset;
+  const all=r.nodeBuffer;r.setTypeFilter('A');
+  assert.ok(r.moveNode(r.beginNodeDrag(1),.5,-.25));r.setTypeFilter(null);
+  assert.notEqual(r.nodeBuffer,all,'a manual move invalidates the dormant scene geometry');
+  const beforeGrow=r.nodeBuffer;uploads.length=0;
+  d.addNodes(Array.from({length:2000},(_,i)=>({id:'growing-'+i,type:'A'})));
+  d.addEdges(Array.from({length:2000},(_,i)=>({id:'growing-edge-'+i,subject_id:'dense-1',object_id:'growing-'+i})));r.sync();
+  assert.equal(r.nodeBuffer,beforeGrow);assert.equal(uploads.filter(row=>typeof row.data==='number').length,3);
+  const endpoint=()=>Array.from(new Float32Array(buffers.get(r.edgeBuffer).buffer,16,4)).slice(2);
+  assert.deepEqual(endpoint(),[.5,-.25]);
+  r.setupGL();r.sync();r.draw();
+  assert.notEqual(r.nodeBuffer,beforeGrow);assert.deepEqual(endpoint(),[.5,-.25]);
+  assert.equal(r.drawnNodes,8000);assert.equal(r.drawnEdges,8000);
+});
 
 test('manual node drag updates only the node and incident GPU buffers without rebuilding the scene',()=>{
   const {renderer,buffers,uploads,subUploads}=bufferScene();
@@ -316,11 +418,24 @@ test('known small full graphs show readable nodes and nearby related entities at
   const sizes=draws.filter(row=>row.mode===renderer.gl.POINTS).map(row=>row.uniforms.get('u_size'));
   assert.ok(sizes.length&&sizes.every(size=>size>=16&&size<=24),'interactive small graph entities use 14–22px plus antialias margins');
   const positions=renderer.renderPositions||renderer.dataset.positions,unit=renderer.camera.unit(renderer.width,renderer.height);
+  for(let i=0;i<positions.length;i+=2)assert.ok(Math.hypot(positions[i],positions[i+1])<=.89,'small graphs fit a circle on wide canvases');
   const lengths=renderer.dataset.edges.map(edge=>{const a=renderer.dataset.nodeIndex.get(edge.subject_id)*2,b=renderer.dataset.nodeIndex.get(edge.object_id)*2;return Math.hypot(positions[a]-positions[b],positions[a+1]-positions[b+1])*unit;});
   assert.ok(lengths.reduce((sum,value)=>sum+value,0)/lengths.length<130,'relationship layout must replace the long hash-scattered edges');
   let closest=Infinity;for(let a=0;a<73;a++)for(let b=a+1;b<73;b++)closest=Math.min(closest,Math.hypot(positions[a*2]-positions[b*2],positions[a*2+1]-positions[b*2+1])*unit);
   assert.ok(closest>=20,'overview entities need enough separation to remain individually visible: '+closest);
   const stats=renderer.stats();assert.equal(stats.layout,'small-relations-v1');assert.equal(stats.canonical_layout,'stable-id-v1');assert.equal(stats.drawn_entities,73);assert.equal(stats.drawn_relations,45);
+});
+
+test('small full graphs with only isolated entities fill a circle instead of a rectangular grid',()=>{
+  const {renderer}=bufferScene();renderer.width=1200;renderer.height=600;
+  renderer.dataset.addNodes(Array.from({length:120},(_,i)=>({id:'isolated-'+i})));
+  renderer.setSessionManifest({id:'isolated-circle',entity_count:120,relation_count:0});renderer.sync();
+  const radii=[];
+  for(let i=0;i<renderer.renderPositions.length;i+=2){
+    radii.push(Math.hypot(renderer.renderPositions[i],renderer.renderPositions[i+1]));
+  }
+  assert.ok(Math.max(...radii)<=.89&&Math.max(...radii)>.8);
+  assert.ok(radii.filter(radius=>radius<.45).length>=25,'isolated entities also use the interior');
 });
 
 test('sparse node and selected ring sprites reserve one physical pixel outside each circular edge',()=>{
@@ -489,20 +604,22 @@ for(const edgeCount of [3,5001])test('relation picking highlights only its exist
     if(/^\d+$/.test(String(key)))edgeReads++;return Reflect.get(target,key,receiver);
   }});
   const pick=(x,y)=>renderer.pick(...renderer.camera.worldToScreen(x,y,renderer.width,renderer.height));
-  assert.equal(pick(0,0),relation);assert.equal(selections.at(-1),relation);assert.equal(renderer.selected,-1);assert.equal(renderer.selectedEdge,1);
+  const edgeY=edgeCount>4000?0:20/renderer.camera.unit(renderer.width,renderer.height);
+  assert.equal(pick(0,edgeY),relation);assert.equal(selections.at(-1),relation);assert.equal(renderer.selected,-1);assert.equal(renderer.selectedEdge,1);
   assert.equal(edgeReads,edgeCount,'relation selection uses its existing single candidate scan');
   renderer.draw();assert.equal(edgeReads,edgeCount,'highlight drawing does not rescan relation records');
-  const lines=draws.filter(row=>row.mode===renderer.gl.LINES),overlay=lines.at(-1);
-  assert.equal(lines.length,edgeCount>4000?1:2);assert.equal(overlay.first,2);assert.equal(overlay.count,2);
-  assert.equal(overlay.attributes.get(renderer.locations.position).buffer,renderer.edgeBuffer);
-  assert.equal(overlay.attributes.size,1);
+  const dense=edgeCount>4000,mode=dense?renderer.gl.LINES:renderer.gl.TRIANGLES;
+  const lines=draws.filter(row=>row.mode===mode),overlay=lines.at(-1);
+  assert.equal(lines.length,dense?1:2);assert.equal(overlay.first,dense?2:6);assert.equal(overlay.count,dense?2:6);
+  assert.equal(overlay.attributes.get(renderer.locations.position).buffer,dense?renderer.edgeBuffer:renderer.strokeBuffer);
+  assert.equal(overlay.attributes.size,dense?1:3);
   assert.deepEqual(overlay.color,[22/255,137/255,233/255,1]);
   assert.ok(draws.indexOf(overlay)<draws.findIndex(row=>row.mode===renderer.gl.POINTS),'nodes render above the relation overlay');
-  draws.length=0;renderer.showEdges=false;renderer.draw();assert.equal(draws.filter(row=>row.mode===renderer.gl.LINES).length,0);
+  draws.length=0;renderer.showEdges=false;renderer.draw();assert.equal(draws.filter(row=>row.mode===mode).length,0);
   renderer.showEdges=true;assert.equal(pick(-.8,0),nodes[0]);assert.equal(renderer.selectedEdge,-1);
-  pick(0,0);assert.equal(pick(-1.2,-.8),null);assert.equal(renderer.selectedEdge,-1);
-  pick(0,0);renderer.locate('a');assert.equal(renderer.selectedEdge,-1);
-  renderer.camera.scale=1;renderer.camera.x=0;renderer.camera.y=0;pick(0,0);
+  pick(0,edgeY);assert.equal(pick(-1.2,-.8),null);assert.equal(renderer.selectedEdge,-1);
+  pick(0,edgeY);renderer.locate('a');assert.equal(renderer.selectedEdge,-1);
+  renderer.camera.scale=1;renderer.camera.x=0;renderer.camera.y=0;pick(0,edgeY);
   const replacement=new GraphDataset();replacement.addNodes(nodes);renderer.setDataset(replacement);assert.equal(renderer.selectedEdge,-1);
 });
 
@@ -513,6 +630,7 @@ for(const scale of [.25,1,4])for(const dpr of [1,2])test(`graph click targets ke
   const relation={id:'ab',kind:'relation',subject_id:'a',object_id:'b'};
   renderer.dataset.addNodes(nodes,new Float32Array([-.4,0,.4,0]));renderer.dataset.addEdges([relation]);renderer.sync();
   const middle=renderer.camera.worldToScreen(0,0,renderer.width,renderer.height);
+  middle[1]-=Math.min(.8*.1*renderer.camera.unit(renderer.width,renderer.height),40)/2;
   assert.equal(renderer.pick(middle[0],middle[1]+9),relation,'a thin line is selectable inside its 10px CSS halo');
   assert.equal(renderer.selectedEdge,0);assert.equal(selected.at(-1),relation);
   assert.equal(renderer.pick(middle[0],middle[1]+11),null,'blank space outside the halo does not select a relationship');
@@ -529,8 +647,22 @@ test('larger graph hit targets still choose the closest existing relationship',(
   const lower={id:'lower',subject_id:'a',object_id:'b'},upper={id:'upper',subject_id:'c',object_id:'d'};
   renderer.dataset.addEdges([lower,upper]);renderer.sync();
   const [x,y]=renderer.camera.worldToScreen(0,0,renderer.width,renderer.height);
-  assert.equal(renderer.pick(x,y-8),upper,'overlapping halos resolve by distance rather than input order');
+  assert.equal(renderer.pick(x,y-23),upper,'overlapping halos resolve by distance rather than input order');
   assert.equal(renderer.selectedEdge,1);
+});
+
+test('reciprocal relationships follow distinct arcs and continue to meet a dragged node',()=>{
+  const {renderer,buffers}=bufferScene();renderer.onSelect=()=>{};
+  renderer.dataset.addNodes([{id:'a'},{id:'b'}],new Float32Array([-.8,0,.8,0]));
+  const forward={id:'forward',subject_id:'a',object_id:'b'},reverse={id:'reverse',subject_id:'b',object_id:'a'};
+  renderer.dataset.addEdges([forward,reverse]);renderer.sync();
+  const pick=(x,y)=>renderer.pick(x,y);
+  assert.equal(pick(400,280),forward);assert.equal(pick(400,320),reverse);assert.equal(pick(400,300),null);
+  renderer.moveNode(renderer.beginNodeDrag(0),-.4,0);
+  assert.equal(pick(460,282),forward);assert.equal(pick(460,318),reverse);
+  const vertices=buffers.get(renderer.strokeBuffer);
+  assert.deepEqual(Array.from(vertices.slice(0,4)),Array.from(renderer.renderPositions));
+  assert.deepEqual(Array.from(vertices.slice(36,40)),[...renderer.renderPositions.slice(2),...renderer.renderPositions.slice(0,2)]);
 });
 
 test('small graph nodes keep a readable diameter after zooming out',()=>{
@@ -625,6 +757,15 @@ test('actual short graph canvases can cache the full stable layout and selected 
   }
 });
 
+test('complete overview caching accounts for a curve that leaves the node bounds',()=>{
+  const {renderer}=overviewScene();
+  renderer.moveNode(renderer.beginNodeDrag(0),-.8,.96);
+  renderer.moveNode(renderer.beginNodeDrag(4999),.8,.96);
+  assert.equal(renderer.canCaptureView(),false,'a visible pair of endpoints can still have a clipped arc');
+  renderer.showEdges=false;
+  assert.equal(renderer.canCaptureView(),true);
+});
+
 test('overview texture allocation errors disable only the optional cache',()=>{
   const scene=overviewScene(),{renderer,gl,draws,copies}=scene;gl.getError=()=>1285;warmOverview(scene);renderer.draw();
   assert.equal(copies.length,1);assert.ok(draws.some(row=>row.mode===gl.POINTS));assert.equal(renderer.stats().cached_entities,0);
@@ -663,7 +804,7 @@ test('destroy releases the bounded overview texture',()=>{
 test('bounded exploration overlay preserves the real complete-view cache and clearing restores its canvas',()=>{
   const scene=overviewScene(),{renderer,draws,copies}=scene;renderer.selected=0;warmOverview(scene);
   assert.ok(renderer.viewSnapshot);renderer.canvas.style={opacity:''};const geometry=[];
-  renderer.labelContext={setTransform(){},clearRect(){},save(){},restore(){},beginPath(){},moveTo(){},lineTo(){geometry.push('edge');},arc(){},stroke(){},fill(){geometry.push('node');}};
+  renderer.labelContext={setTransform(){},clearRect(){},save(){},restore(){},beginPath(){},moveTo(){},quadraticCurveTo(){geometry.push('edge');},arc(){},stroke(){},fill(){geometry.push('node');}};
   renderer.drawLabels=load().Renderer.prototype.drawLabels;renderer.showLabels=false;
   const nodes=['overview0','overview4999'],edge=renderer.dataset.edges[0];
   renderer.setExplorationFocus({nodeIds:new Set(nodes),edgeIds:new Set([edge.id]),edgeRecords:[edge]});renderer.draw();

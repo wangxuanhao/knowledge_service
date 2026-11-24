@@ -1,3 +1,5 @@
+from contextlib import closing
+
 from ontology_seed import seed_project_ontology
 from ontology_seed import seed_ontology
 from fastapi.testclient import TestClient
@@ -5,7 +7,9 @@ import pytest
 
 from knowledge_service.api import create_app
 from knowledge_service.integrations.embeddings import HashingEncoder
-from knowledge_service.models import Scope
+from knowledge_service.models import RecordWrite, Scope
+from knowledge_service.repository import Repository
+from knowledge_service.services.retrieval import PROJECTION_SCHEMA_VERSIONS
 from keyword_index_fixture import install_keyword_store, ready_keyword_index
 
 
@@ -58,7 +62,7 @@ def test_project_cards_report_real_ontology_publications(client):
     summary = client.get(url,params={'metadata_only':True})
     assert summary.status_code == 200
     assert summary.json()['versions'] == [
-        {key: row[key] for key in ('id','version','version_reused')} for row in full]
+        {key: row[key] for key in ('id','created_at','version','version_reused')} for row in full]
 
 
 def test_ontology_scope_accepts_each_legal_combination(client):
@@ -186,6 +190,96 @@ def test_background_ingestion_has_stage_logs(client):
     assert repository.projections.project_watermark(p) == len(events) > 0
     with pytest.raises(RuntimeError, match='not_built'):
         repository.projections.search_index(p, 3)
+
+
+def test_unchanged_manual_saves_reuse_version_without_new_evidence(client, monkeypatch):
+    from knowledge_service.api import knowledge
+    from knowledge_service.services.ontology import Ontology
+
+    p = project(client, use_default_ontology=False)
+    repository = client.app.state.service.repository
+    turtle = ('@prefix ex: <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . '
+              'ex:Person a owl:Class . ex:knows a owl:ObjectProperty . ex:age a owl:DatatypeProperty .')
+    seed_ontology(repository, p, turtle, Ontology(turtle).summary())
+    monkeypatch.setattr(knowledge, 'audit_actor', lambda request: '知识维护员 (editor; user:editor)')
+    path = f'/api/projects/{p}/records'
+    created = client.post(path, json={'records': [
+        {'id': 'person', 'kind': 'entity', 'type': 'Person', 'text': '甲'},
+        {'id': 'other', 'kind': 'entity', 'type': 'Person', 'text': '乙'},
+        {'id': 'relation', 'kind': 'relation', 'type': 'knows', 'text': '甲认识乙',
+         'subject_id': 'person', 'object_id': 'other'},
+        {'id': 'attribute', 'kind': 'attribute', 'type': 'age', 'text': '甲的年龄为 30',
+         'subject_id': 'person', 'value': 30, 'datatype': 'http://www.w3.org/2001/XMLSchema#integer'},
+    ]})
+    assert created.status_code == 201, created.text
+    prior = repository.formal_write_snapshot(p)
+    event_count = repository._db.execute(
+        'SELECT count(*) FROM projection_outbox WHERE project_id=?', (p,)).fetchone()[0]
+    cases = [row for row in created.json()['records'] if row['id'] != 'other']
+    for row in cases:
+        body = {key: value for key, value in row.items() if key in RecordWrite.model_fields}
+        saved = client.put(path + '/' + row['id'], json={'record': body, 'expected_version': row['version']})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()['version_id'] == row['version_id']
+    assert repository.formal_write_snapshot(p) == prior
+    assert repository._db.execute(
+        'SELECT count(*) FROM projection_outbox WHERE project_id=?', (p,)).fetchone()[0] == event_count
+
+    for row in cases:
+        body = {key: value for key, value in row.items() if key in RecordWrite.model_fields}
+        body['text'] += '（更正）'
+        if row['kind'] == 'attribute':
+            body['value'] = 31
+        saved = client.put(path + '/' + row['id'], json={'record': body, 'expected_version': row['version']})
+        assert saved.status_code == 200, saved.text
+        assert saved.json()['version'] == row['version'] + 1
+        stale = client.put(path + '/' + row['id'], json={'record': body, 'expected_version': row['version']})
+        assert stale.status_code == 409, stale.text
+        history = client.get(path + '/' + row['id'] + '/history').json()['versions']
+        assert history[-1]['manual_change'] == {'actor': '知识维护员 (editor; user:editor)'}
+        assert len(history) == 2
+    relation = client.get(path + '/relation').json()
+    body = {key: value for key, value in relation.items() if key in RecordWrite.model_fields}
+    body['metadata'].update({'_deleted': True, '_manual_actor': '伪造的操作者'})
+    deleted = client.put(path + '/relation', json={'record': body, 'expected_version': relation['version']})
+    assert deleted.status_code == 200, deleted.text
+    history = client.get(path + '/relation/history').json()['versions']
+    assert history[-1]['metadata']['_deleted'] is True
+    assert history[-1]['manual_change'] == {'actor': '知识维护员 (editor; user:editor)'}
+
+
+def test_adding_document_evidence_does_not_revise_an_unchanged_entity(client):
+    p = project(client)
+    repository = client.app.state.service.repository
+    path = f'/api/projects/{p}/records'
+    response = client.post(path, json={'records': [
+        {'id': 'source-a', 'kind': 'document', 'text': '来源甲记载规则商户', 'metadata': {'title': '甲', 'status': 'ready'}},
+        {'id': 'source-b', 'kind': 'document', 'text': '来源乙记载规则商户', 'metadata': {'title': '乙', 'status': 'ready'}},
+    ]})
+    assert response.status_code == 201, response.text
+    response = client.post(path, json={'records': [
+        {'id': 'merchant', 'kind': 'entity', 'type': 'Merchant', 'text': '规则商户', 'source_id': 'source-a'},
+    ]})
+    assert response.status_code == 201, response.text
+    row = response.json()['records'][0]
+    body = {key: value for key, value in row.items() if key in RecordWrite.model_fields}
+    for source, new_evidence in [('source-a', False), ('source-b', True), ('source-b', False)]:
+        before = repository._db.execute(
+            'SELECT count(*) FROM projection_outbox WHERE project_id=?', (p,)).fetchone()[0]
+        edited = client.put(path + '/merchant', json={
+            'record': {**body, 'source_id': source}, 'expected_version': row['version'],
+        })
+        assert edited.status_code == 200, edited.text
+        assert edited.json()['version_id'] == row['version_id']
+        after = repository._db.execute(
+            'SELECT count(*) FROM projection_outbox WHERE project_id=?', (p,)).fetchone()[0]
+        if not new_evidence:
+            assert after == before
+    assert len(repository.history(p, 'merchant')) == 1
+    assertions = repository.list_assertions(p, canonical_record_id='merchant', status='accepted')
+    assert sorted(item['document_id'] for item in assertions if item['document_id']) == ['source-a', 'source-b']
+    support = repository.list_record_version_assertions(p, record_version_id=row['version_id'])
+    assert {item['assertion_id'] for item in support} == {item['id'] for item in assertions}
 
 
 def test_revision_and_half_open_time(client, monkeypatch):
@@ -349,15 +443,16 @@ def test_failed_extraction_keeps_receipt_without_partial_records(client, monkeyp
 
 def test_api_persists_across_restart(tmp_path, monkeypatch):
     database = tmp_path/'restart.sqlite'
+    schema_version = PROJECTION_SCHEMA_VERSIONS['milvus']
     with TestClient(create_app(database, HashingEncoder())) as first:
         p = project(first)
         assert first.post(f'/api/projects/{p}/documents', json={
             'title':'持久化','text':'重启后的退款证据','extraction_mode':'documents'}).status_code == 201
         ready_keyword_index(first.app.state.service, p, monkeypatch)
-        selected = first.app.state.service.repository.projections.search_index(p, 3)
+        selected = first.app.state.service.repository.projections.search_index(p, schema_version)
     with TestClient(create_app(database, HashingEncoder())) as second:
         install_keyword_store(second.app.state.service, monkeypatch)
-        assert second.app.state.service.repository.projections.search_index(p, 3) == selected
+        assert second.app.state.service.repository.projections.search_index(p, schema_version) == selected
         result = second.post(f'/api/projects/{p}/search', json={'query':'退款','retrieval_mode':'keyword'}).json()
         assert result['candidate_count'] == 1
         assert '重启后的退款证据' in result['hits'][0]['text']
@@ -391,50 +486,59 @@ def test_malformed_llm_response_is_service_unavailable(client, monkeypatch):
     assert len(provider_calls) == 1
 
 
-def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypatch):
+def test_ingest_failure_does_not_overwrite_concurrent_revision(client, monkeypatch, tmp_path):
     service = client.app.state.service
     repository = service.repository
     p = project(client)
     execute = repository.execute_formal_write
+    update_run = repository.update_ingest_run
     attempts, conflicts = [], []
 
-    def competing_completion(plan):
+    def edit_before_completion(*args, **kwargs):
+        run = update_run(*args, **kwargs)
+        if kwargs.get('active_stage') == 'extraction' and 'chunks_total' in (kwargs.get('counts_patch') or {}):
+            assert not attempts
+            # Commit independently while extraction is still outside its completion transaction.
+            with closing(Repository(tmp_path / 'service.sqlite', bootstrap=False)) as writer:
+                receipt = writer.get_record(p, run['document_id'])
+                assert receipt['version'] == 1
+                replacement = {key: value for key, value in receipt.items() if key in RecordWrite.model_fields}
+                replacement['text'] = 'USER EDIT TO PRESERVE'
+                writer.put_record(p, replacement, expected_version=receipt['version'])
+                attempts.append(receipt['id'])
+        return run
+
+    def observe_completion_conflict(plan):
         completions = [action for action in plan['actions']
                        if action['kind'] == 'record_put'
                        and action['record']['kind'] == 'document'
                        and action['record']['metadata']['status'] == 'ready']
         if not completions:
             return execute(plan)
-        assert len(completions) == 1 and not attempts
+        assert len(completions) == 1
         completion = completions[0]
-        receipt = repository.get_record(p, completion['record']['id'])
-        assert receipt['version'] == completion['expected_version'] == 1
-        replacement = {k:v for k,v in receipt.items() if k not in {
-            'project_id','version','version_id','recorded_at','superseded_at'}}
-        replacement['text'] = 'USER EDIT TO PRESERVE'
-        repository.put_record(p, replacement, expected_version=receipt['version'])
-        attempts.append(receipt['id'])
+        assert attempts == [completion['record']['id']]
+        assert completion['expected_version'] == 1
         try:
             return execute(plan)
         except ValueError as exc:
             conflicts.append(str(exc))
             raise
 
-    # Race the detached completion plan at the real PG CAS boundary; the
-    # document-only path no longer calls an encoder during ingestion.
-    monkeypatch.setattr(repository, 'execute_formal_write', competing_completion)
+    monkeypatch.setattr(repository, 'update_ingest_run', edit_before_completion)
+    monkeypatch.setattr(repository, 'execute_formal_write', observe_completion_conflict)
     response = client.post(f'/api/projects/{p}/documents', json={
         'title':'并发文档','text':'ORIGINAL','extraction_mode':'documents'})
     assert response.status_code == 503
     assert len(attempts) == 1
-    assert conflicts == ['版本冲突：正式写入依赖已变更']
+    assert conflicts == ['版本冲突：记录已变更']
     current = repository.current_records(p)
     documents = [row for row in current if row['kind'] == 'document']
     assert len(documents) == 1
     assert documents[0]['text'] == 'USER EDIT TO PRESERVE'
     assert documents[0]['version'] == 2
     assert len(repository.history(p, documents[0]['id'])) == 2
-    assert [row['text'] for row in current if row['kind'] == 'chunk'] == ['ORIGINAL']
+    assert not [row for row in current if row['kind'] == 'chunk']
 
 
 def test_ingest_prefers_relation_extracted_validity_over_request(client, monkeypatch):

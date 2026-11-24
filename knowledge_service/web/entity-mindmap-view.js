@@ -53,14 +53,19 @@
     // that same span, so a pair of siblings never gets squeezed by other branches.
     let span=leafParents[0]===leafParents.at(-1)?1:2;
     for(let i=1;i<leafParents.length;i++)span+=leafParents[i]===leafParents[i-1]?1:2;
+    const compact=canvasWidth<=560;
     if(vertical){
-      const step=Math.max(144,Math.min(192,(canvasHeight-144)/Math.max(1,depth)));
-      const width=span*244,height=Math.max(1,depth*step);
+      const step=Math.max(compact?100:144,Math.min(192,(canvasHeight-144)/Math.max(1,depth)));
+      const width=span*(compact?126:244),height=Math.max(1,depth*step);
       return {width,height,left:(canvasWidth-width)/2,top:Math.max(72,(canvasHeight-height)/2),total,visible};
     }
-    const step=Math.max(244,Math.min(288,(canvasWidth-264)/Math.max(1,depth)));
-    const width=Math.max(1,depth*step),height=Math.max(160,span*128);
-    return {width,height,left:Math.max(132,(canvasWidth-width)/2),top:(canvasHeight-height)/2,total,visible};
+    const margin=compact?67:132;
+    const step=Math.max(compact?123:244,Math.min(288,(canvasWidth-2*margin)/Math.max(1,depth)));
+    const width=Math.max(1,depth*step),height=Math.max(120,span*(compact?90:118));
+    return {width,height,left:Math.max(margin,(canvasWidth-width)/2),top:(canvasHeight-height)/2,total,visible};
+  }
+  function cardSize(compact,isRoot){
+    return compact?(isRoot?[106,80]:[98,76]):(isRoot?[228,106]:[208,102]);
   }
   function create({chart,host,summary,empty,buttons,zoomLabel,labelOf=value=>value||'实体',colorFor=()=> '#548e88',onInspect=()=>{},onHover=null}){
     let tree=null,truncated=false,vertical=false,styledZoom=1,roamFrame=null;
@@ -77,20 +82,21 @@
       zoomLabel.textContent=tree?Math.round((chart.getOption().series?.[0]?.zoom||1)*100)+'%':'100%';
     }
     function styled(node,isRoot=false,scale=1){
-      const color=isRoot?'#15534f':colorFor(node.type),type=labelOf(node.type)||'实体',textWidth=(isRoot?196:176)*scale;
+      const compact=host.clientWidth<=560,dimensions=cardSize(compact,isRoot);
+      const color=isRoot?'#15534f':colorFor(node.type),type=labelOf(node.type)||'实体',textWidth=(dimensions[0]-(compact?14:32))*scale;
       const relation=isRoot?'根实体':(node.predicate?labelOf(node.predicate):'关联实体');
       const branches=node.children.length?` · ${node.collapsed?'＋':'−'} ${node.children.length} 个分支`:'';
       const marked=node.id===focusedId||pathNodes.has(node.id),onPath=pathEdges.has(node.id);
       return {...node,children:node.children.map(child=>styled(child,false,scale)),
-        symbol:'path://M12 0H196Q208 0 208 12V90Q208 102 196 102H12Q0 102 0 90V12Q0 0 12 0Z',symbolSize:isRoot?[228,106]:[208,102],
+        symbol:'path://M12 0H196Q208 0 208 12V90Q208 102 196 102H12Q0 102 0 90V12Q0 0 12 0Z',symbolSize:dimensions,
         itemStyle:{color:isRoot?'#15534f':marked?'#fff4df':'#ffffff',borderColor:marked?'#bd742b':isRoot?'#15534f':color+'80',borderWidth:marked?2.5*scale:isRoot?0:1.2*scale,
           shadowColor:'rgba(21,66,66,.08)',shadowBlur:10*scale,shadowOffsetY:3*scale},
         lineStyle:{color:onPath?'#bd742b':'#b6cfcc',width:(onPath?2.8:1.6)*scale,opacity:(pathEdges.size&&!onPath)? .4:1},
         label:{position:'inside',align:'center',verticalAlign:'middle',width:textWidth,
-          formatter:`{relation|${richText(wrapName(relation,27,1))}}\n{name|${richText(wrapName(node.name,isRoot?26:22))}}\n{meta|${richText(wrapName(type+branches,29,1))}}`,
-          rich:{relation:{align:'left',width:textWidth,fontSize:11*scale,fontWeight:600,color:isRoot?'#b6dad5':color,lineHeight:20*scale},
-            name:{align:'left',width:textWidth,fontSize:15*scale,fontWeight:600,color:isRoot?'#ffffff':'#173f3d',lineHeight:22*scale},
-            meta:{align:'left',width:textWidth,fontSize:11*scale,color:isRoot?'#b6dad5':'#788f8c',lineHeight:20*scale}}},
+          formatter:`{relation|${richText(wrapName(relation,compact?14:27,1))}}\n{name|${richText(wrapName(node.name,compact?12:isRoot?26:22))}}\n{meta|${richText(wrapName(type+branches,compact?16:29,1))}}`,
+          rich:{relation:{align:'left',width:textWidth,fontSize:11*scale,fontWeight:600,color:isRoot?'#cce3df':color,lineHeight:(compact?15:20)*scale},
+            name:{align:'left',width:textWidth,fontSize:(compact?14:15)*scale,fontWeight:600,color:isRoot?'#ffffff':'#173f3d',lineHeight:(compact?18:22)*scale},
+            meta:{align:'left',width:textWidth,fontSize:11*scale,color:isRoot?'#cce3df':'#536e68',lineHeight:(compact?15:20)*scale}}},
         emphasis:{itemStyle:{borderColor:isRoot?'#15534f':color,borderWidth:2*scale,shadowBlur:14*scale}}};
     }
     function syncView(){
@@ -220,7 +226,8 @@
         if(!nodes.has(raw?.id)||!element)return;
         const point=element.transformCoordToGlobal(0,0);
         if(!point.every(Number.isFinite))return;
-        result.nodes.push({id:raw.id,name:raw.name,x:point[0],y:point[1],width:(raw.id===tree.id?228:208)*zoom,height:(raw.id===tree.id?106:102)*zoom});
+        const [width,height]=cardSize(host.clientWidth<=560,raw.id===tree.id);
+        result.nodes.push({id:raw.id,name:raw.name,x:point[0],y:point[1],width:width*zoom,height:height*zoom});
       });
       return result;
     }

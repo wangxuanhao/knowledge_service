@@ -10,7 +10,7 @@
 #tab-useradmin .ua-flash:empty{display:none}
 #tab-useradmin .ua-flash.is-error{color:#a1363a;background:#fff5f5;border-color:#ebc9c9}
 #tab-useradmin .ua-flash.is-good{color:#21654f;background:#edf7f2;border-color:#c9e1d5}
-#tab-useradmin .ua-search{display:grid;grid-template-columns:minmax(0,1fr) 180px auto;align-items:end;gap:12px;margin:0 0 20px;padding:14px;background:var(--ks-sunken,#eef5f5);border:1px solid var(--ks-line,#d5e4e4);border-radius:8px}
+#tab-useradmin .ua-search{display:grid;grid-template-columns:minmax(0,1fr) 180px auto;align-items:end;gap:12px;margin:12px 0 16px}
 #tab-useradmin .ua-search label{display:grid;gap:6px;min-width:0;margin:0;font-size:12px;font-weight:500;line-height:18px;color:var(--ks-ink-2,#3d5e5e)}
 #tab-useradmin .ua-search :is(input,select,button){width:100%;min-width:0;height:38px;margin:0;padding:8px 12px;font:inherit;font-size:13px;line-height:20px;border-radius:6px;box-sizing:border-box;box-shadow:none}
 #tab-useradmin .ua-search :is(input,select){color:var(--ks-ink,#124242);background-color:var(--ks-surface,#fff);border:1px solid var(--ks-line-strong,#bed0d0)}
@@ -110,12 +110,27 @@ body .ua-management-overlay .ua-edit-card{width:min(480px,100vw);max-width:100%;
 .ua-management-overlay .ua-confirm button{margin:0 8px 0 0}
 @media(max-width:650px){
  #tab-useradmin .ua-page{padding:16px}
- #tab-useradmin .ua-search{grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:12px}
- #tab-useradmin .ua-search-field{grid-column:1/-1}
+ #tab-useradmin .ua-search{grid-template-columns:minmax(0,1fr) minmax(92px,0.68fr) auto;gap:8px}
+ #tab-useradmin .ua-search button{min-width:0;padding-inline:8px}
  #tab-useradmin .ua-head{align-items:flex-start}
  #tab-useradmin .ua-head button{padding:7px 10px}
  .ua-management-overlay .ua-edit-card .ua-head{padding:18px 18px 14px}
  .ua-management-overlay .ua-dialog-intro{margin-left:18px;margin-right:18px}
  .ua-management-overlay .ua-edit-form{padding-left:18px;padding-right:18px}
  .ua-management-overlay :is(.ua-edit-secondary,.ua-confirm){margin-left:18px;margin-right:18px}
+}
+
+@media(max-width:760px){
+ #tab-useradmin .ua-table { min-width:0; table-layout:auto; display:block; }
+ #tab-useradmin .ua-table thead { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); }
+ #tab-useradmin .ua-table tbody { display:block; }
+ #tab-useradmin .ua-table tr { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:6px 10px; align-items:center; padding:12px; }
+ #tab-useradmin .ua-table tr+tr { border-top:1px solid var(--ks-line); }
+ #tab-useradmin .ua-table td { padding:0; border:0; }
+ #tab-useradmin .ua-table td:first-child { grid-column:1 / 3; }
+ #tab-useradmin .ua-table td:nth-child(2) { grid-column:1; grid-row:2; }
+ #tab-useradmin .ua-table td:nth-child(3) { grid-column:3; grid-row:1; justify-self:end; }
+ #tab-useradmin .ua-table td:nth-child(4) { grid-column:2 / 4; grid-row:2; justify-self:end; }
+ #tab-useradmin .ua-table .ua-role-description { display:none; }
+ #tab-useradmin .ua-table .ua-empty { grid-column:1 / -1; text-align:center; }
 }

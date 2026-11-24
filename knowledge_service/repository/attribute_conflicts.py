@@ -196,6 +196,12 @@ class ConflictReads:
         return dict(record_id=record_id,version=member['version'],version_id=member['version_id'],sources=page,
             next_cursor=base64.urlsafe_b64encode(_json([project,set_id,member['version_id'],page[-1]['assertion_id']]).encode()).decode() if len(rows)>limit else None)
 
+    def current_member_version_id(self, project, record_id):
+        """Check the physical current row, including quarantined members."""
+        row = self.repo._db.execute('''SELECT version_id FROM record_versions
+            WHERE project_id=? AND id=? AND superseded_at IS NULL''', (project, record_id)).fetchone()
+        return row['version_id'] if row is not None else None
+
     def support_versions(self,project,record_ids):
         if not record_ids:return []
         rows=self.repo._db.execute('''SELECT id,canonical_record_id,decision_version,status

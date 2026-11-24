@@ -116,6 +116,16 @@ class ReviewStore:
                 project_id, review_id, expected_version, decision, reason, actor)
 
     # ------------------------------------------------------------------ 合并账本
+    def merge_operation_snapshots(self, project_id, operation_id):
+        with self._lock:
+            row = self._db.execute(
+                '''SELECT before_state,after_state,redirects FROM merge_operations
+                   WHERE project_id=? AND id=?''',
+                (project_id, operation_id)).fetchone()
+        if row is None:
+            return None
+        return {key: json.loads(row[key]) for key in ('before_state', 'after_state', 'redirects')}
+
     def list_merge_operations(self, project_id):
         self.repo.get_project(project_id)
         with self._lock:

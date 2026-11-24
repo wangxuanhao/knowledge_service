@@ -1065,8 +1065,8 @@ body main #scope .scope-section:last-child{padding-bottom:0}
 body main #scope .scope-section h3{font-size:13px;margin:0 0 10px;color:var(--ui-ink)}
 body main #scope .scope-section>p{margin:0 0 12px;font-size:12px}
 body main #scope .scope-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
-body main #scope .scope-fields label{display:grid;gap:6px;min-width:0;margin:0}
-body main #scope .scope-fields :is(input,select){width:100%;min-width:0;margin:0;font-size:13px}
+body main #scope .scope-fields>label{display:grid;gap:6px;min-width:0;margin:0}
+body main #scope .scope-fields>label>:is(input,select){width:100%;min-width:0;margin:0;font-size:13px}
 body main #scope .scope-types{grid-template-columns:repeat(2,minmax(0,1fr));max-width:760px}
 body main #scope .cb-row{flex-wrap:wrap;gap:8px}
 body main #scope .cb-field{flex:1 1 220px;max-width:none}

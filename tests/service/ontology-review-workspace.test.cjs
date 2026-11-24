@@ -2,6 +2,16 @@ const test=require('node:test');
 const assert=require('node:assert/strict');
 const review=require('../../knowledge_service/web/ontology-review-workspace.js');
 const item=(id,target,extra={})=>({operation_id:id,target_iri:target,action:'add_annotation',approvable:true,auto_approvable:true,...extra});
+
+test('review explains linked knowledge rules from the scoped draft without calling an empty draft a pending write',()=>{
+  const node=(tag,text)=>({tag,text,children:[],append(...children){this.children.push(...children);}});
+  const draft={associated_knowledge:{selected:2},source_context:{intake_bindings:[{selected_candidate_ids:['a','b']}]}};
+  const section=review.knowledgeRules(draft, (tag,_class,text)=>node(tag,text));
+  const texts=root=>[root.text,...root.children.flatMap(texts)].join(' ');
+  assert.match(texts(section),/2 条关联候选/);
+  assert.match(texts(section),/同名.*相同事实.*范围.*失效.*待核对/);
+  assert.equal(review.knowledgeRules({associated_knowledge:{selected:0}},node),null);
+});
 function fixture(extra={}){
   let context={projectId:'p',draftId:'d',revision:2,preview:false},writes=[];
   let draft={id:'d',revision:2,status:'pending',submitted_at:'now',base_ontology_id:'base',validation_fingerprint:'fp',

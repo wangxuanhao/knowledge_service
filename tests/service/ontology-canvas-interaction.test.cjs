@@ -111,10 +111,12 @@ test('rapid focus changes center the latest node and fit cancels focus without m
   const f=fixture('graph',undefined,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
   f.cy.$id('a').position({x:-800,y:300});f.cy.$id('b').position({x:900,y:700});
   f.canvas.focus('a');f.canvas.focus('b');
-  await new Promise(resolve=>setTimeout(resolve,380));
-  const point=f.cy.$id('b').renderedPosition(),stage=f.host.children[0];
-  assert.ok(Math.abs(point.x-stage.clientWidth/2)<2);
-  assert.ok(Math.abs(point.y-stage.clientHeight/2)<60);
+  await t.waitFor(()=>{
+    assert.equal(f.cy.animated(),false);
+    const point=f.cy.$id('b').renderedPosition(),stage=f.host.children[0];
+    assert.ok(Math.abs(point.x-stage.clientWidth/2)<2);
+    assert.ok(Math.abs(point.y-stage.clientHeight/2)<60);
+  },{timeout:10000,interval:25});
   const before=f.cy.nodes().map(n=>({...n.position()}));
   f.button('适应画布').listeners.click();
   assert.equal(f.cy.elements('.is-muted').length,0);
@@ -125,12 +127,15 @@ test('focusing distant relationship endpoints fits both anchors below the normal
   const graph={nodes:[{id:'a'},{id:'b'}],edges:[{id:'ab',source:'a',target:'b',kind:'relation',termIri:'r'}]};
   const f=fixture('graph',graph,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
   f.cy.$id('a').position({x:10000,y:400});f.cy.$id('b').position({x:20000,y:400});
-  f.canvas.focus('r');await new Promise(resolve=>setTimeout(resolve,340));
-  assert.ok(f.cy.zoom()<.25);
-  for(const node of f.cy.nodes()){
-    const box=node.renderedBoundingBox();
-    assert.ok(box.x1>=0&&box.x2<=950,'both declared endpoints remain visible');
-  }
+  f.canvas.focus('r');
+  await t.waitFor(()=>{
+    assert.equal(f.cy.animated(),false);
+    assert.ok(f.cy.zoom()<.25);
+    for(const node of f.cy.nodes()){
+      const box=node.renderedBoundingBox();
+      assert.ok(box.x1>=0&&box.x2<=950,'both declared endpoints remain visible');
+    }
+  },{timeout:10000,interval:25});
 });
 
 test('one inheritance edge cannot collapse many independent classes into an unreadable strip',t=>{
@@ -407,6 +412,14 @@ test('connected class cards encode safe property rows and switch independently o
   assert.deepEqual({...f.cy.pan()},{x:24,y:35});
   f.canvas.setDisplay('cards');assert.equal(node.data('display'),'cards');
   assert.deepEqual(f.commands,[],'node presentation never emits semantic commands');
+});
+
+test('a class without properties uses a title-height card', t => {
+  const f=fixture('types',{nodes:[{id:'empty',label:'通知',kind:'class'}],edges:[]});
+  t.after(()=>f.canvas.destroy());
+  const data=f.cy.$id('empty').data();
+  assert.ok(data.nodeHeight<=48);
+  assert.match(decodeURIComponent(data.cardImage),/通知/);
 });
 
 test('changing graph node display preserves coordinates without adding hierarchy bands', t => {

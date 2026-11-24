@@ -447,8 +447,8 @@ def test_canvas_draws_the_draft_so_edits_are_visible_and_editable_after_publish(
 
 
 def test_canvas_stats_separate_relation_types_from_drawn_edges():
-    """统计栏把「关系类型 N」与「画得出线 M」分开说 —— 两个数字打架是这轮反馈的起因。"""
-    assert '关系类型 ${relTotal}（画得出线 ${rel}）' in read('ontology-model-canvas.js')
+    """本体中的关系类型总数和画布上的实际连线数可以不同。"""
+    assert '关系类型 ${relTotal} · 关系线 ${rel}' in read('ontology-model-canvas.js')
 
 
 def test_ontology_model_shows_discovery_guide_when_not_yet_published():

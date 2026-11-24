@@ -73,7 +73,11 @@
   for(const [id,label] of [['reading','阅读视图'],['parsed','解析视图'],['raw','原始视图']]){
     const b=make('button',label,'secondary');b.type='button';tabs.append(b);tabButtons[id]=b;
   }
-  async function get(url,signal,raw=false){const response=await fetch(url,{signal});if(!response.ok)throw Error('来源读取失败（HTTP '+response.status+'）');return raw?response.text():response.json();}
+  async function get(url,signal,raw=false){
+    const response=await fetch(url,{signal});
+    if(!response.ok)throw Object.assign(new Error('来源读取失败（HTTP '+response.status+'）'),{status:response.status});
+    return raw?response.text():response.json();
+  }
   function overlay(asset,boxes,project,version){
     const figure=make('figure','','source-reader-image'),canvas=make('div','','source-image-canvas'),img=make('img');img.alt=asset.alt_text||asset.original_path||'原图';img.dataset.assetId=asset.id;img.dataset.assetUrl=sourceUrl(project,version,'assets/'+encodeURIComponent(asset.id));if(asset.width>0&&asset.height>0){img.width=asset.width;img.height=asset.height;}canvas.append(img);
     for(const box of boxes){const style=boxStyle(box);if(!style)continue;const mark=make('span','','source-ocr-box');Object.assign(mark.style,style);mark.title=box.text||'OCR 文字区域';canvas.append(mark);}
@@ -110,7 +114,9 @@
   async function renderParsed({host:body,projectId,versionId,view,location=null,onLocate,onRefresh}){
     const {signal}=view;
     const accepts=view.active;
-    const doc=await get(sourceUrl(projectId,versionId),signal);
+    const pinned=location?.chunk_version_id||location?.spans?.[0]?.chunk_version_id;
+    const query=pinned?'?'+new URLSearchParams({chunk_version_id:pinned}):'';
+    const doc=await get(sourceUrl(projectId,versionId)+query,signal);
     if(!accepts())return;
     body.replaceChildren();
     for(const chunk of doc.chunks||[]){
@@ -119,7 +125,8 @@
       part.append(make('summary','模型片段 · '+chunk.id+' · 固定版本 '+chunk.version_id));
       const kind=chunk.metadata?.source_kind;
       part.append(make('p',kind==='mixed'?'正文与附件识别文字统一切片；来源位置分别保留。':kind==='video_asr'?'视频语音转写；点击下方语音时段定位原视频。':kind==='image_ocr'?'图片 OCR 文字；抽取时会附加识别误差提醒。':'Markdown / 文档正文片段'),make('pre',chunk.text));
-      part.append(make('small','来源块：'+(chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean).join('、')));
+      const blockIds=[...new Set((chunk.spans||[]).map(s=>s.block_id||s.ocr_block_id||s.asr_segment_id).filter(Boolean))];
+      if(blockIds.length)part.append(make('small','来源块（'+blockIds.length+'）：'+blockIds.join('、')));
       body.append(part);
     }
     for(const block of doc.blocks||[]){const section=make('section','','source-parsed-block');section.dataset.blockId=block.block_id||block.id;
@@ -186,17 +193,43 @@
     view.hydrateImages();
     return doc;
   }
-  async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null,matchKind=null}){
+  async function open({projectId,versionId,location=null,assertionId=null,chunkVersionId=null,focusText=null,matchKind=null,fallbackEvidence=null}){
     controller?.abort();clearContent();controller=new AbortController();const {signal}=controller,token=++serial;
     if(!dialog.open)returnFocus=document.activeElement;restoreFocus=true;body.textContent='正在加载固定版本原文…';note.textContent='';
-    for(const button of Object.values(tabButtons))button.disabled=true;
+    title.textContent='固定版本原文';
+    for(const button of Object.values(tabButtons)){
+      button.disabled=true;
+      button.setAttribute('aria-pressed','false');
+    }
     if(!dialog.open)dialog.showModal();
+    function showReadError(error,message){
+      if(!fallbackEvidence||error.status!==404){body.textContent=error.message;return;}
+      const {documentTitle,documentVersionId,quote,quoteTruncated}=fallbackEvidence;
+      const details=[documentTitle,documentVersionId&&'资料修订 '+documentVersionId].filter(Boolean).join(' · ');
+      body.replaceChildren(make('p',message+'（HTTP 404）'));
+      if(details)body.append(make('p',details));
+      body.append(make('h3',quoteTruncated?'已保存引文（截取）':'已保存引文'));
+      body.append(quote?make('pre',quote):make('p','该条证据未保存引文。'));
+    }
     try{
       let doc=await get(sourceUrl(projectId,versionId),signal);if(token!==serial)return;
       title.textContent=window.SourceContent.isPdfSource(doc)?window.SourceContent.sourceInfo(doc).filename:doc.original_name||doc.title||'固定版本原文';const versionNote='固定版本 '+(doc.version||versionId)+' · '+(doc.sha256||doc.source_object?.sha256||'');note.textContent=versionNote;
+      let locationMissing=false;
+      const lookupAssertion=!location&&assertionId&&!chunkVersionId;
       if(!location&&(assertionId||chunkVersionId)){
-        const query=new URLSearchParams();if(assertionId)query.set('assertion_id',assertionId);if(chunkVersionId)query.set('chunk_version_id',chunkVersionId);
-        location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
+        try{
+          if(lookupAssertion){
+            const url='/api/projects/'+encodeURIComponent(projectId)+'/assertions/'+encodeURIComponent(assertionId)+'/evidence';
+            const evidence=await get(url,signal),source=evidence.source_location,mode=evidence.location?.mode;
+            if(source?.document_version_id===versionId&&source.status==='available'&&(mode==='exact'||mode==='chunk')){
+              location={...source,precision:mode==='exact'&&source.precision==='evidence'?'evidence':'chunk'};
+            }else locationMissing=true;
+          }else{
+            const query=new URLSearchParams({chunk_version_id:chunkVersionId});
+            location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
+          }
+        }
+        catch(error){if(error.status!==404)throw error;locationMissing=true;}
       }
       if(token!==serial||!dialog.open)return;
       if(location?.media_locations?.length&&!location.asset_id)location={...location,...location.media_locations[0]};
@@ -209,7 +242,10 @@
         const view=window.SourceContent.createSession({host:body,projectId,versionId,signal:documentSignal,isCurrent:accepts});content=view;
         const signal=view.signal;
         body.textContent='正在加载…';note.textContent=versionNote+(matchKind==='semantic'?' · 语义相关片段定位，非逐字命中':'');
+        if(locationMissing)note.textContent+=' · 未找到证据位置';
         if(matchKind==='semantic'&&location)location={...location,precision:'chunk'};
+        const chunkOnly=lookupAssertion&&location?.precision==='chunk';
+        if(chunkOnly)note.textContent+=' · 未核验精确引文位置';
         for(const [k,b] of Object.entries(tabButtons))b.setAttribute('aria-pressed',String(k===tab));
         try{
           if(tab==='raw'){
@@ -266,7 +302,10 @@
             }
             firstFocus??=focus;
           }
-          if(firstFocus){note.textContent+=matchKind==='semantic'?' · 已框选相关来源片段':precise?' · 已定位证据文字':' · 已定位来源块（未保存精确文字范围）';firstFocus.scrollIntoView({block:'center'});}
+          if(firstFocus){
+            note.textContent+=matchKind==='semantic'?' · 已框选相关来源片段':precise?' · 已定位证据文字':chunkOnly?' · 已定位来源片段':' · 已定位来源块（未能精确标注文字）';
+            firstFocus.scrollIntoView({block:'center'});
+          }
           if(tab==='reading'&&location?.media_locations?.length>1){
             const controls=make('div','','source-downloads');
             location.media_locations.forEach((group,index)=>{
@@ -292,14 +331,14 @@
           if(tab!=='parsed')view.hydrateImages();
           if(tab==='reading'&&location?.asset_id&&!Number.isFinite(location.start_ms)&&!window.SourceContent.isPdfSource(doc))view.focusRegion(location.asset_id,location.boxes||location.ocr_blocks||[]);
           if(tab==='reading'&&location?.asset_id&&Number.isFinite(location.start_ms))view.seekVideo(location.asset_id,location.start_ms);
-        }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();body.textContent=e.message;}}
+        }catch(e){if(e.name!=='AbortError'&&accepts()){view.dispose();showReadError(e,'当前视图所需的冻结来源未找到，可切换其他视图');}}
       }
       for(const [id,b] of Object.entries(tabButtons)){
         b.onclick=()=>show(id);
         b.disabled=false;
       }
       await show(location?.tab==='parsed'?'parsed':'reading');
-    }catch(e){if(e.name!=='AbortError'&&token===serial)body.textContent=e.message;}
+    }catch(e){if(e.name!=='AbortError'&&token===serial&&dialog.open)showReadError(e,'未找到对应的冻结文件版本');}
   }
   window.SourceReader={open,renderParsed,dispose:invalidate,boxStyle,sourceUrl,tableRowRange,characterRange,ocrProgress,pdfPage};
 })();

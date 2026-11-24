@@ -37,7 +37,7 @@
     $('record-history-view').hidden=mode!=='history';
     raw.hidden=mode!=='history';raw.open=false;
     $('record-dialog-help').textContent=mode==='edit'
-      ?'保存新修订：不改动旧修订，系统创建 rN+1。预期修订号用于防止覆盖别人的修改（修订号不一致会拒绝保存）。'
+      ?'内容有变化时生成新修订。预期修订号用于防止覆盖别人的修改。'
       :'这里按系统记录时间展示历次修订。每个 rN 都绑定当时依据的本体发布；选择历史修订只读查看，不会修改数据。';
     if(!dialog.open)dialog.showModal();
     dialog.scrollTop=0;
@@ -50,7 +50,7 @@
   const option=(value,label,selected)=>`<option value="${esc(value)}"${value===selected?' selected':''}>${esc(label)}</option>`;
   function editContext(){
     $('record-dialog-help').textContent=RecordVersionContext.summary(activeRow,activeOntologies)
-      +'。普通编辑保留本体归属，保存会生成下一次修订；使用新本体类型请先执行受控迁移。';
+      +'。内容有变化时生成新修订。使用新本体类型请先执行受控迁移。';
   }
   async function refreshViews(){
     const results=await Promise.allSettled([
@@ -70,12 +70,16 @@
     assertEditable();
     const serial=request,p=current;
     const saved=await api(endpoint('/records/'+encodeURIComponent(record.id)),{record,expected_version:expectedVersion},'PUT');
-    const refresh=window.KnowledgeChanges?.notify({projectId:p,records:[saved],kind:'revise'});
+    const sameRevision=saved.id===record.id&&saved.version===expectedVersion;
+    const unchanged=sameRevision&&!record.source_id;
+    const refresh=unchanged?null:window.KnowledgeChanges?.notify({projectId:p,records:[saved],kind:'revise'});
     if(serial!==request||p!==current||!dialog.open||!activeScope?.())return;
     activeRow=saved;populateRaw(saved);wb.records.set(saved.id,saved);editContext();
     const summary=RecordVersionContext.summary(saved,activeOntologies);
-    const message=`已保存${summary}；旧修订保留，本体结构未修改。`;
+    const message=unchanged?`内容未变化，保留${summary}。`:
+      sameRevision?`来源已关联到${summary}。`:`已保存${summary}。`;
     $('record-dialog-message').classList.remove('error');$('record-dialog-message').textContent=message;status(message);
+    if(unchanged)return saved;
     const reportRefresh=async failed=>{
       if(serial!==request||p!==current||!dialog.open||!activeScope?.()||activeRow!==saved)return;
       if(failed)$('record-dialog-message').textContent=message+' 部分视图刷新失败，请刷新图谱或台账。';
@@ -218,6 +222,10 @@
     appendFact(facts,'知识类别',revisionKind[row.kind]||row.kind||'未知');
     appendFact(facts,'删除状态',row.metadata?._deleted?'已删除':'有效');
     appendFact(facts,'本体归属',revisionOntology(row,ontologies));
+    if(row.manual_change?.actor){
+      appendFact(facts,'变更来源',row.version===1?'手动新增':'手动变更');
+      appendFact(facts,'操作者',row.manual_change.actor);
+    }
     appendFact(facts,'记录时间',window.DisplayTime.format(row.recorded_at,"未知"));
     appendFact(facts,'被取代时间',window.DisplayTime.format(row.superseded_at,'尚未被取代'));
     appendFact(facts,'业务有效期',`${window.DisplayTime.format(row.valid_from,"未知")} → ${window.DisplayTime.format(row.valid_until,"未知")}`);

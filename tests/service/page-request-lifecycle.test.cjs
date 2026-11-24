@@ -14,7 +14,7 @@ test('project cards stay idle at startup and still load on project page entry',a
   context.api=async url=>{env.calls.push({url});return {projects:[]};};
   vm.runInContext(web('projects-view.js'),context);await settle();assert.equal(env.calls.length,0);
   get('tab-projects').className='';await context.window.ProjectsView.refresh();
-  assert.equal(env.calls.length,1);assert.match(get('projects-root').innerHTML,/项目管理/);
+  assert.equal(env.calls.length,1);assert.match(get('projects-root').innerHTML,/id="projects-find"/);
 });
 
 test('project cards show Beijing time to the second and a fallback for missing dates',async()=>{
@@ -51,6 +51,17 @@ for(const id of ['apply-scope','reset-scope'])test('ledger '+id+' loads once thr
   assert.equal(calls.filter(call=>call.url.endsWith('/records/page')&&call.body.limit===50).length,1);
 });
 
+test('ledger asks for other category totals in one request',async()=>{
+  const env=fixture();
+  await env.context.window.refreshKnowledgeLedger();
+  await settle();
+  const counts=env.calls.filter(call=>call.url.endsWith('/records/counts'));
+  assert.equal(counts.length,1);
+  assert.deepEqual(Array.from(counts[0].body.kinds),['relation','attribute','chunk']);
+  assert.equal(env.calls.filter(call=>call.url.endsWith('/records/page')&&call.body.limit===1).length,0);
+  assert.equal(env.calls.filter(call=>call.url.endsWith('/ontologies?metadata_only=true')).length,1);
+});
+
 test('project settings select the target runtime section before activating its loaders',async()=>{
   const source=web('projects-view.js'),nodes=new Map(),loads=[];let active='overview';
   const get=id=>{if(!nodes.has(id))nodes.set(id,{value:'',focus(){},select(){},dispatchEvent(){}});return nodes.get(id);};
@@ -65,8 +76,14 @@ test('project settings select the target runtime section before activating its l
 function batches({realRuntime=false}={}){
   const env=fixture(),{context,get,events}=env,calls=[],timers=new Map(),library={active:false,mode:'upload'};
   const prototype=Object.getPrototypeOf(get('project'));
+  Object.defineProperty(prototype,'childElementCount',{get(){return this.children.length;}});
   prototype.prepend=function(...children){this.children.unshift(...children);};
   prototype.remove=function(){this.removed=true;};
+  prototype.removeChild=function(child){this.children.splice(this.children.indexOf(child),1);};
+  prototype.insertBefore=function(child,before){
+    if(this.children.includes(child))this.removeChild(child);
+    this.children.splice(before===null?this.children.length:this.children.indexOf(before),0,child);
+  };
   context.document.getElementById=get;
   get('project').value='p';get('tab-ingest').className='hidden';get('tab-runtime').className='hidden';get('tab-jobs').className='hidden';
   context.window.LibraryWorkspace={snapshot:()=>library};
@@ -86,7 +103,7 @@ function batches({realRuntime=false}={}){
   context.AbortController=AbortController;
   const batch={id:'b',status:'running',total_items:1,requested_concurrency:'auto',effective_concurrency:1,counts:{running:1}};
   let respond=async url=>url==='/api/ingest/capabilities'?{concurrency_choices:['auto',1]}:
-    url.endsWith('?limit=20')?{items:[batch]}:url.includes('/items?')?{items:[],next_cursor:null}:batch;
+    url.endsWith('?limit=20')?{items:[batch]}:url.includes('/items?')?{batch,items:[],next_cursor:null}:batch;
   context.fetch=async(url,options)=>{calls.push({url,options});const data=await respond(url,options);return {ok:true,json:async()=>data};};
   vm.runInContext(web('ingest-batches.js'),context);
   const api=context.window.IngestBatches;
@@ -177,7 +194,7 @@ test('concurrent visible batch list reads share one request and failed reads can
 test('selecting a summary in an open drawer reads details without reloading the list',async()=>{
   const env=batches();env.drawer();
   env.respond(async url=>url.endsWith('?limit=20')?{items:[env.batch]}:
-    url.includes('/items?')?{items:[{status:'running',original_name:'规则.md',stage:'reusing_chunks',progress:10}]}:env.batch);
+    url.includes('/items?')?{batch:env.batch,items:[{id:'i',status:'running',original_name:'规则.md',stage:'reusing_chunks',progress:10}]}:env.batch);
   await env.api.loadRecent();
   const view=env.descendants(env.get('ingest-batches')).find(node=>node.textContent==='查看批次详情');
   await view.onclick();await settle();
@@ -191,8 +208,8 @@ test('a document link polls its exact file and can return to the full batch',asy
   const env=batches();
   env.drawer();
   env.respond(async url=>url.includes('item_id=file-on-later-page')?
-    {items:[{id:'file-on-later-page',status:'running',original_name:'目标资料.md',stage:'ocr',progress:42}]}:
-    url.includes('/items?')?{items:[{id:'other',status:'queued',original_name:'同批其他文件.md'}]}:env.batch);
+    {batch:env.batch,items:[{id:'file-on-later-page',status:'running',original_name:'目标资料.md',stage:'ocr',progress:42}]}:
+    url.includes('/items?')?{batch:env.batch,items:[{id:'other',status:'queued',original_name:'同批其他文件.md'}]}:env.batch);
   env.api.monitor('p',{id:'b'},{itemId:'file-on-later-page'});
   await settle();
   const nodes=()=>env.descendants(env.get('ingest-batches'));
@@ -205,6 +222,34 @@ test('a document link polls its exact file and can return to the full batch',asy
   assert.equal(env.timers.size,0);
 });
 
+test('batch file rows request a summary and read just the selected result on click',async()=>{
+  const env=batches();
+  env.batch.status='completed';env.batch.settings={extraction_mode:'discovery'};
+  const item={id:'completed-file',status:'completed',original_name:'规则.md',document_id:'doc',run_id:'run'};
+  const saved={...item,result:{run_id:'run',document:{id:'doc',text:'完整正文'}}};
+  const reviews=[],opened=[];
+  env.respond(async url=>url.includes('summary_only=true')?{batch:env.batch,items:[item]}:{items:[saved]});
+  env.context.window.Auth={isAdmin:()=>true};
+  env.context.window.KnowledgeNavigation={open:async()=>{}};
+  env.context.window.OntologyIntake={open:async options=>reviews.push(options)};
+  env.context.window.IngestResults={showBatchItem:async (summary,options)=>{
+    assert.equal(summary,item);
+    opened.push(await options.loadItem());
+  }};
+  env.drawer();
+  const details=env.api.monitor('p',env.batch);await details.refresh();
+  assert.equal(env.calls.length,1);
+  assert.match(env.calls[0].url,/summary_only=true/);
+  const buttons=()=>env.descendants(details.card);
+  await buttons().find(node=>node.textContent==='核对候选与完善结构').onclick();
+  assert.equal(reviews[0].runId,'run');
+  assert.equal(env.calls.length,1);
+  await buttons().find(node=>node.textContent==='查看本次抽取结果').onclick();
+  assert.equal(env.calls.length,2);
+  assert.match(env.calls[1].url,/\/items\?limit=1&item_id=completed-file$/);
+  assert.deepEqual(opened,[saved]);
+});
+
 test('expanding and reloading a batch keeps its files inside a single batch card',async()=>{
   const env=batches();env.drawer();await env.api.loadRecent();
   const cards=()=>env.descendants(env.get('ingest-batches')).filter(node=>node.className.split(' ').includes('ingest-batch-card'));
@@ -215,6 +260,25 @@ test('expanding and reloading a batch keeps its files inside a single batch card
   await env.api.loadRecent();
   assert.equal(cards().length,1,'a list refresh must not duplicate an expanded batch');
   assert.equal(cards()[0],original);
+});
+
+test('batch polling keeps unchanged rows and preserves collapsed diagnostics when a row changes',async()=>{
+  const env=batches();env.drawer();
+  const failed={id:'failed',original_name:'失败.md',status:'needs_attention',error_code:'timeout',auto_retry_count:1};
+  const working={id:'working',original_name:'处理中.md',status:'running',stage:'ocr',progress:1};
+  let items=[failed,working];
+  env.respond(async()=>({batch:env.batch,items}));
+  const details=env.api.monitor('p',env.batch);
+  const rows=()=>env.descendants(details.card).filter(node=>node.className==='batch-item');
+  const diagnostics=row=>row.children.find(node=>node.tagName==='details');
+  await details.refresh();
+  const original=rows();
+  diagnostics(original[0]).open=false;
+  items=[failed,{...working,progress:2}];await details.refresh();
+  assert.equal(rows()[0],original[0]);
+  assert.notEqual(rows()[1],original[1]);
+  items=[{...failed,auto_retry_count:2},items[1]];await details.refresh();
+  assert.equal(diagnostics(rows()[0]).open,false);
 });
 
 test('collapsing a batch stops polling and reopening the drawer leaves it collapsed',async()=>{
@@ -232,7 +296,7 @@ test('collapsing a batch stops polling and reopening the drawer leaves it collap
 test('opening another batch collapses the old files and keeps only the selected poller',async()=>{
   const env=batches(),second={...env.batch,id:'c'};env.drawer();
   env.respond(async url=>url.endsWith('?limit=20')?{items:[env.batch,second]}:
-    url.includes('/items?')?{items:[]}:url.endsWith('/c')?second:env.batch);
+    url.includes('/items?')?{batch:url.includes('/c/')?second:env.batch,items:[]}:env.batch);
   await env.api.loadRecent();
   const views=env.descendants(env.get('ingest-batches')).filter(node=>node.textContent==='查看批次详情');
   await views[0].onclick();await settle();
@@ -247,32 +311,33 @@ test('collapsing an in-flight batch ignores its response without hiding the over
   env.respond(()=>pending.promise);await view.onclick();
   const request=env.calls.at(-1);await view.onclick();
   assert.equal(request.options.signal.aborted,true);
-  pending.resolve({...env.batch,status:'completed'});await settle();
-  assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,0);
+  pending.resolve({batch:{...env.batch,status:'completed'},items:[]});await settle();
+  assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,1);
   assert.equal(view['aria-expanded'],'false');assert.equal(env.details()[0].hidden,false);
 });
 
 test('only explicit visible detail loading starts its current items page and polling',async()=>{
   const env=batches();env.drawer();const detail=env.api.monitor('p',env.batch);await detail.refresh();await settle();
-  assert.equal(env.calls.filter(call=>call.url.endsWith('/b')).length,1);
+  assert.equal(env.calls.filter(call=>call.url.endsWith('/b')).length,0);
+  assert.equal(env.calls.filter(call=>call.url.includes('include_batch=true')).length,1);
   assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,1);assert.equal(env.timers.size,1);
   env.drawer(false);assert.equal(env.timers.size,0);
-  env.drawer();await settle();assert.equal(env.calls.length,4);assert.equal(env.timers.size,1);
+  env.drawer();await settle();assert.equal(env.calls.length,2);assert.equal(env.timers.size,1);
 });
 
 for(const state of ['paused','needs_attention','interrupted','completed','completed_with_errors','cancelled'])test(state+' detail stops automatic polling',async()=>{
   const env=batches();env.batch.status=state;env.drawer();await env.api.monitor('p',env.batch).refresh();await settle();
-  assert.equal(env.calls.length,2);assert.equal(env.timers.size,0);
+  assert.equal(env.calls.length,1);assert.equal(env.timers.size,0);
 });
 
-for(const boundary of ['close','leave','project'])test(boundary+' invalidates an in-flight detail before its items follow-on',async()=>{
+for(const boundary of ['close','leave','project'])test(boundary+' invalidates an in-flight batch and files response',async()=>{
   const env=batches(),old=deferred();env.drawer();env.respond(()=>old.promise);
   const loading=env.api.monitor('p',env.batch).refresh();assert.equal(env.calls.length,1);
   if(boundary==='project'){env.change('q');env.change('p');}
   else if(boundary==='close')env.drawer(false);
   else{env.get('tab-ingest').className='hidden';env.page('records');}
   assert.equal(env.calls[0].options.signal?.aborted,true);
-  old.resolve({...env.batch,status:'completed'});await loading;await settle();
+  old.resolve({batch:{...env.batch,status:'completed'},items:[]});await loading;await settle();
   assert.equal(env.calls.filter(call=>!call.url.endsWith('?limit=20')).length,1);assert.equal(env.timers.size,0);
   assert.equal(env.details()[0]?.dataset.status,undefined);
 });
@@ -289,10 +354,10 @@ test('a list response from a closed and reopened drawer cannot populate the new 
 test('reopened detail accepts the new read and rejects the previous visit response',async()=>{
   const env=batches(),old=deferred(),latest=deferred();env.drawer();env.respond(()=>old.promise);
   const first=env.api.monitor('p',env.batch).refresh();env.drawer(false);
-  env.respond(url=>url.includes('/items?')?Promise.resolve({items:[]}):latest.promise);env.drawer();
-  latest.resolve({...env.batch,status:'paused'});await settle();
-  old.resolve({...env.batch,status:'running'});await first;await settle();
-  assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,1);
+  env.respond(()=>latest.promise);env.drawer();
+  latest.resolve({batch:{...env.batch,status:'paused'},items:[]});await settle();
+  old.resolve({batch:{...env.batch,status:'running'},items:[]});await first;await settle();
+  assert.equal(env.calls.filter(call=>call.url.includes('/items?')).length,2);
   assert.equal(env.details()[0].dataset.status,'paused');assert.equal(env.timers.size,0);
 });
 

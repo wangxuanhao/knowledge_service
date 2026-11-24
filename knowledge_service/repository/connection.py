@@ -38,6 +38,7 @@ from psycopg_pool import ConnectionPool, PoolTimeout
 # 必须导入**顶层** psycopg：下面的 DatabaseError/IntegrityError 别名在模块级
 # 立即求值，缺少这个导入会让本模块一被导入就 NameError（而不是等到用的时候）。
 import psycopg  # noqa: E402
+from ..core.database_errors import InterfaceError, OperationalError
 
 # ── 默认参数（规划 §5.1 的初始预算；实测后调参，不在代码里写死最优值）──────────
 DEFAULT_POOL_MIN = 2
@@ -117,8 +118,6 @@ def _reject_sqlite(dsn: str) -> None:
 #      检索抛错，而不是按设计降级。
 # 因此在这里给出唯一出处，运行时代码只引用这两个名字，不直接依赖驱动。
 DatabaseError = psycopg.Error
-OperationalError = psycopg.OperationalError
-InterfaceError = psycopg.InterfaceError
 IntegrityError = psycopg.errors.IntegrityError
 SerializationFailure = psycopg.errors.SerializationFailure
 DeadlockDetected = psycopg.errors.DeadlockDetected

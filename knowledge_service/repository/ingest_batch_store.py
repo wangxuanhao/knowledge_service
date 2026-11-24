@@ -47,10 +47,13 @@ class IngestBatchStore:
             if batch is None:
                 return None
             counts = {status: 0 for status in ('pending','running','retry_wait','succeeded','failed','cancelled','interrupted')}
-            for row in self.db.execute('SELECT status,COUNT(*) AS count FROM ingest_batch_items WHERE batch_id=? GROUP BY status', (batch_id,)):
+            total_bytes = 0
+            for row in self.db.execute(
+                    'SELECT status, COUNT(*) AS count, COALESCE(SUM(size_bytes), 0) AS size_bytes '
+                    'FROM ingest_batch_items WHERE batch_id=? GROUP BY status', (batch_id,)):
                 counts[row['status']] = row['count']
-            totals = self.db.execute('SELECT COUNT(*) AS total,COALESCE(SUM(size_bytes),0) AS total_bytes FROM ingest_batch_items WHERE batch_id=?', (batch_id,)).fetchone()
-            batch.update(counts=counts, total=totals['total'], total_bytes=totals['total_bytes'])
+                total_bytes += row['size_bytes']
+            batch.update(counts=counts, total=sum(counts.values()), total_bytes=total_bytes)
             return batch
 
     def list_batches(self, project_id, limit=50, offset=0):
@@ -162,6 +165,14 @@ class IngestBatchStore:
             row = _row(row)
             return {**row['settings'], **row['options']}
 
+    def latest_document_status(self, project_id, document_id):
+        with self.repo._lock:
+            row = self.db.execute('''SELECT status,stage,created_at,updated_at,public_error
+                FROM ingest_batch_items WHERE project_id=? AND document_id=?
+                ORDER BY document_generation DESC,created_at DESC,id DESC LIMIT 1''',
+                (project_id,document_id)).fetchone()
+        return dict(row) if row else None
+
     def active_document_item(self, project_id, document_id):
         with self.repo._transaction():
             return _row(self.db.execute('''SELECT * FROM ingest_batch_items
@@ -206,22 +217,44 @@ class IngestBatchStore:
                  generation,source['original_name'],source['size_bytes'],source['sha256'],
                  'document-reprocess:'+idempotency_key,_json(options or {}),source['source_object_id'])).fetchone())
 
-    def list_items(self, project_id, batch_id, limit=50, offset=0, status=None, *, item_id=None):
+    def list_items(self, project_id, batch_id, limit=50, offset=0, status=None, *,
+                   item_id=None, include_batch=False, summary_only=False):
         limit,offset = self._page(limit,offset)
-        with self.repo._transaction():
-            if self.get_batch(project_id,batch_id) is None:
+        with self.repo.read_snapshot():
+            if include_batch:
+                batch = self.get_batch(project_id, batch_id)
+            else:
+                batch = self.db.execute('SELECT 1 FROM ingest_batches WHERE project_id=? AND id=?',
+                                        (project_id, batch_id)).fetchone()
+            if batch is None:
                 raise KeyError(batch_id)
             where='project_id=? AND batch_id=?'; values=[project_id,batch_id]
             if item_id:
                 where+=' AND id=?';values.append(item_id)
             if status:
                 where+=' AND status=?';values.append(status)
-            total = self.db.execute('SELECT COUNT(*) FROM ingest_batch_items WHERE '+where, values).fetchone()[0]
-            rows = self.db.execute('''SELECT id,batch_id,project_id,document_id,source_document_id,source_version_id,source_restart_of,document_generation,original_name,size_bytes,file_sha256,
+            if include_batch and not item_id and not status:
+                total = batch['total']
+            else:
+                total = self.db.execute('SELECT COUNT(*) FROM ingest_batch_items WHERE '+where, values).fetchone()[0]
+            if summary_only:
+                # Older results may link to documents and discovery runs only inside the result JSON.
+                columns = """id,batch_id,project_id,original_name,source_version_id,status,stage,progress,
+                    auto_retry_count,next_retry_at,error_code,public_error,failed_chunk_ordinal,
+                    COALESCE(NULLIF(document_id,''),NULLIF(result#>>'{document,id}',''),
+                             NULLIF(result->>'document_id','')) AS document_id,
+                    COALESCE(NULLIF(result->>'run_id',''),
+                             NULLIF(result#>>'{document,metadata,run_id}','')) AS run_id"""
+            else:
+                columns = '''id,batch_id,project_id,document_id,source_document_id,source_version_id,source_restart_of,document_generation,original_name,size_bytes,file_sha256,
                 status,stage,progress,attempt,auto_retry_count,next_retry_at,error_code,error_message,public_error,
-                failed_chunk_ordinal,result,options_json,created_at,updated_at,completed_at FROM ingest_batch_items
-                WHERE '''+where+' ORDER BY created_at,id LIMIT ? OFFSET ?', (*values,limit,offset))
-            return {'items': [_row(row) for row in rows], 'total':total,'limit':limit,'offset':offset}
+                failed_chunk_ordinal,result,options_json,created_at,updated_at,completed_at'''
+            rows = self.db.execute('SELECT '+columns+' FROM ingest_batch_items WHERE '+where
+                                   +' ORDER BY created_at,id LIMIT ? OFFSET ?', (*values,limit,offset))
+            page = {'items': [_row(row) for row in rows], 'total':total,'limit':limit,'offset':offset}
+            if include_batch:
+                page['batch'] = batch
+            return page
 
     def transition(self, project_id, batch_id, action):
         targets = {'start':'running','resume':'running','pause':'paused','cancel':'cancelled'}

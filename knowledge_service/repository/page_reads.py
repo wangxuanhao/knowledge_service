@@ -5,7 +5,7 @@ from uuid import uuid4
 from ..core.time import normalize_time
 from .assertions_store import AssertionStore
 from .pg_engine import translate
-from .scoped_reads import ScopedReads, _snapshot_read
+from .scoped_reads import ScopedReads, _snapshot_read, business_scope_snapshot
 
 
 class PageReads:
@@ -144,16 +144,17 @@ class PageReads:
     def metadata_groups(self, project, scope):
         """Stream metadata alone, weighting equal objects by their record count."""
         self.repo.get_project(project)
-        sql, params = ScopedReads(self.repo)._qualified(
-            project, {**scope, 'filters': None})
-        query = '''SELECT (r.payload::jsonb->'metadata')::text AS metadata,
-                count(*) AS records FROM record_versions r WHERE ''' + sql + '''
-            GROUP BY r.payload::jsonb->'metadata' ORDER BY min(r.id),min(r.version)'''
-        with self.repo._db.raw.cursor(name='metadata_facets_' + uuid4().hex) as cursor:
-            cursor.itersize = 200
-            cursor.execute(translate(query), params)
-            for row in cursor:
-                yield json.loads(row['metadata']) if row['metadata'] else {}, row['records']
+        with business_scope_snapshot(self.repo, scope):
+            sql, params = ScopedReads(self.repo)._qualified(
+                project, {**scope, 'filters': None})
+            query = '''SELECT (r.payload::jsonb->'metadata')::text AS metadata,
+                    count(*) AS records FROM record_versions r WHERE ''' + sql + '''
+                GROUP BY r.payload::jsonb->'metadata' ORDER BY min(r.id),min(r.version)'''
+            with self.repo._db.raw.cursor(name='metadata_facets_' + uuid4().hex) as cursor:
+                cursor.itersize = 200
+                cursor.execute(translate(query), params)
+                for row in cursor:
+                    yield json.loads(row['metadata']) if row['metadata'] else {}, row['records']
 
     @_snapshot_read
     def discovery_inputs(self, project):

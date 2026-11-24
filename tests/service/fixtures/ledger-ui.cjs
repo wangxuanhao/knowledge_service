@@ -49,8 +49,9 @@ function fixture(options={}){
         const list=body.cursor?[{...rows[0],id:'last',text:'最后实体'}]:rows;
         return {records:list,total:150001,next_cursor:body.cursor?null:'next-page'};
       }
+      if(url.endsWith('/records/counts'))return {counts:{entity:150001,relation:0,attribute:0,chunk:0}};
       if(url.endsWith('/assertions/batch'))return {assertions_by_record:{first:[{id:'a',canonical_record_id:'first',status:'accepted'}]}};
-      if(url.endsWith('/ontologies'))return {versions:[]};
+      if(url.endsWith('/ontologies?metadata_only=true'))return {versions:[]};
       if(url.endsWith('/operations'))return {operations:[]};
       throw Error('Unexpected request '+url);
     }});

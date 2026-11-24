@@ -1,8 +1,42 @@
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 from knowledge_service.repository import Repository
+
+
+def test_business_scope_jit_is_local_to_ledger_and_metadata_queries(tmp_path, monkeypatch):
+    from knowledge_service.repository.page_reads import PageReads
+    from knowledge_service.repository.scoped_reads import ScopedReads
+    from knowledge_service.services.graph_workspace import GraphWorkspace
+
+    repo = Repository(tmp_path / 'scoped-read-jit')
+    project = repo.create_project('筛选查询快照')['id']
+    repo.put_record(project, {'id': 'entity', 'kind': 'entity', 'text': '企业'})
+    scope = {'applicability': {'platforms': {'mode': 'specific', 'values': ['美团']}}}
+    observed = []
+    qualify = ScopedReads._qualified
+
+    def observe(reads, *args, **kwargs):
+        observed.append(reads.repo._db.execute('SHOW jit').fetchone()[0])
+        return qualify(reads, *args, **kwargs)
+
+    monkeypatch.setattr(ScopedReads, '_qualified', observe)
+    with repo.independent_read_view() as reader:
+        reader._db.execute('SET LOCAL jit = on')
+        workspace = GraphWorkspace(SimpleNamespace(repository=reader, annotate_structure_pending=lambda *_: None))
+        params = dict(kinds=['entity'], query='', cursor=None, limit=50, include_total=True, record_ids=None)
+        assert workspace.records_page(project, params)['total'] == 1
+        assert observed and set(observed) == {'on'}
+
+        for read in (lambda: workspace.records_page(project, {**scope, **params}),
+                     lambda: workspace.record_counts(project, {**scope, 'kinds': ['entity'], 'query': ''}),
+                     lambda: list(PageReads(reader).metadata_groups(project, scope))):
+            observed.clear()
+            read()
+            assert observed and set(observed) == {'off'}
+            assert reader._db.execute('SHOW jit').fetchone()[0] == 'on'
 
 
 def test_graph_session_pages_are_complete_scoped_and_bound_to_session(tmp_path):
@@ -64,6 +98,30 @@ def test_graph_session_never_includes_out_of_scope_endpoint(tmp_path):
     manifest = GraphSessions(repo).create(project, {'filters': {'field': 'metadata.region', 'op': 'eq', 'value': '北京'}})
     assert manifest['entity_count'] == 1
     assert manifest['relation_count'] == 0
+
+
+def test_record_counts_preserve_page_scope_and_endpoint_qualification(tmp_path):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+    from knowledge_service.integrations.embeddings import HashingEncoder
+
+    app = create_app(tmp_path / 'record-counts', encoder=HashingEncoder())
+    repo = app.state.service.repository
+    project = repo.create_project('按类别计数')['id']
+    repo.put_batch(project, [
+        {'id':'a','kind':'entity','text':'检索甲','metadata':{'region':'北京'}},
+        {'id':'b','kind':'entity','text':'检索乙','metadata':{'region':'上海'}},
+        {'id':'r','kind':'relation','text':'检索关联','subject_id':'a','object_id':'b','metadata':{'region':'北京'}},
+    ])
+    client = TestClient(app)
+    base = f'/api/projects/{project}/records'
+    kinds = ['entity', 'relation', 'attribute', 'chunk']
+    for scope in [{}, {'filters': {'field':'metadata.region','op':'eq','value':'北京'}}, {'query':'关联'},
+                  {'known_at':'2000-01-01T00:00:00Z'}, {'ontology_scope':'unknown'}]:
+        response = client.post(base+'/counts', json={**scope, 'kinds': kinds})
+        assert response.status_code == 200, response.text
+        assert response.json()['counts'] == {kind: client.post(
+            base+'/page', json={**scope, 'kinds':[kind], 'limit':1}).json()['total'] for kind in kinds}
 
 
 def test_record_page_searches_aliases_inside_current_scope(tmp_path):

@@ -363,11 +363,13 @@ class OntologyDraftStore:
         return self._draft(row)
 
     def append_decisions(self, project_id, draft_id, decisions):
+        """Append one review request in order, retaining each immutable decision."""
         if not isinstance(decisions, (list, tuple)):
             raise ValueError('本体审核决定必须是列表')
-        saved = []
         with self.repo._transaction():
             self.get(project_id, draft_id)
+            batch_time = utc_now()
+            prepared = []
             for proposed in decisions:
                 if not isinstance(proposed, dict):
                     raise ValueError('本体审核决定必须是对象')
@@ -383,25 +385,27 @@ class OntologyDraftStore:
                     'reason': proposed.get('reason'),
                     'actor': _required_text(proposed, 'actor'),
                     'supersedes_decision_id': proposed.get('supersedes_decision_id'),
-                    'created_at': proposed.get('created_at') or utc_now(),
+                    'created_at': str(proposed.get('created_at') or batch_time),
                 }
                 _required_text(decision, 'id')
                 if decision['supersedes_decision_id'] == decision['id']:
                     raise ValueError('本体审核决定不能替代自身')
-                # Project the inserted immutable row directly, keeping the
-                # database's normalization and all per-decision guards.
-                row = self._db.execute(
-                    '''INSERT INTO ontology_review_decisions
-                       (id,project_id,draft_id,operation_id,operation_fingerprint,
-                        action,reason,actor,supersedes_decision_id,created_at)
-                       VALUES (?,?,?,?,?,?,?,?,?,?)
-                       RETURNING *''',
-                    (decision['id'], project_id, draft_id, decision['operation_id'],
-                     decision['operation_fingerprint'], action, decision['reason'],
-                     decision['actor'], decision['supersedes_decision_id'],
-                     decision['created_at'])).fetchone()
-                saved.append(self._decision(row))
-        return saved
+                prepared.append(decision)
+            if not prepared:
+                return []
+            rows = self._db.execute(
+                '''INSERT INTO ontology_review_decisions
+                   (id,project_id,draft_id,operation_id,operation_fingerprint,
+                    action,reason,actor,supersedes_decision_id,created_at)
+                   SELECT item->>'id', ?, ?, item->>'operation_id', item->>'operation_fingerprint',
+                          item->>'action', item->>'reason', item->>'actor',
+                          item->>'supersedes_decision_id', (item->>'created_at')::timestamptz
+                   FROM jsonb_array_elements(?::jsonb) WITH ORDINALITY AS batch(item, ordinal)
+                   ORDER BY batch.ordinal
+                   RETURNING *''',
+                (project_id, draft_id, _canonical_json(prepared))).fetchall()
+        saved = {row['id']: self._decision(row) for row in rows}
+        return [saved[decision['id']] for decision in prepared]
 
     def effective_operations(self, project_id, draft_id, *, with_evidence=True):
         """当前有效操作；校验/指纹类消费方可关闭 evidence 大列读取。"""

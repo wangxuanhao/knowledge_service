@@ -7,7 +7,8 @@
   const empty=document.createElement('div');empty.className='source-empty';empty.setAttribute('aria-live','polite');empty.hidden=true;
   empty.innerHTML='<div class="source-empty-icon" aria-hidden="true">📄</div><h3></h3><p></p>';layout.append(empty);
   refresh.textContent='刷新';refresh.classList.add('secondary');
-  let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,allDocuments=[],currentFilter='all';
+  let serial=0,detailSerial=0,citationSerial=0,selected=null,activeTab='text',loadedProject=null,loadedScope=null,loadedState=null,currentFilter='all';
+  const allDocuments=new Map(),directoryRows=new Map();
   let inFlight=null,nextCursor=null,total=0,directoryCounts=null,appliedQuery='',loadedQuery=null,composing=false;
   let retrievalMode='keyword',loadedMode=null,pendingModeChange=false,loadedRelevance=null;
   let searchSteps=[],loadedSteps=null,addingStep=false,searchSucceeded=false,searchLoading=false,boundedBySemantic=false;
@@ -39,7 +40,7 @@
     const chain=[...searchSteps,...(appliedQuery?[{query:appliedQuery,retrieval_mode:retrievalMode,...(loadedRelevance?JSON.parse(loadedRelevance):window.SearchRelevance?.read('source'))}]:[])];
     stepsUI.hidden=!chain.length&&!addingStep;
     searchActions.hidden=!chain.length&&!addingStep;
-    refine.disabled=addingStep||searchLoading||!searchSucceeded||!appliedQuery||!allDocuments.length||chain.length>=8;
+    refine.disabled=addingStep||searchLoading||!searchSucceeded||!appliedQuery||!allDocuments.size||chain.length>=8;
     back.textContent=addingStep?'取消继续检索':'退回上一步';back.disabled=!addingStep&&!chain.length;
     if(!chain.length&&!addingStep)return;
     const head=document.createElement('div');head.className='source-search__head';
@@ -173,8 +174,8 @@
   }
   function updateCounts(){
     page.querySelector('.source-filter-bar')?.setAttribute('aria-label',boundedSearch()?'本次召回资料处理状态（最多100片段）':'资料处理状态');
-    const counts=directoryCounts||{ready:0,processing:0,failed:0,all:allDocuments.length};
-    if(!directoryCounts)allDocuments.forEach(doc=>counts[buildState(doc).className]++);
+    const counts=directoryCounts||{ready:0,processing:0,failed:0,all:allDocuments.size};
+    if(!directoryCounts)for(const doc of allDocuments.values())counts[buildState(doc).className]++;
     for(const name of Object.keys(counts))$(name+'-count').textContent=counts[name];
   }
   // 检索进行中计数用“—”占位，而不是先归零：否则“全部 0”会让用户以为已经搜完且没有结果。
@@ -187,10 +188,10 @@
     const filterBar=document.createElement('div');filterBar.className='source-filter-bar';
     filterBar.setAttribute('aria-label','资料处理状态');
     filterBar.innerHTML=`
+      <button type="button" class="source-filter-btn active" data-filter="all">全部 <span class="filter-count" id="all-count">0</span></button>
       <button type="button" class="source-filter-btn" data-filter="ready"><span class="filter-dot ready"></span>处理完成 / 待核验 <span class="filter-count" id="ready-count">0</span></button>
       <button type="button" class="source-filter-btn" data-filter="processing"><span class="filter-dot processing"></span>处理中 <span class="filter-count" id="processing-count">0</span></button>
-      <button type="button" class="source-filter-btn" data-filter="failed"><span class="filter-dot failed"></span>失败 <span class="filter-count" id="failed-count">0</span></button>
-      <button type="button" class="source-filter-btn active" data-filter="all">全部 <span class="filter-count" id="all-count">0</span></button>`;
+      <button type="button" class="source-filter-btn" data-filter="failed"><span class="filter-dot failed"></span>失败 <span class="filter-count" id="failed-count">0</span></button>`;
     const resultToolbar=document.createElement('div');resultToolbar.className='source-results-toolbar';
     layout.before(resultToolbar);resultToolbar.append(filterBar,summary);
     filterBar.querySelectorAll('.source-filter-btn').forEach(button=>{
@@ -206,9 +207,34 @@
       const active=button.dataset.filter===currentFilter;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
     });
   }
-  function renderDocumentList(){
-    closeDetail();updateCounts();
-    if(!allDocuments.length){
+  function renderDocumentList(documents,{reset=false}={}){
+    if(reset)list.replaceChildren();
+    const added=document.createDocumentFragment();
+    for(const [id,doc] of new Map(documents.map(doc=>[doc.id,doc]))){
+      const previous=allDocuments.get(id),row=directoryRows.get(id);
+      if(previous&&sameValue(previous,doc))continue;
+      allDocuments.set(id,doc);
+      const state=buildState(doc);
+      if(currentFilter!=='all'&&state.className!==currentFilter){
+        row?.element.remove();directoryRows.delete(id);continue;
+      }
+      const updated=renderDocumentRow(doc,state,row);
+      directoryRows.set(id,updated);
+      if(row)continue;
+      // An overlapping entry may become visible again after a status change.
+      // Keep its original position even when its new data arrived out of order.
+      let next;
+      if(previous){
+        let after=false;
+        for(const key of allDocuments.keys()){
+          if(after&&directoryRows.has(key)){next=directoryRows.get(key).element;break;}
+          if(key===id)after=true;
+        }
+      }
+      if(next)next.before(updated.element);else added.append(updated.element);
+    }
+    list.append(added);updateCounts();
+    if(!allDocuments.size){
       if(appliedQuery){
         if(boundedSearch())message('本次召回范围内无资料',`本次最多100片段召回范围内，当前条件和处理状态下没有可展示的资料。可调整条件、切换状态或清空搜索。`);
         else message('没有匹配的资料',`当前范围和处理状态下，搜索“${appliedQuery}”无结果。可调整关键词、切换状态或清空搜索。`);return;
@@ -216,52 +242,55 @@
       if(currentFilter!=='all'&&directoryCounts?.all){message('当前筛选无结果','可切换其他处理状态查看资料。');return;}
       message('当前范围暂无原文',canWrite()?'可以切换项目、调整筛选条件，或点击“添加文件”上传资料。':'可以切换项目或调整筛选条件查看已有资料。');return;
     }
-    const filtered=allDocuments.filter(doc=>currentFilter==='all'||buildState(doc).className===currentFilter);
-    if(!filtered.length){
+    if(!directoryRows.size){
       const labels={ready:'处理完成或待核验',processing:'处理中',failed:'失败',all:'所有'};
       message('当前筛选无结果',`没有${labels[currentFilter]}的文档。`);return;
     }
-    layout.classList.remove('is-empty');empty.hidden=true;list.replaceChildren();
-    const appendMatch=(node,text,term)=>{
-      const t=String(term||'');if(!t){node.textContent=text;return;}
-      const lowered=t.toLocaleLowerCase();let i=0;
-      while(i<text.length){
-        const idx=text.toLocaleLowerCase().indexOf(lowered,i);
-        if(idx<0){const rest=document.createElement('span');rest.textContent=text.slice(i);node.append(rest);break;}
-        if(idx>i){const pre=document.createElement('span');pre.textContent=text.slice(i,idx);node.append(pre);}
-        const hit=document.createElement('mark');hit.textContent=text.slice(idx,idx+t.length);node.append(hit);i=idx+t.length;
-      }
-    };
-    for(const [index,doc] of allDocuments.entries()){
-      if(currentFilter!=='all'&&buildState(doc).className!==currentFilter)continue;
-      const state=buildState(doc),button=document.createElement('button');button.type='button';button.className='source-item';
-      button.dataset.source=String(index);button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');button.setAttribute('aria-current','false');
-      const format=String(doc.metadata?.source_format||'').toLowerCase();
-      const platform=platformLabel(doc);
-      const stage=sourceProcessingStage(doc,state);
-      const bits=[stage,platform?'适用平台 '+platform:'',formatLabel(doc.metadata?.source_format),doc.metadata?.source_size_bytes!=null?sizeLabel(doc.metadata.source_size_bytes):'',
-        doc.metadata?.page_count?doc.metadata.page_count+' 页':'',doc.text_length==null?'正文按需读取':doc.text_length+' 字',
-        doc.derived_count!=null?'派生摘要 '+doc.derived_count+' 条':''].filter(Boolean);
-      button.innerHTML=`<span class="source-item__icon source-item__icon--${esc(format||'doc')}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></span>
+    layout.classList.remove('is-empty');empty.hidden=true;
+  }
+  function renderDocumentRow(doc,state,row){
+    const button=row?.button||document.createElement('button');
+    if(!row){
+      const id=doc.id;
+      button.type='button';button.className='source-item';button.dataset.source=String(id);
+      button.setAttribute('aria-haspopup','dialog');button.setAttribute('aria-controls','source-detail-drawer');
+      button.setAttribute('aria-current',String(selected===id));
+      button.addEventListener('click',()=>{
+        if(directoryRows.get(id)?.button===button)return openDocument(allDocuments.get(id),button);
+      });
+    }
+    const format=String(doc.metadata?.source_format||'').toLowerCase();
+    const platform=platformLabel(doc);
+    const stage=sourceProcessingStage(doc,state);
+    const bits=[stage,platform?'适用平台 '+platform:'',formatLabel(doc.metadata?.source_format),doc.metadata?.source_size_bytes!=null?sizeLabel(doc.metadata.source_size_bytes):'',
+      doc.metadata?.page_count?doc.metadata.page_count+' 页':'',doc.text_length==null?'正文按需读取':doc.text_length+' 字',
+      doc.derived_count!=null?'派生摘要 '+doc.derived_count+' 条':''].filter(Boolean);
+    button.innerHTML=`<span class="source-item__icon source-item__icon--${esc(format||'doc')}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg></span>
         <span class="source-item__main"><span class="source-item__name"><b>${esc(documentTitle(doc))}</b><small>${esc(doc.metadata?.source_file||'已保存正文 · 原始文件名未记录')}</small></span>
         <span class="source-item__sub">${bits.length?esc(bits.join(' · ')):''}</span></span>
         <span class="source-item__side"><span class="source-state ${state.className}">${state.label}</span><span class="source-item__open" aria-hidden="true">查看 ›</span></span>`;
-      if(appliedQuery&&doc.match&&window.SourceMatchView){
-        const snippet=document.createElement('span');snippet.className='source-item__match';window.SourceMatchView.render(snippet,doc.match);button.append(snippet);
-        if(doc.match.mode==='keyword')for(const selector of ['.source-item__name b','.source-item__name small']){
-          const field=button.querySelector(selector),text=field.textContent;field.replaceChildren();window.SourceMatchView.appendText(field,text,doc.match.query,true);
-        }
+    if(appliedQuery&&doc.match&&window.SourceMatchView){
+      const snippet=document.createElement('span');snippet.className='source-item__match';window.SourceMatchView.render(snippet,doc.match);button.append(snippet);
+      if(doc.match.mode==='keyword')for(const selector of ['.source-item__name b','.source-item__name small']){
+        const field=button.querySelector(selector),text=field.textContent;field.replaceChildren();window.SourceMatchView.appendText(field,text,doc.match.query,true);
       }
-      button.addEventListener('click',()=>openDocument(doc,button));
-      const project=current,stamp=scopeStamp();
-      const progress=doc.processing_task||state.className!=='ready'?
-        progressButton(doc,project,()=>loadedProject===project&&sameContext(project,stamp)):null;
-      if(progress){
-        progress.classList.add('source-item-progress');
-        // Keep the document and progress actions separately focusable.
-        const row=detailNode('div',undefined,'source-directory-row');row.append(button,progress);list.append(row);
-      }else list.append(button);
     }
+    const project=loadedProject,stamp=loadedScope;
+    const progress=doc.processing_task||state.className!=='ready'?
+      progressButton(doc,project,()=>loadedProject===project&&sameContext(project,stamp),doc.processing_task||doc.metadata,row?.progress):null;
+    const focused=document.activeElement===button||document.activeElement===row?.progress?document.activeElement:null;
+    let element=row?.element||button;
+    // Keep the document and progress actions separately focusable.
+    if(progress&&!row?.progress){
+      progress.classList.add('source-item-progress');
+      element=detailNode('div',undefined,'source-directory-row');
+      if(row)button.before(element);
+      element.append(button,progress);
+    }else if(!progress&&row?.progress){
+      element.before(button);element.remove();element=button;
+    }
+    if(focused&&focused!==document.activeElement)(focused===button?button:progress||button).focus({preventScroll:true});
+    return {element,button,progress};
   }
   function sourceProcessingStage(doc,state){
     const task=doc.processing_task;
@@ -271,18 +300,17 @@
     const stage=task?.stage||(state.className==='processing'?doc.metadata?.active_stage:null);
     return detailStages[stage]||'';
   }
-  function progressButton(doc,project,accepts,task=doc.processing_task||doc.metadata){
+  function progressButton(doc,project,accepts,task=doc.processing_task||doc.metadata,existing=null){
     const batchId=task?.batch_id,itemId=task?.batch_item_id;
     const batchAvailable=batchId&&window.LibraryWorkspace?.openBatch;
     const jobId=task?.durable_task_id;
     if(!batchAvailable&&!(jobId&&window.IngestResults?.watch))return null;
-    const button=detailNode('button','查看进度','secondary');button.type='button';
+    const button=existing||detailNode('button','查看进度','secondary');button.type='button';
     button.setAttribute('aria-label','查看进度 · '+documentTitle(doc));
     button.setAttribute('aria-haspopup','dialog');
     button.onclick=()=>{
       if(!accepts()||!button.isConnected)return;
-      const trigger=button.classList.contains('source-item-progress')?button:
-        Array.from(list.querySelectorAll('.source-item')).find(row=>allDocuments[Number(row.dataset.source)]?.id===doc.id);
+      const trigger=button.classList.contains('source-item-progress')?button:directoryRows.get(doc.id)?.button;
       if(batchAvailable)window.LibraryWorkspace.openBatch({projectId:project,batchId,itemId,trigger});
       else{
         window.WorkspaceDrawers.close({restoreFocus:false});
@@ -292,7 +320,7 @@
     return button;
   }
   async function openDocument(doc,trigger){
-    if(loadedProject!==current||loadedScope!==scopeStamp())return;
+    if(!doc||loadedProject!==current||loadedScope!==scopeStamp())return;
     clearReading();detailContent?.dispose();detailContent=null;readingMode='rich';
     const project=current,stamp=scopeStamp(),request=++detailSerial,ticket=window.WorkspaceContext?.ticket(project,'sources');
     selected=doc.id;activeTab='text';drawer.open({trigger});
@@ -441,6 +469,14 @@
     const runTools=detailNode('section',undefined,'source-run-tools');runTools.hidden=true;
     const runActions=detailNode('div',undefined,'source-run-actions');runTools.append(runActions);
     const currentDocument=()=>drawer.dialog.open&&selected===doc.id&&sameContext(project,stamp,ticket);
+    if(doc.version_id&&window.openDocumentDuplicateReview){
+      const duplicate=detailNode('button','查重本文件','secondary');duplicate.type='button';
+      duplicate.setAttribute('aria-haspopup','dialog');duplicate.setAttribute('aria-controls','ledger-governance-drawer');
+      duplicate.onclick=()=>{
+        if(currentDocument())window.openDocumentDuplicateReview({projectId:project,id:doc.id,version_id:doc.version_id,title:documentTitle(doc)});
+      };
+      meta.querySelector('.source-meta__head').append(duplicate);
+    }
     const progress=progressButton(doc,project,currentDocument);
     if(progress)runActions.append(progress);
     renderReprocessing(runTools,runActions,doc,project,stamp,ticket);
@@ -463,7 +499,7 @@
           if(!accepts())return;
           if(name==='assertions')renderAssertions(result.assertions||[],project,doc);
           else if(name==='runs'){
-            const status=renderRuns(result.runs||result.items||[],doc,project),facts=await confirmation;
+            const status=renderRuns(result.runs||result.items||[],doc,project,result.processing_task),facts=await confirmation;
             if(!accepts())return;
             if(!Array.isArray(facts?.assertions))status.textContent='该资料事实入图状态暂未核验，请到「抽取结果」重试查看。';
             else{
@@ -491,7 +527,7 @@
     }
   }
   const detailNode=(tag,text,css='')=>{const element=document.createElement(tag);if(text!==undefined)element.textContent=text;if(css)element.className=css;return element;};
-  const detailStates={queued:'等待处理',running:'处理中',processing:'处理中',completed:'处理结束',ready:'处理完成',failed:'处理失败',interrupted:'已中断'};
+  const detailStates={queued:'等待处理',pending:'等待处理',retry_wait:'等待重试',running:'处理中',processing:'处理中',completed:'处理结束',ready:'处理完成',failed:'处理失败',interrupted:'已中断',cancelled:'已取消'};
   const detailStages={document:'保存原文',parse:'文档解析',parsing:'文档解析',ocr:'图片文字识别',asr:'视频语音转写',chunking:'生成切片',reusing_chunks:'复用已解析切片',keyword:'关键词索引',semantic:'语义索引',extraction:'知识抽取',extracting:'知识抽取',discovery:'开放发现',merging:'知识融合',validating:'知识校验',committing:'保存结果',completed:'流程结束',failed:'处理失败'};
   const readinessLabels={document_ready:'原文',keyword_ready:'关键词检索',semantic_ready:'语义检索',candidate_ready:'候选生成',graph_ready:'当次入图'};
   const displayTime=value=>window.DisplayTime.format(value,'时间未记录');
@@ -506,55 +542,66 @@
     if(state){const badge=detailNode('span',detailStates[state]||state,'source-activity-state');badge.dataset.status=state;heading.append(badge);}
     item.append(heading);
   }
-  function renderRuns(rows,doc,project){
+  function renderRuns(rows,doc,project,currentTask){
     const stamp=scopeStamp(),ticket=window.WorkspaceContext?.ticket(project,'sources');
-    body.replaceChildren(detailNode('p','下方记录各次解析、切片和抽取的当次结果；后续本体发布或事实确认不会改写这些历史状态。重试属于新的尝试，流程结束不代表派生索引已同步。','source-detail-intro'));
+    body.replaceChildren(detailNode('p','这里只显示当前处理状态和当次成功产物。','source-detail-intro'));
     const status=detailNode('p','正在核验该资料已确认入图的事实…','source-detail-intro source-graph-status');status.setAttribute('aria-live','polite');body.append(status);
-    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return status;}
-    for(const run of [...rows].reverse()){
-      const item=detailNode('article',undefined,'source-activity source-processing-run');item.dataset.runId=run.id;
-      activityHeading(item,'处理记录 · '+displayTime(run.created_at),run.status);
-      const facts=[run.attempt?'同一原文版本第 '+run.attempt+' 次尝试':'',run.active_stage?'阶段：'+(detailStages[run.active_stage]||run.active_stage):'阶段未记录'];
-      item.append(detailNode('p',facts.filter(Boolean).join(' · '),'source-activity-meta'));
-      const metrics=detailNode('dl',undefined,'source-run-metrics');
-      for(const [key,label] of [['chunks_total','切片总数'],['chunks_failed','失败切片'],['records_accepted','当次写入记录'],['assertions_pending','当次待审核计数']]){
-        if(run.counts?.[key]==null)continue;const cell=detailNode('div');cell.append(detailNode('dt',label),detailNode('dd',run.counts[key]));metrics.append(cell);
-      }
-      if(metrics.children.length)item.append(metrics);
-      const readiness=detailNode('div',undefined,'source-readiness');readiness.setAttribute('aria-label','当次处理结果');
-      for(const [key,label] of Object.entries(readinessLabels)){
-        if(typeof run.readiness?.[key]!=='boolean')continue;
-        const value=key==='graph_ready'?(run.readiness[key]?'已完成':'未直接入图'):(run.readiness[key]?'就绪':'尚未就绪');
-        const chip=detailNode('span',label+'：'+value);chip.dataset.ready=String(run.readiness[key]);readiness.append(chip);
-      }
-      if(readiness.children.length)item.append(readiness);
-      if(run.failure){const failure=typeof run.failure==='string'?run.failure:run.failure.message||'本次处理未成功，详见原始数据。';item.append(detailNode('p',failure,'source-activity-error'));}
-      // Pending assertions count formal review candidates only. Current document
-      // metadata can describe this run only when its saved run identity matches.
-      const mode=doc.metadata?.run_id===run.id?doc.metadata?.extraction_mode:null;
-      const formalPending=run.counts?.assertions_pending>0;
-      const formal=formalPending||run.readiness?.graph_ready===true||mode==='ontology';
-      const discovery=!formal&&run.readiness?.candidate_ready===true
-        &&(mode==='discovery'||run.readiness?.graph_ready===false);
-      if(canWrite()&&run.id&&(formalPending||discovery)){
-        const review=detailNode('button',formalPending?'查看项目待审核事实':'核对本次处理的候选','secondary admin-only');review.type='button';
-        if(formalPending)item.append(detailNode('p','显示当前项目全部待审核事实，不按本次处理筛选','subtle'));
-        review.onclick=async()=>{
-          if(!canWrite()||!sameContext(project,stamp,ticket)||selected!==doc.id||!drawer.dialog.open)return;
-          try{
-            if(formalPending){
-              if(!window.KnowledgeNavigation)throw Error('知识审核导航尚未就绪，请刷新页面。');
-              window.WorkspaceDrawers.close({restoreFocus:false});
-              await window.KnowledgeNavigation.open('reviews',{projectId:project});return;
-            }
-            if(!window.OntologyIntake)throw Error('候选核对模块尚未就绪，请刷新页面。');
-            window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
-            await window.OntologyIntake.open({projectId:project,documentId:doc.id,documentTitle:documentTitle(doc),runId:run.id,trigger:review});
-          }catch(error){window.OntologyModel?.status(error.message,true);}
-        };item.append(review);
-      }
-      item.append(rawData(run,'查看本次处理数据'));body.append(item);
+    const latest=Array.isArray(rows)?rows.at(-1):null;
+    const metadata=doc.metadata||{},task=currentTask||doc.processing_task;
+    let run=latest;
+    const taskTime=task?.updated_at||task?.created_at;
+    if(task?.status&&task.status!=='succeeded'&&(!taskTime||!latest?.created_at||Date.parse(taskTime)>=Date.parse(latest.created_at))){
+      run={status:task.status,active_stage:task.stage,created_at:task.updated_at||task.created_at,
+        failure:task.public_error};
+    }else if(['processing','failed'].includes(metadata.status)&&(!run||metadata.run_id!==run.id)){
+      run={status:metadata.status,active_stage:metadata.active_stage,created_at:doc.recorded_at,
+        failure:metadata.public_error};
     }
+    if(!run){body.append(detailNode('p','暂无独立处理记录。结构化导入的正文或旧资料可能没有解析运行记录。','source-detail-empty'));return status;}
+    const succeeded=run.status==='completed'||run.status==='ready';
+    const item=detailNode('article',undefined,'source-activity source-processing-run');if(run.id)item.dataset.runId=run.id;
+    activityHeading(item,'处理记录 · '+displayTime(run.created_at),run.status);
+    const facts=[run.active_stage?'阶段：'+(detailStages[run.active_stage]||run.active_stage):'阶段未记录'];
+    item.append(detailNode('p',facts.filter(Boolean).join(' · '),'source-activity-meta'));
+    const metrics=detailNode('dl',undefined,'source-run-metrics');
+    for(const [key,label] of Object.entries(succeeded?{chunks_total:'切片总数',records_accepted:'当次写入记录',assertions_pending:'当次待审核计数'}:{})){
+      if(run.counts?.[key]==null)continue;const cell=detailNode('div');cell.append(detailNode('dt',label),detailNode('dd',run.counts[key]));metrics.append(cell);
+    }
+    if(metrics.children.length)item.append(metrics);
+    const readiness=detailNode('div',undefined,'source-readiness');readiness.setAttribute('aria-label','当次处理结果');
+    for(const [key,label] of Object.entries(readinessLabels)){
+      if(!succeeded||typeof run.readiness?.[key]!=='boolean')continue;
+      const value=key==='graph_ready'?(run.readiness[key]?'已完成':'未直接入图'):(run.readiness[key]?'就绪':'尚未就绪');
+      const chip=detailNode('span',label+'：'+value);chip.dataset.ready=String(run.readiness[key]);readiness.append(chip);
+    }
+    if(readiness.children.length)item.append(readiness);
+    if(run.failure){const failure=typeof run.failure==='string'?run.failure:run.failure.message||'本次处理未成功，详见原始数据。';item.append(detailNode('p',failure,'source-activity-error'));}
+    // Pending assertions count formal review candidates only. Current document
+    // metadata can describe this run only when its saved run identity matches.
+    const mode=doc.metadata?.run_id===run.id?doc.metadata?.extraction_mode:null;
+    const formalPending=run.counts?.assertions_pending>0;
+    const formal=formalPending||run.readiness?.graph_ready===true||mode==='ontology';
+    const discovery=!formal&&run.readiness?.candidate_ready===true
+      &&(mode==='discovery'||run.readiness?.graph_ready===false);
+    if(succeeded&&canWrite()&&run.id&&(formalPending||discovery)){
+      const review=detailNode('button',formalPending?'查看项目待审核事实':'核对本次处理的候选','secondary admin-only');review.type='button';
+      if(formalPending)item.append(detailNode('p','显示当前项目全部待审核事实，不按本次处理筛选','subtle'));
+      review.onclick=async()=>{
+        if(!canWrite()||!sameContext(project,stamp,ticket)||selected!==doc.id||!drawer.dialog.open)return;
+        try{
+          if(formalPending){
+            if(!window.KnowledgeNavigation)throw Error('知识审核导航尚未就绪，请刷新页面。');
+            window.WorkspaceDrawers.close({restoreFocus:false});
+            await window.KnowledgeNavigation.open('reviews',{projectId:project});return;
+          }
+          if(!window.OntologyIntake)throw Error('候选核对模块尚未就绪，请刷新页面。');
+          window.WorkspaceDrawers.close({restoreFocus:false});window.KnowledgeTabs.open('ontology-model');
+          await window.OntologyIntake.open({projectId:project,documentId:doc.id,documentTitle:documentTitle(doc),runId:run.id,trigger:review});
+        }catch(error){window.OntologyModel?.status(error.message,true);}
+      };item.append(review);
+    }
+    if(run.id)item.append(rawData(run,'查看本次处理数据'));
+    body.append(item);
     return status;
   }
   function sameValue(left,right){
@@ -563,42 +610,69 @@
     const keys=Object.keys(left);return keys.length===Object.keys(right).length&&keys.every(key=>Object.prototype.hasOwnProperty.call(right,key)&&sameValue(left[key],right[key]));
   }
   const shortValue=value=>value==null?'未设置':Array.isArray(value)?value.length+' 项':typeof value==='object'?'已更新':String(value).slice(0,80);
+  const processingFields=new Set([
+    'status','active_stage','run_id','batch_id','batch_item_id','document_generation','reprocessing',
+    'uploaded_at','indexed_at','extracted_at','failed_at','error_type','validation_error_count','validation_errors',
+    'readiness','llm','extraction_mode','ocr_mode','review_candidates','discovery_candidates','warnings',
+    'document_parser','parser_version','page_count','page_summaries','table_count','table_summaries'
+  ]);
   function revisionChanges(row,previous){
     const text=String(row.text??''),before=String(previous?.text??'');
     if(!previous)return ['首次保存资料 · 正文 '+text.length+' 字'];
-    const changes=[text===before?'正文未变化':'正文已变化：'+before.length+' 字 → '+text.length+' 字'];
-    const labels={title:'标题',status:'处理状态',active_stage:'处理阶段',published_at:'发布时间',revised_at:'原文修订时间',indexed_at:'索引时间',extraction_mode:'处理方式',applicability:'适用范围',uploaded_at:'上传时间',extracted_at:'处理完成时间',review_candidates:'待审核候选',discovery_candidates:'开放发现候选',readiness:'就绪状态',source_file:'文件名',source_format:'文件格式',source_size_bytes:'文件大小',document_parser:'解析方式',valid_from:'生效时间',valid_until:'失效时间'};
-    const timeFields=new Set(['published_at','revised_at','uploaded_at','extracted_at','indexed_at','valid_from','valid_until']);
+    const changes=text===before?[]:['正文已变化：'+before.length+' 字 → '+text.length+' 字'];
+    const labels={title:'标题',published_at:'发布时间',revised_at:'原文修订时间',applicability:'适用范围',source_file:'文件名',source_format:'文件格式',source_size_bytes:'文件大小',valid_from:'生效时间',valid_until:'失效时间'};
+    const timeFields=new Set(['published_at','revised_at','valid_from','valid_until']);
     const changeValue=(key,value)=>timeFields.has(key)?window.DisplayTime.format(value,'未设置'):shortValue(value);
-    const internal=new Set(['run_id','batch_id','batch_item_id','file_sha256','document_generation']);let internalChanges=0;
     const metadata=row.metadata||{},oldMetadata=previous.metadata||{};
     for(const key of new Set([...Object.keys(oldMetadata),...Object.keys(metadata)])){
-      if(sameValue(metadata[key],oldMetadata[key]))continue;
-      if(internal.has(key)){internalChanges++;continue;}
+      if(processingFields.has(key)||sameValue(metadata[key],oldMetadata[key]))continue;
       const label=labels[key]||key;
-      if(key==='status')changes.push(label+'：'+(detailStates[oldMetadata[key]]||shortValue(oldMetadata[key]))+' → '+(detailStates[metadata[key]]||shortValue(metadata[key])));
-      else if(key==='active_stage')changes.push(label+'：'+(detailStages[oldMetadata[key]]||shortValue(oldMetadata[key]))+' → '+(detailStages[metadata[key]]||shortValue(metadata[key])));
-      else if(key==='source_document_version_id')changes.push('原始文件版本已更新');
-      else if(key==='review_candidates'||key==='discovery_candidates')changes.push(label+'已更新（'+(Array.isArray(metadata[key])?metadata[key].length+' 条':'未记录')+'）');
+      if(key==='source_document_version_id')changes.push('原始文件版本已更新');
       else if(typeof metadata[key]==='object'&&metadata[key]!==null||typeof oldMetadata[key]==='object'&&oldMetadata[key]!==null)changes.push(label+'已更新');
       else changes.push(label+'：'+changeValue(key,oldMetadata[key])+' → '+changeValue(key,metadata[key]));
     }
     for(const key of ['valid_from','valid_until','type','kind'])if(!sameValue(row[key],previous[key]))changes.push((labels[key]||key)+'：'+changeValue(key,previous[key])+' → '+changeValue(key,row[key]));
-    if(internalChanges)changes.push('处理关联信息已更新（'+internalChanges+' 项）');
     return changes;
   }
   function renderHistory(rows){
-    body.replaceChildren(detailNode('p','修订记录是资料记录的保存版本。正文、资料字段或系统处理状态变化都可能产生修订，不等于人工修改次数。每版保存完整快照，这里只展示变化摘要。','source-detail-intro'));
-    if(!Array.isArray(rows)||!rows.length){body.append(detailNode('p','没有可用的修订记录。','source-detail-empty'));return;}
-    for(let index=rows.length-1;index>=0;index--){
-      const row=rows[index],item=detailNode('article',undefined,'source-activity source-revision');item.dataset.versionId=row.version_id||row.id;
-      activityHeading(item,'修订 r'+(row.version||index+1)+(index===rows.length-1&&!row.superseded_at?' · 当前记录':''));
+    body.replaceChildren(detailNode('p','这里显示已保存的正文和资料字段变更。','source-detail-intro'));
+    const revisions=[];
+    for(const row of Array.isArray(rows)?rows:[]){
+      const status=row.metadata?.status;
+      if(status&&status!=='ready'&&status!=='completed')continue;
+      const changes=revisionChanges(row,revisions.at(-1)?.row);
+      if(changes.length)revisions.push({row,changes});
+    }
+    if(!revisions.length){body.append(detailNode('p','没有可用的修订记录。','source-detail-empty'));return;}
+    for(let index=revisions.length-1;index>=0;index--){
+      const {row,changes}=revisions[index],item=detailNode('article',undefined,'source-activity source-revision');item.dataset.versionId=row.version_id||row.id;
+      activityHeading(item,'修订 '+(index+1)+(index===revisions.length-1?' · 最新修订':''));
       item.append(detailNode('p','保存于 '+displayTime(row.recorded_at),'source-activity-meta'));
-      const changes=revisionChanges(row,rows[index-1]),list=detailNode('ul',undefined,'source-change-list');
+      const list=detailNode('ul',undefined,'source-change-list');
       for(const change of changes.slice(0,8))list.append(detailNode('li',change));
       if(changes.length>8)list.append(detailNode('li','另有 '+(changes.length-8)+' 项字段变化，可展开本版原始数据核对。'));
       item.append(list,rawData(row,'查看本版完整快照'));body.append(item);
     }
+  }
+  function distinctSourceEvidence(rows){
+    const occurrences=new Map();
+    return rows.filter(row=>{
+      if(row.status!=='accepted'||!row.document_id||!row.document_version_id||!row.canonical_record_id
+        ||!Number.isInteger(row.start_char)||!Number.isInteger(row.end_char)
+        ||row.start_char>=row.end_char||!row.quote)return true;
+      const key=JSON.stringify([row.document_id,row.document_version_id,row.source_hash,row.kind,
+        row.canonical_record_id,row.start_char,row.end_char,row.quote]);
+      const fact={...row.payload};
+      for(const field of ['id','chunk_id','created_at','confidence'])delete fact[field];
+      if(fact.metadata&&typeof fact.metadata==='object'&&!Array.isArray(fact.metadata)){
+        fact.metadata={...fact.metadata};
+        delete fact.metadata.chunk_id;
+      }
+      const seen=occurrences.get(key)||[];
+      if(seen.some(prior=>sameValue(prior,fact)))return false;
+      seen.push(fact);occurrences.set(key,seen);
+      return true;
+    });
   }
   function renderAssertions(rows,project,doc){
     const sourceScope=JSON.parse(JSON.stringify(window.WorkspaceContext?.read(project,'sources')||scope()));
@@ -606,7 +680,7 @@
     if(!rows.length){body.textContent=doc?.metadata?.extraction_mode==='documents'?
       '当前仅用于文档检索，暂无抽取结果。':'此资料暂无抽取结果。';return;}
     if(doc)renderCandidateAction(rows,doc,project);
-    for(const row of rows){
+    for(const row of distinctSourceEvidence(rows)){
       const item=document.createElement('div');item.className='source-record-row';const payload=row.payload||{};
       const label=document.createElement('strong');
       const kinds={entity:'实体',relation:'关系',attribute:'属性'},states={pending:'待核对',accepted:'已确认',rejected:'已拒绝'};
@@ -642,9 +716,10 @@
     if(inFlight?.key===key&&inFlight.serial===serial)return inFlight.promise;
     if(reuse&&loadedProject===project&&loadedScope===stamp&&loadedState===state&&loadedQuery===term&&loadedMode===mode&&loadedSteps===chain&&loadedRelevance===relevanceStamp)return Promise.resolve(true);
     const request=++serial,accepts=()=>request===serial&&sameContext(project,stamp,ticket)&&currentFilter===state&&appliedQuery===term&&retrievalMode===mode&&stepsStamp()===chain&&JSON.stringify(window.SearchRelevance?.read('source')||{})===relevanceStamp;
-    searchLoading=true;searchSucceeded=false;boundedBySemantic=false;renderSearchSteps();
-    closeDetail();
-    if(!append){loadedProject=null;loadedScope=null;loadedState=null;allDocuments=[];directoryCounts=null;nextCursor=null;setCountsLoading(true);
+    searchLoading=true;
+    if(!append){searchSucceeded=false;boundedBySemantic=false;}
+    renderSearchSteps();
+    if(!append){closeDetail();loadedProject=null;loadedScope=null;loadedState=null;allDocuments.clear();directoryRows.clear();directoryCounts=null;nextCursor=null;setCountsLoading(true);
       summary.textContent=semanticSearch()?'正在进行'+modeLabel(mode)+'召回…':'正在读取当前项目的原文…';
       // 检索进行中不显示空状态卡片，只保留列表占位，避免先呈现一张“没有结果”样式的卡片。
       empty.hidden=true;layout.classList.remove('is-empty');
@@ -655,17 +730,20 @@
       const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources'+query,searchSteps.length?{...filter,...relevance,search_steps:JSON.parse(chain)}:{...filter,...relevance});
       if(!accepts())return false;
       loadedProject=project;loadedScope=stamp;loadedState=state;loadedQuery=term;loadedMode=mode;loadedSteps=chain;loadedRelevance=relevanceStamp;searchSucceeded=true;boundedBySemantic=result.bounded_by_semantic===true;
-      allDocuments=[...new Map([...(append?allDocuments:[]),...(result.documents||[])].map(doc=>[doc.id,doc])).values()];
-      nextCursor=result.next_cursor||null;total=result.total??allDocuments.length;directoryCounts=result.counts||null;
+      nextCursor=result.next_cursor||null;directoryCounts=result.counts||null;
+      renderDocumentList(result.documents||[],{reset:!append});total=result.total??allDocuments.size;
       summary.textContent=searchSteps.length&&boundedSearch()
-        ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 已命中 ${directoryCounts?.all??total} 份 · 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        ?`召回范围内继续检索 · ${searchSteps.length+1} 步条件 · 已命中 ${directoryCounts?.all??total} 份 · 已加载 ${allDocuments.size} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
         :semanticSearch()
-        ?`${modeLabel(mode)}召回 · “${term}” · 本次召回 ${directoryCounts?.all??total} 份资料（最多100片段）· 已加载 ${allDocuments.length} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
-        :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇 · 已加载 ${allDocuments.length} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
+        ?`${modeLabel(mode)}召回 · “${term}” · 本次召回 ${directoryCounts?.all??total} 份资料（最多100片段）· 已加载 ${allDocuments.size} 份${result.complete===false?' · 召回不完整，请刷新重试':''}`
+        :(term?`搜索“${term}” · `:'')+`当前范围共 ${total} 篇 · 已加载 ${allDocuments.size} 篇 · 选择资料查看详情${result.complete===false?' · 结果不完整，请刷新重试':''}`;
       loadMore.hidden=!nextCursor;
-      renderDocumentList();return true;
+      return true;
     }catch(error){
-      if(accepts()){summary.textContent=semanticSearch()?modeLabel(mode)+'召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行'+modeLabel(mode)+'召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}return false;
+      if(accepts()){
+        if(append)summary.textContent='加载更多资料失败：'+error.message+'；可重试。';
+        else{summary.textContent=semanticSearch()?modeLabel(mode)+'召回失败':'原文加载失败';message(semanticSearch()?'暂时无法进行'+modeLabel(mode)+'召回':'暂时无法读取原文',error.message+'；请点击右上角“刷新”重试。');}
+      }return false;
     }finally{if(request===serial){searchLoading=false;setCountsLoading(false);renderSearchSteps();refresh.disabled=false;loadMore.disabled=false;if(inFlight?.serial===request)inFlight=null;}}
     })();
     inFlight={key,serial:request,promise};return promise;
@@ -681,24 +759,23 @@
     closeDetail();const project=current,stamp=scopeStamp(),loaded=await load({reuse:true}),request=serial,detailRequest=detailSerial;
     const accepts=()=>citation===citationSerial&&detailRequest===detailSerial&&request===serial&&project===current&&stamp===scopeStamp();
     if(!loaded||!accepts())throw Error('资料范围已更新，请重新选择原文');
-    let doc=allDocuments.find(item=>item.id===sourceId);
+    let doc=allDocuments.get(sourceId);
     if(!doc){
       const result=await api('/api/projects/'+encodeURIComponent(project)+'/sources?limit=50&summary_only=true&state=all&document_id='+encodeURIComponent(sourceId),scope());
       if(!accepts())throw Error('资料范围已更新，请重新选择原文');
       doc=result.documents?.find(item=>item.id===sourceId);
-      if(doc){allDocuments.push(doc);renderDocumentList();}
+      if(doc)renderDocumentList([doc]);
     }
     if(!doc)throw Error('当前范围没有这条原文');
-    if(currentFilter!=='all'&&buildState(doc).className!==currentFilter){currentFilter='all';syncFilterButtons();renderDocumentList();}
-    const button=[...list.querySelectorAll('.source-item')].find(item=>allDocuments[Number(item.dataset.source)]?.id===sourceId);
+    const button=directoryRows.get(sourceId)?.button;
     if(!button)throw Error('当前范围没有这条原文');await openDocument(doc,button);
   };
-  refresh.onclick=()=>load();loadMore.onclick=()=>load({append:true});
+  refresh.onclick=()=>load();loadMore.onclick=()=>nextCursor&&load({append:true});
   // Auth resolves asynchronously; its body role classes own entry visibility.
   const upload=$('upload-source');upload.classList.add('admin-only');
   upload.onclick=()=>{if(!canWrite())return;if(window.LibraryWorkspace)window.LibraryWorkspace.open('upload');else window.KnowledgeTabs.open('ingest');};
   document.querySelector('[data-tab="sources"]')?.addEventListener('click',()=>load());
   document.addEventListener('workspace:scope-changed',event=>{if(event.detail.page==='sources'){serial++;closeDetail();if(visible())load();}});
-  $('project').addEventListener('change',()=>{serial++;resetSearch();closeDetail();loadedProject=null;loadedScope=null;loadedState=null;loadedQuery=null;loadedMode=null;allDocuments=[];directoryCounts=null;nextCursor=null;loadMore.hidden=true;updateCounts();message('正在切换项目','进入资料库后会自动加载。');if(visible())load();});
+  $('project').addEventListener('change',()=>{serial++;resetSearch();closeDetail();loadedProject=null;loadedScope=null;loadedState=null;loadedQuery=null;loadedMode=null;allDocuments.clear();directoryRows.clear();directoryCounts=null;nextCursor=null;loadMore.hidden=true;updateCounts();message('正在切换项目','进入资料库后会自动加载。');if(visible())load();});
   if(visible())load();
 })();

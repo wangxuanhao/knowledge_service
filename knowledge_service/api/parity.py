@@ -1,9 +1,10 @@
 """探索、迁移、治理与持久化任务的 HTTP 契约。"""
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
 from .audit_identity import audit_actor
 from fastapi.responses import StreamingResponse, FileResponse
+from ..domain.entity_identity import DuplicateReviewRequired
 from ..models import Request, Scope, Ingest, Question, RetrievalOptions
 from ..services.explorer import Explorer
 from ..services.governance import Governance
@@ -61,9 +62,15 @@ class Merge(Request):
 class DuplicateScan(Request):
     limit:int=Field(default=20,ge=1,le=50)
     cursor:str|None=Field(default=None,max_length=10000)
+    document_id: str | None = Field(default=None, min_length=1, max_length=200)
+    document_version_id: str | None = Field(default=None, min_length=1, max_length=200)
+    document_mode: Literal['within', 'related'] | None = None
 
 class DuplicateGroup(Request):
     key:str=Field(min_length=1,max_length=10000)
+
+class DuplicatePreviewBatch(Request):
+    keys: list[Annotated[str, Field(min_length=1, max_length=10000)]] = Field(min_length=1, max_length=20)
 
 class DuplicateConfirmGroup(DuplicateGroup):
     preview_fingerprint:str=Field(pattern='^[a-f0-9]{64}$')
@@ -71,7 +78,23 @@ class DuplicateConfirmGroup(DuplicateGroup):
 class DuplicateConfirm(Request):
     groups:list[DuplicateConfirmGroup]=Field(min_length=1,max_length=20)
 
-class DuplicateSources(DuplicateConfirmGroup):
+PartitionEntityId = Annotated[str, Field(min_length=1, max_length=200)]
+
+
+class DuplicatePartition(DuplicateGroup):
+    assignments: dict[PartitionEntityId, PartitionEntityId] = Field(min_length=2, max_length=20)
+    expected_versions: dict[PartitionEntityId, Annotated[int, Field(strict=True, ge=1)]] = Field(min_length=2, max_length=20)
+
+
+class DuplicatePartitionConfirm(DuplicatePartition):
+    preview_fingerprint: str = Field(pattern='^[a-f0-9]{64}$')
+
+class DuplicateMembers(DuplicateGroup):
+    limit:int=Field(default=10,ge=1,le=20)
+    after_id:str|None=Field(default=None,min_length=1,max_length=200)
+
+class DuplicateSources(DuplicateGroup):
+    preview_fingerprint:str|None=Field(default=None,pattern='^[a-f0-9]{64}$')
     entity_id:str=Field(min_length=1,max_length=200)
     expected_version_id:str=Field(min_length=1,max_length=200)
     limit:int=Field(default=10,ge=1,le=20)
@@ -175,10 +198,14 @@ def install(app,service):
 
     @router.get('/projects/{p}/ingest-batches/{batch_id}/items')
     def list_ingest_items(p:str,batch_id:str,limit:int=Query(50,ge=1,le=1000),
-                          cursor:int=Query(0,ge=0),status:str|None=None,item_id:str|None=None):
-        batches.get(p,batch_id)
+                          cursor:int=Query(0,ge=0),status:str|None=None,item_id:str|None=None,
+                          include_batch:bool=False,summary_only:bool=False):
+        service.data.get_project(p)
         internal={'queued':'pending','staged':'pending','completed':'succeeded','needs_attention':'failed'}.get(status,status)
-        result=batches.store.list_items(p,batch_id,limit,cursor,internal,item_id=item_id)
+        result=batches.store.list_items(p,batch_id,limit,cursor,internal,item_id=item_id,
+                                        include_batch=include_batch,summary_only=summary_only)
+        if include_batch:
+            result['batch']=public_batch(result['batch'])
         result['items']=[public_item(row) for row in result['items']]
         result['next_cursor']=str(cursor+len(result['items'])) if cursor+len(result['items'])<result['total'] else None
         return result
@@ -370,37 +397,55 @@ def install(app,service):
     def duplicate_scan(p:str,request:DuplicateScan):return governance.scan_duplicates(p,**request.model_dump())
 
     @router.post('/projects/{p}/duplicates/preview')
-    def duplicate_preview(p:str,request:DuplicateGroup):return governance.preview_duplicate_group(p,request.key)
+    def duplicate_preview(p:str,request:DuplicateGroup):
+        try:
+            return governance.preview_duplicate_group(p,request.key)
+        except DuplicateReviewRequired as exc:
+            return exc.result(request.key)
+
+    @router.post('/projects/{p}/duplicates/preview-batch')
+    def duplicate_preview_batch(p: str, request: DuplicatePreviewBatch):
+        return governance.preview_duplicate_groups(p, request.keys)
 
     @router.post('/projects/{p}/duplicates/confirm')
     def duplicate_confirm(p:str,request:DuplicateConfirm,http_request:HttpRequest):
         return governance.confirm_duplicate_groups(p,[g.model_dump() for g in request.groups],actor=audit_actor(http_request))
 
+    @router.post('/projects/{p}/duplicates/partition/preview')
+    def duplicate_partition_preview(p: str, request: DuplicatePartition):
+        return governance.preview_duplicate_partition(p, **request.model_dump())
+
+    @router.post('/projects/{p}/duplicates/partition/confirm')
+    def duplicate_partition_confirm(p: str, request: DuplicatePartitionConfirm, http_request: HttpRequest):
+        return governance.confirm_duplicate_partition(p, **request.model_dump(), actor=audit_actor(http_request))
+
     @router.post('/projects/{p}/duplicates/sources')
     def duplicate_sources(p:str,request:DuplicateSources):return governance.duplicate_sources(p,**request.model_dump())
 
+    @router.post('/projects/{p}/duplicates/members')
+    def duplicate_members(p:str,request:DuplicateMembers):return governance.duplicate_members(p,**request.model_dump())
+
     @router.post('/projects/{p}/attribute-conflicts')
     def conflict_page(p:str,request:ConflictPage):
-        from ..repository.attribute_conflicts import ConflictReads
-        data=request.model_dump();limit=data.pop('limit');cursor=data.pop('cursor');entity=data.pop('entity_id')
-        return ConflictReads(service.repository).page(p,data,limit=limit,cursor=cursor,entity_id=entity)
+        scope = request.model_dump(exclude={'limit', 'cursor', 'entity_id'})
+        return governance.conflict_page(p, scope, limit=request.limit, cursor=request.cursor,
+                                        entity_id=request.entity_id)
 
     @router.post('/projects/{p}/attribute-conflicts/{set_id}/read')
     def conflict_read(p:str,set_id:str,request:Scope):
-        from ..repository.attribute_conflicts import ConflictReads
-        return ConflictReads(service.repository).read(p,set_id,request.model_dump())
+        return governance.conflict_read(p, set_id, request.model_dump())
 
     @router.post('/projects/{p}/attribute-conflicts/{set_id}/members/{record_id}/read')
     def conflict_member(p:str,set_id:str,record_id:str,request:ConflictMemberRead):
-        from ..repository.attribute_conflicts import ConflictReads
-        data=request.model_dump();expected=data.pop('expected_version_id');data.pop('limit');data.pop('cursor')
-        return ConflictReads(service.repository).member(p,set_id,record_id,data,expected_version_id=expected)
+        scope = request.model_dump(exclude={'expected_version_id', 'limit', 'cursor'})
+        return governance.conflict_member(p, set_id, record_id, scope,
+                                          expected_version_id=request.expected_version_id)
 
     @router.post('/projects/{p}/attribute-conflicts/{set_id}/members/{record_id}/sources')
     def conflict_sources(p:str,set_id:str,record_id:str,request:ConflictMemberRead):
-        from ..repository.attribute_conflicts import ConflictReads
-        data=request.model_dump();expected=data.pop('expected_version_id');limit=data.pop('limit');cursor=data.pop('cursor')
-        return ConflictReads(service.repository).sources(p,set_id,record_id,data,expected_version_id=expected,limit=limit,cursor=cursor)
+        scope = request.model_dump(exclude={'expected_version_id', 'limit', 'cursor'})
+        return governance.conflict_sources(p, set_id, record_id, scope, expected_version_id=request.expected_version_id,
+                                           limit=request.limit, cursor=request.cursor)
 
     @router.post('/projects/{p}/attribute-conflicts/{set_id}/resolve')
     def conflict_resolve(p:str,set_id:str,request:ConflictResolve,http_request:HttpRequest):
@@ -415,6 +460,9 @@ def install(app,service):
 
     @router.get('/projects/{p}/operations')
     def operations(p:str):return {'operations':governance.operations(p)}
+
+    @router.get('/projects/{p}/operations/{operation_id}')
+    def operation_detail(p:str,operation_id:str):return governance.operation_detail(p,operation_id)
 
     @router.get('/projects/{p}/duplicate-groups')
     def duplicate_groups(p:str):return {'groups':governance.duplicate_groups(p)}

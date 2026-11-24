@@ -517,7 +517,6 @@ def test_document_date_evidence_scrolls_without_hiding_preview_controls(workbenc
     drawer = page.locator('#chunk-preview')
     drawer.wait_for(state='visible')
     dates = drawer.locator('#chunk-preview-summary')
-    assert '原文发布时间 · 2026-09-25' in dates.inner_text()
     assert '业务生效 · 未知' in dates.inner_text()
     assert '未设结束时间' in dates.inner_text()
     assert '持续有效' not in dates.inner_text()

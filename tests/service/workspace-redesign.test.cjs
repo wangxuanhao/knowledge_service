@@ -91,6 +91,24 @@ test('scope store rejects obsolete list dimensions and ignores obsolete session 
   assert.equal(store.read('a','search').applicability,undefined);
 });
 
+test('scope option lookups coalesce and never reuse another login session',async()=>{
+  const vm=require('node:vm');let session='first',calls=0,finish;
+  const window={Auth:{scopeCacheOwner(){const owner=session;return ()=>session===owner;}}};
+  vm.runInNewContext(fs.readFileSync('knowledge_service/web/workspace-context.js','utf8'),{window});
+  const lookup=window.WorkspaceContext.createLookup();
+  const first=lookup.read('same scope',()=>{calls++;return new Promise(resolve=>{finish=resolve;});});
+  assert.strictEqual(lookup.read('same scope',()=>{throw Error('unexpected duplicate request');}),first);
+  await Promise.resolve();
+  session='second';
+  const current={platforms:['current project value']};
+  assert.strictEqual(await lookup.read('same scope',()=>{calls++;return current;}),current);
+  finish({platforms:['abandoned request value']});await first;
+  assert.strictEqual(lookup.peek('same scope'),current);
+  assert.equal(calls,2);
+  window.WorkspaceContext.invalidateLookups();
+  assert.equal(lookup.peek('same scope'),undefined);
+});
+
 test('scope UI restores applied state without importing hidden form values',()=>{
   const vm=require('node:vm'),store=context.createStore();
   const applied={field:'metadata.city',op:'eq',value:'杭州'};
@@ -103,7 +121,7 @@ test('scope UI restores applied state without importing hidden form values',()=>
     return fields.get(id);
   };
   get('filters').value=JSON.stringify({field:'metadata.city',op:'eq',value:'旧输入'});
-  const bridge={page:'search',store,isContentPage:()=>true,read:project=>store.read(project,'search'),
+  const bridge={page:'search',store,createLookup:context.createLookup,isContentPage:()=>true,read:project=>store.read(project,'search'),
     register(value){value.restore();}};
   vm.runInNewContext(fs.readFileSync('knowledge_service/web/workspace-context-ui.js','utf8'),{
     window:{WorkspaceContext:bridge,TemporalScope:require('../../knowledge_service/web/temporal-scope.js'),ScopeFields:{countConditions:()=>1}},

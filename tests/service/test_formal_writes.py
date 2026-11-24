@@ -1,4 +1,5 @@
 from ontology_seed import seed_ontology
+from datetime import datetime, timedelta
 from decimal import Decimal
 from threading import Event, Thread
 
@@ -437,14 +438,30 @@ def test_assertion_only_approval_selects_version_before_transition(tmp_path, mon
     assert len(mappings) == 1
     assert mappings[0]['record_version_id'] == target['version_id']
     assert repo.get_record(project_id, 'a')['version_id'] != target['version_id']
+    assert [(event['from_status'], event['to_status'])
+            for event in repo.list_assertion_events(project_id, 'pending')] == [
+                (None, 'pending'), ('pending', 'accepted')]
 
 
 def test_identical_assertion_replay_is_idempotent_but_new_version_conflicts(tmp_path):
+    from knowledge_service.repository.qa_evidence_reads import QaEvidenceReads
+
     repo, _, project_id = _system(tmp_path)
     assertion = _assertion('support', 'a')
     _write(repo, project_id, [_entity('a')], [assertion], suppress_auto_assertions=True)
     before = _mapping_ids(repo, project_id)
     events = repo.list_assertion_events(project_id)
+    assert [(event['from_status'], event['to_status'], event['decision_version'])
+            for event in events] == [(None, 'accepted', 2)]
+    event = events[0]
+    mapping = repo.list_record_version_assertions(project_id, assertion_id='support')[0]
+    assert mapping['assertion_event_id'] == event['id']
+    earlier = datetime.fromisoformat(str(event['created_at'])) - timedelta(microseconds=1)
+    reads = QaEvidenceReads(repo)
+    assert list(reads.assertions_at(project_id, ['support'], earlier))[0]['event_id'] is None
+    current = list(reads.assertions_at(project_id, ['support'], event['created_at']))[0]
+    assert current['event_id'] == event['id']
+    assert current['to_status'] == 'accepted'
     _write(repo, project_id, assertions=[assertion])
 
     assert len(before) == 1

@@ -1,5 +1,5 @@
 /* The library keeps its width; document details appear only in the drawer. */
-#tab-sources .source-layout{display:block;min-height:300px}
+#tab-sources .source-layout{display:block;min-height:0}
 #tab-sources #source-list{max-height:none;overflow:visible;padding:0;min-width:0}
 #tab-sources .source-summary{margin:0;font-size:12px;line-height:1.6}
 
@@ -90,15 +90,24 @@
 
 /* —— 响应式 —— */
 @media(max-width:640px){
-  #tab-sources>.panel{padding:16px}
-  #tab-sources .source-search__row{flex-wrap:wrap}
-  #tab-sources .source-search__field{flex-basis:100%}
+  #tab-sources>.panel{padding:12px}
+  #tab-sources .source-actions-row{gap:5px;margin-bottom:9px}
+  #tab-sources .source-search{margin-bottom:9px}
+  #tab-sources .source-search__row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:5px}
+  #tab-sources .source-search__seg{grid-row:1;grid-column:1/3;justify-self:start}
+  #tab-sources .source-search__row .source-relevance-settings{grid-row:1;grid-column:3;justify-self:end}
+  #tab-sources .source-search__field{grid-row:2;grid-column:1}
+  #tab-sources .source-search__row>button{grid-row:2;padding-inline:9px}
   #tab-sources .source-search__seg button{min-height:34px}
   #tab-sources #source-list .source-item{grid-template-columns:auto minmax(0,1fr);padding:12px 12px;gap:10px}
   #tab-sources .source-item__side{grid-column:2;justify-self:start}
   #tab-sources .source-item__open{display:none}
   #tab-sources .source-item__match{grid-column:2}
-  #tab-sources .source-filter-btn{font-size:11px;padding:6px 9px}
+  #tab-sources .source-results-toolbar{gap:4px;padding-bottom:6px}
+  #tab-sources .source-results-toolbar .source-filter-bar{max-width:100%;flex-wrap:nowrap;gap:4px;overflow-x:auto;scrollbar-width:thin}
+  #tab-sources .source-filter-btn{flex:none;gap:4px;font-size:11px;padding:5px 7px}
+  #tab-sources .source-filter-btn .filter-count{padding-inline:4px}
+  #tab-sources #source-list{margin-top:6px}
   #tab-sources .source-directory-row{align-items:stretch;flex-direction:column;gap:0;padding:0}
   #tab-sources .source-item-progress{align-self:flex-start;margin:0 10px 10px 58px}
 }

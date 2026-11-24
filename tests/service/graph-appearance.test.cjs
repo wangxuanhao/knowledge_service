@@ -39,6 +39,7 @@ test('focused content and blue focus strokes remain legible on a white constella
     .reduce((sum,value,i)=>sum+value*[.2126,.7152,.0722][i],0);
   const contrast=hex=>{const a=luminance(hex),b=luminance(subject.tokens.background);return (Math.max(a,b)+.05)/(Math.min(a,b)+.05);};
   assert.ok(contrast('#18181b')>=7,'the hover card and focused name require high contrast');
+  assert.ok(contrast(subject.tokens.text)>=4.5,'ordinary entity names remain legible against the canvas');
   assert.ok(contrast(subject.tokens.selected)>=3,'focus rings and selected relationships must be visible');
 });
 
@@ -47,6 +48,8 @@ test('only bounded small graphs add degree-based node hierarchy',()=>{
   const edges=nodes.slice(1).map(node=>({subject_id:'n0',object_id:node.id}));
   const sizes=subject.sizesFor(nodes,edges);
   assert.ok(sizes.get('n0')>sizes.get('n1'),'the central entity stands out');
+  assert.ok(sizes.get('n1')>=18);
+  assert.equal(subject.labelSize(nodes.length),14);
   assert.ok([...sizes.values()].every(size=>size>=14&&size<=22),'small graph entities need a readable interactive diameter');
   assert.equal(subject.sizesFor(Array.from({length:201},(_,i)=>({id:i})),[]),null,'large progressive graphs skip degree decoration');
 });

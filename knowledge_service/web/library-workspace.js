@@ -43,7 +43,7 @@
     }});
     const initialBatch=get('batch').value;
     const shell=root.WorkspaceDrawers.create({id:'library-workspace-drawer',title:'添加文件',
-      description:'关闭后保留本页未提交内容；已提交的处理批次继续运行。',content:host,dismissOnBackdrop:false,
+      description:'关闭可保留草稿，后台批次继续运行。',content:host,dismissOnBackdrop:false,
       onClose(){if(typeof closeChunkPreview==='function')closeChunkPreview();preparation?.close();state.close();host.classList.add('hidden');root.IngestBatches?.visibilityChanged();notice.textContent='';}});
     const title=get('library-workspace-drawer-title');
     const nav=node('nav','library-workspace-nav');nav.setAttribute('aria-label','资料操作');

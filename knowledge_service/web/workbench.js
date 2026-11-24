@@ -302,7 +302,7 @@ async function jobList(){const r=await api('/api/jobs',undefined,'GET');
 }
 function watch(job){wb.jobs.set(job.id,job);jobList();}
 bind('load-jobs',jobList);
-setInterval(async()=>{if(!wb.jobs.size)return;try{const jobs=await jobList();for(const j of jobs){if(wb.jobs.has(j.id)&&!['queued','running'].includes(j.status)){wb.jobs.delete(j.id);if(j.status==='completed'){await projects();if(j.result?.project){$('project').value=j.result.project.id;$('project').onchange();status('导入完成：'+j.result.project.name+'。进入图谱页查看。');}}}}}catch(e){status(e.message,true);}},3000);
+setInterval(async()=>{if(!wb.jobs.size)return;try{const jobs=await jobList();for(const j of jobs){if(wb.jobs.has(j.id)&&!['queued','running'].includes(j.status)){wb.jobs.delete(j.id);if(j.status==='completed'){await projects();if(j.result?.project){const project=$('project');project.value=j.result.project.id;project.dispatchEvent(new Event('change',{bubbles:true}));status('导入完成：'+j.result.project.name+'。进入图谱页查看。');}}}}}catch(e){status(e.message,true);}},3000);
 function readParseSettings(){
   const settings={chunk_strategy:$('parse-strategy').value,chunk_size:Number($('parse-size').value),chunk_overlap:Number($('parse-overlap').value),extract_attributes:$('extraction-mode').value!=='documents'&&$('parse-attributes').checked,relation_constraint_mode:$('parse-relation-constraints').value,resolve_entities:$('parse-resolve').checked,auto_merge:$('parse-merge').checked,merge_threshold:Number($('parse-threshold').value)};
   if(!Number.isInteger(settings.chunk_size)||settings.chunk_size<100||settings.chunk_size>10000)throw Error('最大字符数需为 100–10000 的整数');
@@ -1219,7 +1219,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       sourceTab.click();
       try{await window.selectSource?.(node.dataset.evidenceSource);}catch(error){status(error.message,true);}
         };});
-    turn.append(block);atEnd();
+    turn.append(block);
   }
   function showIndexNotice(message){
     const notice=$c('qa-notice'),text=$c('qa-notice-text'),button=$c('qa-build');
@@ -1237,7 +1237,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const text=document.createElement('span');text.className='qa-error-text';text.textContent='回答失败：'+message;
     const retry=document.createElement('button');retry.type='button';retry.className='qa-retry';retry.textContent='重试';
     retry.onclick=()=>{if(!busy)replay();};
-    box.append(text,retry);turn.append(box);retry.focus();atEnd();
+    box.append(text,retry);turn.append(box);retry.focus({preventScroll:true});
   }
   async function stream(body,turn,historyIndex=qaHistory.length,submittedScope=null){
     if(busy||preparing||sessionManager?.loading||sessionManager?.state.conflict)return;
@@ -1246,6 +1246,12 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     // Chat owns its cancellation generation. A graph repaint is not a change
     // to the chat scope; project/scope controls explicitly reset chat serial.
     const project=current,mine=++serial,scopeTicket=window.WorkspaceContext?.ticket(current,'qa');
+    const ownsStream=()=>mine===serial&&project===current&&(!scopeTicket||window.WorkspaceContext.accepts(scopeTicket,current,'qa'));
+    const scroll=$c('qa-scroll');
+    const followsEnd=()=>{
+      const visibleHeight=document.hidden?0:scroll?.clientHeight;
+      return visibleHeight>0&&scroll.scrollHeight-visibleHeight-scroll.scrollTop<=8;
+    };
     if(turn)provenance.close(false);
     const record={kind:'assistant',text:'',scope:JSON.parse(JSON.stringify(submittedScope||body)),project_id:project};
     // Reserve the retry slot in memory; only terminal answers belong in saved history.
@@ -1261,13 +1267,23 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     target.dataset.state='streaming';target.replaceChildren();
     const answer=document.createElement('div');answer.className='qa-answer';answer.dataset.answer='';target.append(answer);
     markDraft(target);
+    if(!document.hidden&&scroll?.clientHeight)atEnd();
     live.textContent='';
-    let buffer='',spoken='',pending='',text='',finished=false,failed=false;
-    const speak=force=>{
-      const step=chat.completeSentences(pending);
-      if(step.announce){spoken+=step.announce;live.textContent=spoken;}
-      pending=step.rest;
-      if(force&&pending){live.textContent=spoken+pending;pending='';}
+    let buffer='',text='',announced=0,frame=null,finished=false,failed=false;
+    const isEvidenceDraft=()=>!body.generate&&window.QaPresentation?.isEvidenceTranscript?.({...record,mode:'evidence_only',text});
+    const announceSentences=()=>{
+      if(announced===text.length)return;
+      const {announce}=chat.completeSentences(text.slice(announced));
+      if(announce){announced+=announce.length;live.textContent=text.slice(0,announced);}
+    };
+    const paintDraft=()=>{
+      frame=null;
+      if(!ownsStream())return;
+      // Check before changing the height so readers can scroll back while the answer grows.
+      const follow=followsEnd();
+      if(isEvidenceDraft())answer.hidden=true;
+      else{answer.textContent=text;announceSentences();}
+      if(follow)atEnd();
     };
     const handle=item=>{
       if(item.event==='malformed')throw Error('服务返回了无法解析的流数据');
@@ -1286,20 +1302,21 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         }));
         // C1：结构待定的知识单列，不进证据清单 —— 但历史重绘时要原样恢复（否则切一次标签就"消失"）。
         record.structure_pending=item.data?.structure_pending||null;
+        const follow=followsEnd();
         summary.textContent=item.data?.structure_pending?.count?'另有 '+item.data.structure_pending.count+' 条资料待确认，未用于回答。':'';
         addEvidence(target,{...item.data,answer_id:record.answer_id});
         progress.textContent=body.generate&&record.evidence.length?'模型正在组织答案…':'正在整理检索结果…';
         showRetrievalNotice(item.data);
+        if(follow)atEnd();
       }else if(item.event==='delta'){
         const chunk=String(item.data?.text??'');
         text+=chunk;
-        if(!body.generate&&window.QaPresentation?.isEvidenceTranscript?.({...record,mode:'evidence_only',text}))answer.hidden=true;
-        if(!answer.hidden){pending+=chunk;answer.textContent=text;speak(false);atEnd();}
+        if(chunk&&frame===null&&!answer.hidden)frame=window.requestAnimationFrame(paintDraft);
       }else if(item.event==='done'){
         capture(item.data);
         record.generation=item.data?.generation;record.timings_ms=item.data?.timings_ms;record.mode=item.data?.mode;
         record.answer_purpose=item.data?.answer_purpose;record.answer_label=item.data?.answer_label;
-        if(typeof item.data?.answer==='string'){text=item.data.answer;spoken='';pending=text;live.textContent='';}
+        if(typeof item.data?.answer==='string')text=item.data.answer;
         finished=true;
       }
     };
@@ -1320,7 +1337,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       reader=response.body.getReader();const decoder=new TextDecoder();
       while(true){
         const {done,value}=await request.wait(reader.read(),{timeoutMs:60000,message:'回答等待超时，已收到的内容仍保留，请重试。'});
-        if(mine!==serial||project!==current||(scopeTicket&&!window.WorkspaceContext.accepts(scopeTicket,current,'qa'))){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
+        if(!ownsStream()){await reader.cancel();throw Error('范围已变化，已停止显示旧回答');}
         if(done)break;
         buffer+=decoder.decode(value,{stream:true});
         const step=chat.splitSseBuffer(buffer);buffer=step.rest;
@@ -1333,6 +1350,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         for(const item of tail.events){handle(item);if(finished)break;}
       }
       if(!finished)throw Error('回答流提前结束');
+      // Terminal state and history settle even while animation frames are paused.
+      const follow=followsEnd();
       target.dataset.state='done';progress.textContent='回答完成';
       target.querySelector('.qa-draft-status')?.remove();
       record.text=text;
@@ -1340,21 +1359,26 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       provenance.decorateAnswer(answer,text,{...answerContext(record),projectId:project});
       if(!record.answer_id)markUnresolvedProvenance(target);
       window.QaPresentation?.annotate(target,record);
-      if(target.dataset.result==='evidence'){pending='检索完成。';spoken='';}
-      speak(true);
+      const announcement=target.dataset.result==='evidence'?'检索完成。':text;
+      if(live.textContent!==announcement)live.textContent=announcement;
+      if(follow)atEnd();
       persist();
     }catch(error){
       if(mine!==serial||project!==current)return;
+      const follow=followsEnd();
       failed=true;target.dataset.state='error';progress.textContent='';
+      if(!answer.hidden&&!isEvidenceDraft())announceSentences();
       answer.hidden=false;answer.textContent=text;
       markDraft(target,true);
       const emsg=error?.message||String(error);
       record.text=text;record.error=emsg;persist();
       addFailure(target,emsg,()=>stream(body,target,historyIndex,submittedScope));
+      if(follow)atEnd();
     }finally{
+      if(frame!==null)window.cancelAnimationFrame(frame);
       request?.close();
       try{reader?.cancel()?.catch(()=>{});}catch{}
-      if(mine===serial){busy=false;controller=null;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);if(!failed&&project===current)input.focus();}
+      if(mine===serial){busy=false;controller=null;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);if(!failed&&project===current)input.focus({preventScroll:true});}
     }
   }
   async function submit(){

@@ -260,6 +260,10 @@
     window.Auth = {
         fetchConversation: fetchConversation,
         whenReady: whenReady,
+        scopeCacheOwner: function () {
+            var token = getToken();
+            return function () { return getToken() === token; };
+        },
         user: function () { return currentUser; },
         isAdmin: function () { return canWrite(currentUser); },
         isSuperAdmin: function () { return !!currentUser && currentUser.role === 'superadmin'; },

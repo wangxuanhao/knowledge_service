@@ -142,6 +142,7 @@
     const rows=node('div','','batch-items'),pages=node('div','','batch-actions');
     const fileActions=node('div','','batch-file-toolbar-actions'),operations=node('div','','batch-operations');
     let focusedItem=null,cursor='',nextCursor=null,timer=null,inFlight=null,generation=0,active=false,expanded=false,allFailures=[];
+    let renderedItems=new Map();
     const url=base(project)+'/'+encodeURIComponent(batch.id);
     const showAll=button('查看本批全部文件',()=>control.show(null));
     fileActions.append(filter,showAll,button('刷新进度',()=>reload()));fileToolbar.append(fileHeading,fileActions);
@@ -151,7 +152,7 @@
     async function action(name,body={}){requireWriter();await request(url+'/'+name,body);await reload();}
     const start=button('开始处理',()=>action('start')),pause=button('暂停',()=>action('pause')),resume=button('继续',()=>action('resume'));
     const retry=button('重试全部失败',()=>action('retry-failed',{mode:'resume_checkpoint'})),cancel=button('取消未开始文件',()=>action('cancel')),download=button('下载失败明细',async()=>{
-      allFailures=[];let c='';do{const r=await request(url+'/items?status=needs_attention&limit=100'+(c?'&cursor='+encodeURIComponent(c):''));allFailures.push(...(r.items||[]));c=r.next_cursor;}while(c);
+      allFailures=[];let c='';do{const r=await request(url+'/items?status=needs_attention&limit=100&summary_only=true'+(c?'&cursor='+encodeURIComponent(c):''));allFailures.push(...(r.items||[]));c=r.next_cursor;}while(c);
       const blob=new Blob([failureCsv(allFailures)],{type:'text/csv;charset=utf-8'}),link=node('a');link.href=URL.createObjectURL(blob);link.download='批次失败明细.csv';link.click();setTimeout(()=>URL.revokeObjectURL(link.href),1000);
     });
     const review=button('核对本批次候选',async()=>{
@@ -173,7 +174,11 @@
       inFlight=read;
       read.promise=(async()=>{try{
         const signal=read.controller?.signal;
-        const detail=await request(url,undefined,{},signal);
+        const query=focusedItem?'limit=1&item_id='+encodeURIComponent(focusedItem):
+          'limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):'');
+        const list=await request(url+'/items?'+query+'&include_batch=true&summary_only=true',undefined,{},signal);
+        if(!accepts())return;
+        const detail=list.batch||await request(url,undefined,{},signal);
         if(!accepts())return;
         batch=detail;
         view.update(batch);
@@ -184,26 +189,33 @@
         const failures=(counts.needs_attention||0)+(counts.interrupted||0);
         const pending=['draft','uploading','staged','pending','queued','retry_wait'].some(s=>counts[s]>0);
         for(const [b,enabled] of [[start,['draft','uploading','queued'].includes(batch.status)],[pause,batch.status==='running'],[resume,batch.status==='paused'],[retry,failures>0],[cancel,pending],[download,counts.needs_attention>0]]){b.dataset.inactive=String(!enabled);b.disabled=!enabled;}
-        const query=focusedItem?'limit=1&item_id='+encodeURIComponent(focusedItem):
-          'limit=50&status='+encodeURIComponent(filter.value)+(cursor?'&cursor='+encodeURIComponent(cursor):'');
-        const list=await request(url+'/items?'+query,undefined,{},signal);
-        if(!accepts())return;
-        error.textContent=batch.status==='paused'?(pauseReasons[batch.paused_reason]||batch.paused_reason||''):'';rows.replaceChildren();
-        if(!list.items?.length)rows.append(node('p',focusedItem?'本批次中未找到该文件。':'当前筛选没有文件。','subtle'));
+        error.textContent=batch.status==='paused'?(pauseReasons[batch.paused_reason]||batch.paused_reason||''):'';
+        const nextItems=new Map(),visibleRows=[];
         for(const item of list.items||[]){
+          const previous=renderedItems.get(item.id);
+          const documentId=item.document_id||item.result?.document?.id||item.result?.document_id;
+          const hasDocument=Boolean(documentId&&item.source_version_id&&window.selectSource);
+          const signature=JSON.stringify([item.original_name,item.status,item.stage,item.progress,item.error_code,
+            item.failed_chunk_ordinal,item.public_error,item.auto_retry_count,item.next_retry_at,
+            documentId,item.source_version_id,hasDocument,batch.settings?.extraction_mode]);
+          if(previous?.signature===signature){
+            previous.item=item;
+            nextItems.set(item.id,previous);visibleRows.push(previous.row);
+            continue;
+          }
           const row=node('article','','batch-item');row.dataset.status=item.status;
+          const entry={signature,row,item,diagnostics:null};
           row.append(node('strong',item.original_name),node('span',states[item.status]||item.status));
           if(item.stage&&!item.error_code){
             const percent=item.status==='running'&&Number.isFinite(item.progress)?' · '+Math.round(item.progress)+'%':'';
             row.append(node('p','当前阶段：'+(states[item.stage]||item.stage)+percent,'batch-file-stage'));
           }
           const rowActions=node('div','','batch-item-actions');
-          if(item.error_code){const diagnostics=node('details','','batch-item-details');diagnostics.open=true;
+          if(item.error_code){const diagnostics=node('details','','batch-item-details');diagnostics.open=previous?.diagnostics?.open??true;
+            entry.diagnostics=diagnostics;
             diagnostics.append(node('summary','错误与重试'),node('p',`${states[item.stage]||item.stage||'处理'}${item.failed_chunk_ordinal!=null?' · 切片 '+item.failed_chunk_ordinal:''} · ${item.public_error||item.error_code}`,'batch-error'),node('small','自动重试 '+(item.auto_retry_count||0)+' 次'+(item.next_retry_at?' · 下次 '+window.DisplayTime.format(item.next_retry_at):'')));
             const tools=node('div','','batch-actions admin-only');for(const [mode,label] of Object.entries(retryLabels))tools.append(button(label,()=>{requireWriter();return request(url+'/items/'+encodeURIComponent(item.id)+'/retry',{mode}).then(reload);}));diagnostics.append(tools);row.append(diagnostics);
           }
-          const documentId=item.document_id||item.result?.document?.id||item.result?.document_id;
-          const hasDocument=Boolean(documentId&&item.source_version_id&&window.selectSource);
           if(hasDocument){
             rowActions.append(button('查看资料',async()=>{
               if(project!==currentProject())return;
@@ -216,20 +228,46 @@
             return window.SourceReader?.open({projectId:project,versionId:item.source_version_id,...(hasDocument?{location:{tab:'parsed'}}:{})});
           }));
           if(item.status==='completed'&&documentId){
-            if(batch.settings?.extraction_mode!=='documents')rowActions.append(button('查看本次抽取结果',()=>{window.WorkspaceDrawers?.close({restoreFocus:false});return window.IngestResults?.showBatchItem(item,{projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id});}));
+            if(batch.settings?.extraction_mode!=='documents')rowActions.append(button('查看本次抽取结果',()=>{
+              const selected=entry.item;
+              window.WorkspaceDrawers?.close({restoreFocus:false});
+              return window.IngestResults?.showBatchItem(selected,{
+                projectId:project,mode:batch.settings?.extraction_mode||'ontology',ontologyId:batch.settings?.ontology_id,
+                async loadItem(){
+                  if(Object.hasOwn(selected,'result'))return selected;
+                  const page=await request(url+'/items?limit=1&item_id='+encodeURIComponent(selected.id));
+                  const [saved]=page.items||[];
+                  if(saved?.id!==selected.id)throw Error('未找到这份文件的处理结果。');
+                  return saved;
+                },
+              });
+            }));
             if(batch.settings?.extraction_mode==='discovery'){
               const structure=button('核对候选与完善结构',async()=>{
                 requireWriter();window.WorkspaceDrawers?.close({restoreFocus:false});
                 await window.KnowledgeNavigation.open('ontology-model',{projectId:project});
                 if(!window.OntologyIntake)throw Error('结构候选模块尚未就绪，请刷新页面。');
-                const runId=item.result?.run_id||item.result?.document?.metadata?.run_id;
+                const currentItem=entry.item;
+                const runId=currentItem.run_id||currentItem.result?.run_id||currentItem.result?.document?.metadata?.run_id;
                 if(!runId)throw Error('此文件结果缺少本次处理的运行标识；请从资料库查看当前文档候选。');
-                await window.OntologyIntake.open({projectId:project,documentId,documentTitle:item.original_name,batchId:item.batch_id||batch.id,runId,trigger:structure});
+                await window.OntologyIntake.open({projectId:project,documentId,documentTitle:currentItem.original_name,batchId:currentItem.batch_id||batch.id,runId,trigger:structure});
               });structure.className+=' admin-only';rowActions.append(structure);
             }
           }
           if(rowActions.childElementCount)row.append(rowActions);
-          rows.append(row);
+          nextItems.set(item.id,entry);visibleRows.push(row);
+        }
+        renderedItems=nextItems;
+        if(!visibleRows.length){
+          const message=focusedItem?'本批次中未找到该文件。':'当前筛选没有文件。';
+          if(rows.children.length!==1||rows.children[0].textContent!==message)rows.replaceChildren(node('p',message,'subtle'));
+        }else{
+          // Drop obsolete rows first so later unchanged rows are not moved.
+          const keep=new Set(visibleRows);
+          for(const row of Array.from(rows.children))if(!keep.has(row))rows.removeChild(row);
+          visibleRows.forEach((row,index)=>{
+            if(rows.children[index]!==row)rows.insertBefore(row,rows.children[index]||null);
+          });
         }
         nextCursor=list.next_cursor;pages.replaceChildren();if(cursor)pages.append(button('回到首页',()=>{cursor='';return reload();}));if(nextCursor)pages.append(button('下一页',()=>{cursor=nextCursor;return reload();}));
       }catch(e){if(accepts()&&e.name!=='AbortError')error.textContent='批次更新失败：'+(e.message==='Failed to fetch'?'无法连接服务，请检查连接后重试。':e.message);}

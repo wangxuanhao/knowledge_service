@@ -1,8 +1,9 @@
 """Fail closed until the source-qualified native generation is audited and live."""
 
+from ..domain.search_projection import PROJECTION_SCHEMA_VERSIONS
+
 
 def source_identity_projection_readiness(repository,project):
-    from ..services.retrieval import PROJECTION_SCHEMA_VERSIONS
     try:
         with repository.independent_read_view() as reader:
             index=reader.projections.search_index(project,PROJECTION_SCHEMA_VERSIONS['milvus'])

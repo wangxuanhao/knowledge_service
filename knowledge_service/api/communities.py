@@ -127,7 +127,7 @@ def ask_communities(project_id: str, body: CommunityAsk, request: Request):
 
 
 def install(app, service):
-    communities = Communities(service.repository, app.state.jobs, service.llm_models, search_service=service)
+    communities = Communities.for_service(service, app.state.jobs)
     app.state.communities = communities
     app.state.community_refresh = CommunityRefresh(communities)
     app.state.jobs.handlers[JOB_KIND] = communities.run_job

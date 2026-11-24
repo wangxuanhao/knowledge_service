@@ -231,10 +231,11 @@ def test_local_deleted_root_is_restored_by_ledger_undo_with_the_same_hops(record
     assert page.evaluate('() => FullGraphView.mode') == 'local'
     page.click('#close-record-dialog')
     page.click('[data-tab="records"]')
-    page.get_by_role('button', name='读取操作历史', exact=True).click()
+    page.get_by_role('button', name='可撤销的操作', exact=True).click()
     page.once('dialog', lambda dialog: dialog.accept())
     page.locator('[data-undo-operation="delete-a"]').click()
     page.wait_for_function('() => document.getElementById("status").textContent.includes("已撤销")')
+    page.get_by_role('dialog', name='可撤销的操作').get_by_role('button', name='关闭 ×').click()
     page.click('[data-tab="search"]')
     page.wait_for_function('() => FullGraphView.mode === "local" && wb.nodes.get("a")?.version === 3')
     assert mutations == [('delete', {'record_id': 'a', 'expected_version': 1}), ('undo', {})]
@@ -361,14 +362,16 @@ def test_graph_creation_entry_is_disabled_in_history_on_a_narrow_screen(record_p
         box = button.bounding_box()
         assert box['x'] >= 0 and box['x'] + box['width'] <= 321, box
         stage = page.locator('#graph-stage').bounding_box()
-        for control in page.locator('#graph-stage .graph-stage-heading button:visible').all():
+        heading = page.locator('#graph-stage .graph-stage-heading')
+        heading_box = heading.bounding_box()
+        for control in heading.locator('button:visible').all():
             bounds = control.bounding_box()
             measurement = dict(control=control.get_attribute('id') or control.get_attribute('data-fg-mode'),
-                               bounds=bounds, stage=stage, viewport=320)
+                               bounds=bounds, stage=stage, heading=heading_box, viewport=320)
             assert bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= 321, measurement
             assert bounds['y'] >= 0 and bounds['y'] + bounds['height'] <= 901, measurement
             assert bounds['x'] >= stage['x'] - 1 and bounds['x'] + bounds['width'] <= stage['x'] + stage['width'] + 1, measurement
-            assert bounds['y'] >= stage['y'] - 1 and bounds['y'] + bounds['height'] <= stage['y'] + stage['height'] + 1, measurement
+            assert bounds['y'] >= heading_box['y'] - 1 and bounds['y'] + bounds['height'] <= heading_box['y'] + heading_box['height'] + 1, measurement
         button.evaluate('node => node.click()')
         assert page.locator('#record-create-dialog').count() == 0
     assert calls['creates'] == 0

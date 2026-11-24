@@ -46,11 +46,13 @@ PROBE = r"""() => {
   lines.addNodes([{id:'left',type:'Thing'},{id:'right',type:'Thing'}]);lines.addEdges([{id:'diagonal',subject_id:'left',object_id:'right'}]);
   r.setDataset(lines);r.setSessionManifest({id:'pixel-line',entity_count:2,relation_count:1});r.sync();
   const pixels=read(),positions=r.renderPositions,endpoints=[0,1].map(i=>r.camera.worldToScreen(positions[i*2],positions[i*2+1],r.width,r.height).map(v=>v*r.dpr));
-  const [[ax,ay],[bx,by]]=endpoints,vx=bx-ax,vy=by-ay,length=Math.hypot(vx,vy),solid=edge.map((v,i)=>Math.round(v*.5+bg[i]*.5));
+  const [[ax,ay],[bx,by]]=endpoints,vx=bx-ax,vy=by-ay,length=Math.hypot(vx,vy);
+  const bend=Math.min(length*tokens.edgeCurveness,40*r.dpr),solid=edge.map((v,i)=>Math.round(v*tokens.edgeOpacity+bg[i]*(1-tokens.edgeOpacity)));
   let partial=0,painted=0;
   for(let y=0;y<r.canvas.height;y++)for(let x=0;x<r.canvas.width;x++){
     const along=((x+.5-ax)*vx+(y+.5-ay)*vy)/length;if(along<30*r.dpr||along>length-30*r.dpr)continue;
-    const distance=Math.abs((x+.5-ax)*vy-(y+.5-ay)*vx)/length;if(distance>2*r.dpr)continue;
+    const t=along/length,normal=((x+.5-ax)*vy-(y+.5-ay)*vx)/length;
+    if(Math.abs(normal-2*bend*t*(1-t))>2*r.dpr)continue;
     const actual=color(pixels,x,y);if(different(actual,bg))painted++;
     if(different(actual,bg)&&different(actual,solid))partial++;
   }

@@ -1,11 +1,46 @@
 /* Full entity graph: compact buffers, bounded labels and shared record details. */
 (function(root){
   'use strict';
-  const tokens=root.GraphAppearance?.tokens||{background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9',nodeOpacity:1,edgeOpacity:.35,edgeWidth:1,selectedEdgeWidth:2};
+  const tokens=root.GraphAppearance?.tokens||{background:'#ffffff',edge:'#819db4',text:'#4e646c',outline:'#ffffff',selected:'#1689e9',nodeOpacity:1,nodeOutlineWidth:1.2,edgeOpacity:.35,edgeWidth:1,edgeCurveness:.1,selectedEdgeWidth:2};
   const rgb=hex=>new Uint8Array([1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)));
   const fallbackColors=new Map();
   // CSS pixels, independent of backing-store resolution and camera zoom.
   const nodeHitRadius=12,edgeHitRadius=10;
+  const curveEdgeLimit=4000,maxCurveControlOffset=40;
+  const denseNodeThreshold=4000,recentFilterLimit=2;
+  function includeNodeInBounds(bounds,x,y){
+    bounds.minX=Math.min(bounds.minX,x);bounds.maxX=Math.max(bounds.maxX,x);
+    bounds.minY=Math.min(bounds.minY,y);bounds.maxY=Math.max(bounds.maxY,y);
+  }
+  const strokeCorners=[[0,-1],[1,-1],[0,1],[0,1],[1,-1],[1,1]];
+  function writeStroke(vertices,offset,ax,ay,bx,by){
+    for(const [along,side] of strokeCorners){
+      vertices[offset++]=ax;vertices[offset++]=ay;
+      vertices[offset++]=bx;vertices[offset++]=by;
+      vertices[offset++]=along;vertices[offset++]=side;
+    }
+  }
+  function curveControlPoint(ax,ay,bx,by){
+    const dx=bx-ax,dy=by-ay,bend=Math.min(tokens.edgeCurveness,maxCurveControlOffset/Math.hypot(dx,dy));
+    return [(ax+bx)/2+dy*bend,(ay+by)/2-dx*bend];
+  }
+  function curveFitsAxis(start,control,end,limit){
+    const t=(start-control)/(start-2*control+end);
+    if(!(t>0&&t<1))return true;
+    const extremum=(1-t)**2*start+2*(1-t)*t*control+t*t*end;
+    return extremum>=2&&extremum<=limit-2;
+  }
+  function curveDistanceSquared(x,y,dx,dy,length,maxOffset){
+    const along=(x*dx+y*dy)/length,normal=(y*dx-x*dy)/length;
+    const bend=Math.min(tokens.edgeCurveness,maxOffset/Math.sqrt(length));
+    let t=Math.max(0,Math.min(1,along));
+    // Refine the projection onto the quadratic in its tangent/normal frame.
+    for(let i=0;i<2;i++){
+      const slope=2*bend*(1-2*t),error=2*bend*t*(1-t)-normal;
+      t=Math.max(0,Math.min(1,t-(t-along+error*slope)/(1+slope*slope-4*bend*error)));
+    }
+    return length*((along-t)**2+(normal-2*bend*t*(1-t))**2);
+  }
   const smallNodeSize=(size,scale)=>Math.max(12,Math.min(28,size*Math.sqrt(scale)));
   const nodeRGB=record=>{
     if(root.GraphAppearance)return root.GraphAppearance.rgbFor(record);
@@ -14,20 +49,35 @@
     return fallbackColors.get(color);
   };
   const theme={};for(const name of ['background','edge','outline','selected'])theme[name]=Array.from(rgb(tokens[name]),value=>value/255);
-  function hash(value){let n=2166136261;for(const c of String(value)){n^=c.charCodeAt(0);n=Math.imul(n,16777619);}return n>>>0;}
-  function point(id){const h=hash(id),j=hash(id+'@y');return [((h&0xffffff)/0xffffff)*1.9-.95,((j&0xffffff)/0xffffff)*1.9-.95];}
+  const goldenAngle=Math.PI*(3-Math.sqrt(5));
+  function hashFraction(value){
+    let n=2166136261;
+    for(let i=0;i<value.length;i++)n=Math.imul(n^value.charCodeAt(i),16777619);
+    n=Math.imul(n^(n>>>16),0x7feb352d);
+    n=Math.imul(n^(n>>>15),0x846ca68b);
+    return ((n^(n>>>16))>>>0)/0x100000000;
+  }
+  function point(id){
+    const key=String(id),angle=2*Math.PI*hashFraction(key);
+    // Squared radius is uniform, so the density follows the area of the disc.
+    const radius=.95*Math.sqrt(hashFraction(key+'@radius'));
+    return [Math.cos(angle)*radius,Math.sin(angle)*radius];
+  }
   // A bounded display layout is only used after the manifest certifies a small
   // session. Canonical/worker positions remain untouched for paging and export.
-  function relationshipPositions(dataset,width,height){
+  function relationshipPositions(dataset,width,height,circular=false){
     const count=dataset.nodeCount,degrees=new Uint32Array(count),links=[];
     for(const edge of [...dataset.edges].sort((a,b)=>String(a.id).localeCompare(String(b.id)))){const a=dataset.nodeIndex.get(edge.subject_id),b=dataset.nodeIndex.get(edge.object_id);if(Number.isInteger(a)&&Number.isInteger(b)&&a!==b){degrees[a]++;degrees[b]++;links.push([a,b]);}}
     const connected=[],isolated=[];for(let i=0;i<count;i++)(degrees[i]?connected:isolated).push(i);
     connected.sort((a,b)=>degrees[b]-degrees[a]||String(dataset.records[a].id).localeCompare(String(dataset.records[b].id)));
     isolated.sort((a,b)=>String(dataset.records[a].id).localeCompare(String(dataset.records[b].id)));
-    const availableWidth=Math.max(120,width-100),availableHeight=Math.max(100,height-72),isolateWidth=isolated.length&&connected.length?Math.min(availableWidth*.3,Math.max(120,Math.ceil(isolated.length/Math.max(1,Math.floor(availableHeight/42)))*106)):0;
-    const graphWidth=availableWidth-isolateWidth-(isolateWidth?36:0),x=new Float32Array(count),y=new Float32Array(count),dx=new Float32Array(count),dy=new Float32Array(count);
-    const ideal=Math.sqrt(Math.max(10000,graphWidth*availableHeight)/Math.max(1,connected.length))*.7;
-    connected.forEach((index,order)=>{const angle=order*2.399963229728653,radius=ideal*Math.sqrt(order+1);x[index]=Math.cos(angle)*radius;y[index]=Math.sin(angle)*radius;});
+    const availableWidth=Math.max(120,width-100),availableHeight=Math.max(100,height-72);
+    const isolateWidth=!circular&&isolated.length&&connected.length?Math.min(availableWidth*.3,Math.max(120,Math.ceil(isolated.length/Math.max(1,Math.floor(availableHeight/42)))*106)):0;
+    const graphWidth=circular?Math.min(availableWidth,availableHeight):availableWidth-isolateWidth-(isolateWidth?36:0);
+    const graphHeight=circular?graphWidth:availableHeight;
+    const x=new Float32Array(count),y=new Float32Array(count),dx=new Float32Array(count),dy=new Float32Array(count);
+    const ideal=Math.sqrt(Math.max(10000,graphWidth*graphHeight)/Math.max(1,connected.length))*.7;
+    connected.forEach((index,order)=>{const angle=order*goldenAngle,radius=ideal*Math.sqrt(order+1);x[index]=Math.cos(angle)*radius;y[index]=Math.sin(angle)*radius;});
     // Fixed iterations and deterministic seeds make append/reload reproducible;
     // the 200-entity manifest gate keeps pairwise work off the progressive path.
     for(let step=0;step<180&&connected.length>1;step++){
@@ -42,18 +92,34 @@
     }
     if(connected.length){
       let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;for(const i of connected){minX=Math.min(minX,x[i]);maxX=Math.max(maxX,x[i]);minY=Math.min(minY,y[i]);maxY=Math.max(maxY,y[i]);}
-      const scale=Math.min(graphWidth/Math.max(1,maxX-minX),availableHeight/Math.max(1,maxY-minY));
-      for(const i of connected){x[i]=50+graphWidth/2+(x[i]-(minX+maxX)/2)*scale;y[i]=36+availableHeight/2+(y[i]-(minY+maxY)/2)*scale;}
+      const scale=Math.min(graphWidth/Math.max(1,maxX-minX),graphHeight/Math.max(1,maxY-minY));
+      for(const i of connected){x[i]=50+graphWidth/2+(x[i]-(minX+maxX)/2)*scale;y[i]=36+graphHeight/2+(y[i]-(minY+maxY)/2)*scale;}
       // Final screen-space separation protects the readable node diameter when
       // high-degree stars compress nearby leaves during fitting.
+      const spacing=circular?36:30;
       for(let step=0;step<32;step++)for(let a=0;a<connected.length;a++)for(let b=a+1;b<connected.length;b++){
-        const i=connected[a],j=connected[b],vx=x[j]-x[i],vy=y[j]-y[i],distance=Math.max(.01,Math.hypot(vx,vy));if(distance>=30)continue;
-        const move=(30-distance)/2,fx=vx/distance*move,fy=vy/distance*move;x[i]=Math.max(50,Math.min(50+graphWidth,x[i]-fx));y[i]=Math.max(36,Math.min(36+availableHeight,y[i]-fy));x[j]=Math.max(50,Math.min(50+graphWidth,x[j]+fx));y[j]=Math.max(36,Math.min(36+availableHeight,y[j]+fy));
+        const i=connected[a],j=connected[b],vx=x[j]-x[i],vy=y[j]-y[i],distance=Math.max(.01,Math.hypot(vx,vy));if(distance>=spacing)continue;
+        const move=(spacing-distance)/2,fx=vx/distance*move,fy=vy/distance*move;x[i]=Math.max(50,Math.min(50+graphWidth,x[i]-fx));y[i]=Math.max(36,Math.min(36+graphHeight,y[i]-fy));x[j]=Math.max(50,Math.min(50+graphWidth,x[j]+fx));y[j]=Math.max(36,Math.min(36+graphHeight,y[j]+fy));
       }
+    }
+    const positions=new Float32Array(count*2),unit=Math.min(width,height)/2;
+    if(circular){
+      const radius=Math.max(0,1-36/Math.max(1,unit));
+      // Give the connected core room in proportion to its share of the nodes.
+      const core=isolated.length?radius*Math.min(.82,Math.sqrt(connected.length/count)):radius;
+      const cx=50+graphWidth/2,cy=36+graphHeight/2;
+      const extent=Math.max(1,...connected.map(i=>Math.hypot(x[i]-cx,y[i]-cy)));
+      for(const i of connected){positions[i*2]=(x[i]-cx)*core/extent;positions[i*2+1]=(cy-y[i])*core/extent;}
+      const inner=connected.length?Math.min(radius,core+24/Math.max(1,unit)):0;
+      isolated.forEach((i,order)=>{
+        const angle=order*goldenAngle,fraction=count===1?0:(order+.5)/isolated.length;
+        const distance=Math.sqrt(inner**2+(radius**2-inner**2)*fraction);
+        positions[i*2]=Math.cos(angle)*distance;positions[i*2+1]=Math.sin(angle)*distance;
+      });
+      return positions;
     }
     const gridLeft=connected.length?width-50-isolateWidth:50,gridWidth=connected.length?isolateWidth:availableWidth,columns=Math.max(1,Math.ceil(Math.sqrt(isolated.length*gridWidth/availableHeight))),rows=Math.ceil(isolated.length/columns);
     isolated.forEach((i,order)=>{x[i]=gridLeft+gridWidth*(order%columns+.5)/columns;y[i]=36+availableHeight*(Math.floor(order/columns)+.5)/Math.max(1,rows);});
-    const positions=new Float32Array(count*2),unit=Math.min(width,height)/2;
     for(let i=0;i<count;i++){positions[i*2]=(x[i]-width/2)/unit;positions[i*2+1]=(height/2-y[i])/unit;}
     return positions;
   }
@@ -90,9 +156,16 @@
     addEdges(rows){for(const row of rows){if(this.edgeIndex.has(row.id))continue;const a=this.nodeIndex.get(row.subject_id),b=this.nodeIndex.get(row.object_id);if(a===undefined||b===undefined)throw new Error('关系端点不在同一图谱清单中');this.edgeIndex.add(row.id);this.edges.push(row);
       if(this.indexTypes){const group=this.nodeTypes[a];if(group===this.nodeTypes[b])group.edges.push(this.edges.length-1);}
     }this._neighborIndex?.sync();}
-    edgePositions(positions=this.positions){const result=new Float32Array(this.edgeCount*4);this.edges.forEach((edge,i)=>{const a=this.nodeIndex.get(edge.subject_id)*2,b=this.nodeIndex.get(edge.object_id)*2;result[i*4]=positions[a];result[i*4+1]=positions[a+1];result[i*4+2]=positions[b];result[i*4+3]=positions[b+1];});return result;}
+    edgePositions(positions=this.positions,first=0){
+      const result=new Float32Array((this.edgeCount-first)*4);
+      for(let i=first,offset=0;i<this.edgeCount;i++,offset+=4){
+        const edge=this.edges[i],a=this.nodeIndex.get(edge.subject_id)*2,b=this.nodeIndex.get(edge.object_id)*2;
+        result[offset]=positions[a];result[offset+1]=positions[a+1];result[offset+2]=positions[b];result[offset+3]=positions[b+1];
+      }
+      return result;
+    }
   }
-  // One active projection; append work visits only that type's new indexes.
+  // Each projection catches up from its own offsets when it is displayed.
   // The full session dataset remains authoritative for paging and counts.
   class TypeProjection{
     constructor(source,type,predicate=null){this.source=source;this.type=type;this.predicate=predicate;this.dataset=new GraphDataset({indexTypes:false});this.nodes=0;this.edges=0;}
@@ -103,9 +176,11 @@
         if(source.edgeCount>this.edges)this.dataset.addEdges(source.edges.slice(this.edges).filter(row=>!this.predicate||row.type===this.predicate));this.edges=source.edgeCount;return;
       }
       if(!group)return;
-      const rows=[],positions=new Float32Array((group.nodes.length-this.nodes)*2);
-      for(let i=this.nodes;i<group.nodes.length;i++){const index=group.nodes[i],offset=(i-this.nodes)*2;rows.push(source.records[index]);positions[offset]=source.positions[index*2];positions[offset+1]=source.positions[index*2+1];}
-      if(rows.length)this.dataset.addNodes(rows,positions);this.nodes=group.nodes.length;
+      if(group.nodes.length>this.nodes){
+        const rows=[],positions=new Float32Array((group.nodes.length-this.nodes)*2);
+        for(let i=this.nodes;i<group.nodes.length;i++){const index=group.nodes[i],offset=(i-this.nodes)*2;rows.push(source.records[index]);positions[offset]=source.positions[index*2];positions[offset+1]=source.positions[index*2+1];}
+        this.dataset.addNodes(rows,positions);this.nodes=group.nodes.length;
+      }
       if(group.edges.length>this.edges)this.dataset.addEdges(group.edges.slice(this.edges).map(index=>source.edges[index]).filter(row=>!this.predicate||row.type===this.predicate));this.edges=group.edges.length;
     }
   }
@@ -129,6 +204,7 @@
       if(!this.gl)throw new Error('当前浏览器无法创建 WebGL，全量模式不可用。可切回局部探索。');
       this.setupGL();this.abort=new AbortController();const signal=this.abort.signal;
       let drag=null;
+      this.cancelPointerDrag=()=>{drag=null;this.pendingNodeMove=null;};
       this.canvas.addEventListener('pointerdown',e=>{
         if(e.button!==0||e.isPrimary===false)return;
         this.clearHover();const box=this.canvas.getBoundingClientRect(),x=e.clientX-box.left,y=e.clientY-box.top,index=this.nearestNode(x,y),world=this.camera.screenToWorld(x,y,this.width,this.height),positions=this.renderPositions||this.displayDataset.positions;
@@ -155,7 +231,7 @@
         if(drag&&!drag.moved&&Math.hypot(e.clientX-drag.originX,e.clientY-drag.originY)<5){const box=this.canvas.getBoundingClientRect();this.pick(e.clientX-box.left,e.clientY-box.top);}
         drag=null;if(this.canvas.hasPointerCapture(e.pointerId))this.canvas.releasePointerCapture(e.pointerId);
       },{signal});
-      for(const event of ['pointercancel','lostpointercapture'])this.canvas.addEventListener(event,()=>{drag=null;this.pendingNodeMove=null;},{signal});
+      for(const event of ['pointercancel','lostpointercapture'])this.canvas.addEventListener(event,this.cancelPointerDrag,{signal});
       this.canvas.addEventListener('wheel',e=>{e.preventDefault();this.clearHover();const box=this.canvas.getBoundingClientRect();this.camera.zoomAt(Math.exp(-e.deltaY*.0015),e.clientX-box.left,e.clientY-box.top,this.width,this.height);this.requestDraw();},{signal,passive:false});
       this.canvas.addEventListener('dblclick',()=>{if(this.selected<0&&this.selectedEdge<0)this.reset();},{signal});
       this.canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();this.lost=true;this.onError('GPU 上下文丢失，请恢复图谱或切回局部探索。');},{signal});
@@ -211,8 +287,10 @@
       this.pointProgram=gl.createProgram();gl.attachShader(this.pointProgram,pv);gl.attachShader(this.pointProgram,pf);gl.linkProgram(this.pointProgram);gl.deleteShader(pv);gl.deleteShader(pf);if(!gl.getProgramParameter(this.pointProgram,gl.LINK_STATUS))throw new Error('实体轮廓绘制程序创建失败');
       this.pointLocations={position:gl.getAttribLocation(this.pointProgram,'a_position'),typeColor:gl.getAttribLocation(this.pointProgram,'a_typeColor')};for(const name of ['center','scale','size','color','ring','outline','outlineColor','vertexColor'])this.pointLocations[name]=gl.getUniformLocation(this.pointProgram,'u_'+name);
       gl.useProgram(this.pointProgram);gl.uniform3f(this.pointLocations.outlineColor,...theme.outline);
-      this.nodeBuffer=gl.createBuffer();this.groupedNodeBuffer=gl.createBuffer();this.edgeBuffer=gl.createBuffer();this.nodeRanges=[];this.syncedDataset=null;gl.enableVertexAttribArray(this.locations.position);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-      this.nodeColorBuffer=null;this.useNodeColorBuffer=false;
+      this.classicBuffers={nodes:gl.createBuffer(),grouped:gl.createBuffer(),edges:{buffer:gl.createBuffer(),capacity:0},colors:null};
+      this.denseGeometries=new Map();this.activeGeometry=null;this.bindSceneGeometry(null);
+      this.nodeRanges=[];this.syncedDataset=null;gl.enableVertexAttribArray(this.locations.position);gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      this.useNodeColorBuffer=false;
       // Render every relation into one cached world-space layer. Camera
       // motion transforms that complete layer instead of overdrawing millions
       // of long transparent segments on each frame. Entity points remain live.
@@ -242,12 +320,12 @@
         if(!this.explorationFocus)return;
         this.explorationFocus=null;if(this.canvas?.style)this.canvas.style.opacity=this.explorationOpacity??'';this.explorationOpacity=null;
       }else{
-        const d=this.displayDataset,nodeIndices=[],included=new Set(),edgeEndpoints=[];let visited=0;
+        const d=this.displayDataset,nodeIndices=[],included=new Set(),edgeEndpoints=new Map();let visited=0;
         // Resolve only the bounded model result. A complete edge-ID map or a
         // scan of d.edges would duplicate the large-session adjacency cost.
         for(const id of value.nodeIds||[]){if(visited++>=200)break;const index=d.nodeIndex.get(id);if(index!==undefined){nodeIndices.push(index);included.add(index);}}
         const records=value.edgeRecords||[];
-        for(let i=0;i<Math.min(400,records.length);i++){const edge=records[i];if(!edge||!value.edgeIds?.has(edge.id))continue;const a=d.nodeIndex.get(edge.subject_id),b=d.nodeIndex.get(edge.object_id);if(included.has(a)&&included.has(b))edgeEndpoints.push([a,b]);}
+        for(let i=0;i<Math.min(400,records.length);i++){const edge=records[i];if(!edge||!value.edgeIds?.has(edge.id))continue;const a=d.nodeIndex.get(edge.subject_id),b=d.nodeIndex.get(edge.object_id);if(included.has(a)&&included.has(b))edgeEndpoints.set(edge.id,[a,b]);}
         if(!this.explorationFocus)this.explorationOpacity=this.canvas?.style?.opacity??'';
         this.explorationFocus={dataset:d,nodeIndices,edgeEndpoints};if(this.canvas?.style)this.canvas.style.opacity='0.18';
       }
@@ -255,27 +333,102 @@
     }
     setTypeFilter(type){
       const next=type==null?null:String(type);if(next===(this.typeFilter??null))return;
-      this.clearHover();this.setExplorationFocus(null);
-      this.typeFilter=next;this.typeProjection=next===null&&!this.predicateFilter?null:new TypeProjection(this.dataset,next,this.predicateFilter);
-      this.selected=-1;this.selectedEdge=-1;this.layoutKey=null;this.sync();
+      this.typeFilter=next;this.changeProjection();
     }
     setPredicateFilter(predicate){
       const next=predicate||null;if(next===(this.predicateFilter??null))return;
-      this.clearHover();this.setExplorationFocus(null);this.predicateFilter=next;
-      this.typeProjection=this.typeFilter==null&&!next?null:new TypeProjection(this.dataset,this.typeFilter??null,next);
+      this.predicateFilter=next;this.changeProjection();
+    }
+    changeProjection(){
+      this.cancelPointerDrag?.();this.clearHover();this.setExplorationFocus(null);
+      const type=this.typeFilter??null,predicate=this.predicateFilter??null;
+      const previous=this.typeProjection;
+      if(previous&&!this.recentProjections?.has(JSON.stringify([previous.type,previous.predicate])))this.dropDenseGeometry(previous.dataset);
+      this.typeProjection=null;
+      if(type!==null||predicate){
+        const dataset=this.dataset;
+        const large=dataset.nodeCount>denseNodeThreshold||dataset.edgeCount>curveEdgeLimit;
+        if(large){
+          const key=JSON.stringify([type,predicate]),projections=this.recentProjections??=new Map();
+          const projection=projections.get(key)||new TypeProjection(dataset,type,predicate);
+          projections.delete(key);projections.set(key,projection);this.typeProjection=projection;
+          if(projections.size>recentFilterLimit){
+            const oldest=projections.keys().next().value;
+            this.dropDenseGeometry(projections.get(oldest).dataset);projections.delete(oldest);
+          }
+        }else{
+          this.typeProjection=new TypeProjection(dataset,type,predicate);
+        }
+      }
       this.selected=-1;this.selectedEdge=-1;this.layoutKey=null;this.sync();
     }
-    setDataset(dataset){this.pendingNodeMove=null;this.manualPositions=new Map();this.clearHover();this.setExplorationFocus(null);this.dataset=dataset;this.typeFilter=null;this.predicateFilter=null;this.typeProjection=null;this.selected=-1;this.selectedEdge=-1;this.sessionManifest=null;this.smallSession=false;this.renderPositions=null;this.layoutKey=null;this.sync();}
+    setDataset(dataset){
+      this.cancelPointerDrag?.();this.pendingNodeMove=null;this.manualPositions=new Map();this.clearHover();this.setExplorationFocus(null);
+      for(const old of this.denseGeometries?.keys()||[])this.dropDenseGeometry(old);
+      this.recentProjections?.clear();this.syncedDataset=null;
+      this.dataset=dataset;this.typeFilter=null;this.predicateFilter=null;this.typeProjection=null;
+      this.selected=-1;this.selectedEdge=-1;this.sessionManifest=null;this.smallSession=false;this.renderPositions=null;this.layoutKey=null;this.sync();
+    }
     setSessionManifest(manifest){
       const small=Number.isInteger(manifest?.entity_count)&&manifest.entity_count<=200&&manifest.entity_count>=0&&Number.isInteger(manifest?.relation_count)&&manifest.relation_count<=400&&manifest.relation_count>=0;
       if(this.smallSession!==small||this.sessionManifest?.id!==manifest?.id){this.layoutKey=undefined;if(small)this.camera=new Camera();}
       this.sessionManifest=manifest;this.smallSession=small;
     }
+    dropDenseGeometry(dataset){
+      const geometry=this.denseGeometries?.get(dataset);if(!geometry)return;
+      if(!this.lost)for(const storage of [geometry.nodes,geometry.colors,geometry.edges])this.gl.deleteBuffer(storage.buffer);
+      this.denseGeometries.delete(dataset);
+    }
+    bindSceneGeometry(geometry){
+      const classic=this.classicBuffers;
+      this.activeGeometry=geometry;
+      this.nodeBuffer=geometry?.nodes.buffer||classic.nodes;
+      this.groupedNodeBuffer=geometry?.nodes.buffer||classic.grouped;
+      this.nodeColorBuffer=geometry?.colors.buffer||classic.colors;
+      this.edgeBuffer=geometry?.edges.buffer||classic.edges.buffer;
+    }
+    uploadGrowingBuffer(storage,count,first,stride,dataFrom){
+      if(!count)return;
+      const gl=this.gl;gl.bindBuffer(gl.ARRAY_BUFFER,storage.buffer);
+      if(count>storage.capacity){
+        // WebGL 1 cannot copy buffer-to-buffer. Reserve room so most pages
+        // write only their tail, and refill the buffer when it finally grows.
+        storage.capacity=Math.max(Math.ceil(count*1.25),Math.ceil(storage.capacity*1.5));
+        gl.bufferData(gl.ARRAY_BUFFER,storage.capacity*stride,gl.DYNAMIC_DRAW);first=0;
+      }
+      gl.bufferSubData(gl.ARRAY_BUFFER,first*stride,dataFrom(first));
+    }
+    syncDenseGeometry(dataset,positions){
+      const gl=this.gl;
+      let geometry=this.denseGeometries.get(dataset);
+      if(!geometry){
+        const storage=()=>({buffer:gl.createBuffer(),capacity:0});
+        geometry={nodes:storage(),colors:storage(),edges:storage(),nodeCount:0,edgeCount:0,
+          bounds:{minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity}};
+        this.denseGeometries.set(dataset,geometry);
+      }
+      this.bindSceneGeometry(geometry);this.nodeBounds=geometry.bounds;this.useNodeColorBuffer=true;
+      this.nodeGroups=null;this.nodeRanges=[];this.nodeSizes=null;
+      if(geometry.nodeCount!==dataset.nodeCount){
+        this.uploadGrowingBuffer(geometry.nodes,dataset.nodeCount,geometry.nodeCount,8,first=>positions.subarray(first*2));
+        this.uploadGrowingBuffer(geometry.colors,dataset.nodeCount,geometry.nodeCount,3,first=>{
+          const colors=new Uint8Array((dataset.nodeCount-first)*3);
+          for(let i=first;i<dataset.nodeCount;i++)colors.set(nodeRGB(dataset.records[i]),(i-first)*3);
+          return colors;
+        });
+        for(let i=geometry.nodeCount;i<dataset.nodeCount;i++)includeNodeInBounds(geometry.bounds,positions[i*2],positions[i*2+1]);
+        geometry.nodeCount=dataset.nodeCount;
+      }
+      if(geometry.edgeCount!==dataset.edgeCount){
+        this.uploadGrowingBuffer(geometry.edges,dataset.edgeCount,geometry.edgeCount,16,first=>dataset.edgePositions(positions,first));
+        geometry.edgeCount=dataset.edgeCount;
+      }
+    }
     sync(){
-      if(this.destroyed||this.lost)return;this.typeProjection?.sync();const gl=this.gl,d=this.displayDataset,replace=this.syncedDataset!==d;
+      if(this.destroyed||this.lost)return;this.typeProjection?.sync();const d=this.displayDataset,replace=this.syncedDataset!==d;
       if(this.smallSession&&(d.nodeCount>200||d.edgeCount>400))this.smallSession=false;
       const key=this.smallSession?[d.nodeCount,d.edgeCount,this.width,this.height].join(':'):null,layoutChanged=replace||key!==this.layoutKey;
-      if(layoutChanged)this.renderPositions=key?relationshipPositions(d,this.width,this.height):d.positions;
+      if(layoutChanged)this.renderPositions=key?relationshipPositions(d,this.width,this.height,true):d.positions;
       const positionsChanged=this.positionSource!==d.positions;
       if(!key&&(layoutChanged||positionsChanged||!this.renderPositions))this.renderPositions=d.positions;
       this.positionSource=d.positions;this.layoutKey=key;
@@ -284,11 +437,28 @@
         for(const [id,point] of this.manualPositions){const index=d.nodeIndex.get(id);if(index!==undefined)this.renderPositions.set(point,index*2);}
       }
       const positions=this.renderPositions;
+      const nodesChanged=replace||layoutChanged||this.syncedNodes!==d.nodeCount,edgesChanged=replace||layoutChanged||this.syncedEdges!==d.edgeCount;
+      if(nodesChanged||edgesChanged)this.invalidateViewCache();
+      let endpoints;
+      if(!this.smallSession&&d.nodeCount>denseNodeThreshold){
+        this.syncDenseGeometry(d,positions);
+      }else{
+        this.bindSceneGeometry(null);
+        endpoints=this.syncClassicGeometry(d,positions,layoutChanged,nodesChanged,edgesChanged);
+      }
+      if(edgesChanged){
+        if(d.edgeCount&&d.edgeCount<=curveEdgeLimit)this.syncStrokes(endpoints||d.edgePositions(positions));
+        if(layoutChanged)this.cachedDataset=null;
+        this.buildEdgeCache();
+      }
+      this.syncedDataset=d;this.syncedNodes=d.nodeCount;this.syncedEdges=d.edgeCount;this.requestDraw();
+    }
+    syncClassicGeometry(d,positions,layoutChanged,nodesChanged,edgesChanged){
+      const gl=this.gl;
       if(layoutChanged){const sizes=this.smallSession&&root.GraphAppearance?.sizesFor?.(d.records,d.edges);this.nodeSizes=sizes?d.records.map(row=>sizes.get(row.id)||16):null;}
-      if(replace||layoutChanged||this.syncedNodes!==d.nodeCount||this.syncedEdges!==d.edgeCount)this.invalidateViewCache();
-      if(replace||layoutChanged||this.syncedNodes!==d.nodeCount){
+      if(nodesChanged){
         gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.bufferData(gl.ARRAY_BUFFER,positions,gl.STATIC_DRAW);
-        const regroup=replace||layoutChanged||this.syncedNodes>d.nodeCount,first=regroup?0:this.syncedNodes;
+        const regroup=layoutChanged||this.syncedNodes>d.nodeCount,first=regroup?0:this.syncedNodes;
         if(regroup){this.nodeGroups=new Map();this.nodeBounds={minX:Infinity,maxX:-Infinity,minY:Infinity,maxY:-Infinity};}
         // Only new entities are classified in JS. Existing groups are copied
         // with native typed-array operations, never regrouped record by record.
@@ -297,7 +467,7 @@
           if(!group){group={positions:new Float32Array(32),count:0,size,rgb:color,color:Array.from(color,value=>value/255)};this.nodeGroups.set(key,group);}
           if(group.count*2===group.positions.length){const grown=new Float32Array(group.positions.length*2);grown.set(group.positions);group.positions=grown;}
           group.positions[group.count*2]=positions[i*2];group.positions[group.count*2+1]=positions[i*2+1];group.count++;
-          const bounds=this.nodeBounds,x=positions[i*2],y=positions[i*2+1];bounds.minX=Math.min(bounds.minX,x);bounds.maxX=Math.max(bounds.maxX,x);bounds.minY=Math.min(bounds.minY,y);bounds.maxY=Math.max(bounds.maxY,y);
+          includeNodeInBounds(this.nodeBounds,positions[i*2],positions[i*2+1]);
         }
         const groupedPositions=new Float32Array(d.nodeCount*2);this.nodeRanges=[];let offset=0;
         for(const group of this.nodeGroups.values()){group.first=offset;groupedPositions.set(group.positions.subarray(0,group.count*2),offset*2);this.nodeRanges.push({first:offset,count:group.count,color:group.color,size:group.size});offset+=group.count;}
@@ -311,12 +481,22 @@
             const end=(group.first+group.count)*3;
             for(let i=group.first*3;i<end;i+=3)colors.set(group.rgb,i);
           }
-          this.nodeColorBuffer??=gl.createBuffer();
+          this.nodeColorBuffer=this.classicBuffers.colors??=gl.createBuffer();
           gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeColorBuffer);gl.bufferData(gl.ARRAY_BUFFER,colors,gl.STATIC_DRAW);
         }
       }
-      if(replace||layoutChanged||this.syncedEdges!==d.edgeCount){gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.bufferData(gl.ARRAY_BUFFER,d.edgePositions(positions),gl.STATIC_DRAW);if(this.smallSession)this.syncStrokes(positions);if(layoutChanged)this.cachedDataset=null;this.buildEdgeCache();}
-      this.syncedDataset=d;this.syncedNodes=d.nodeCount;this.syncedEdges=d.edgeCount;this.requestDraw();
+      if(edgesChanged){
+        const storage=this.classicBuffers.edges;
+        if(d.edgeCount>curveEdgeLimit){
+          const first=layoutChanged||!storage.capacity?0:this.syncedEdges;
+          this.uploadGrowingBuffer(storage,d.edgeCount,first,16,start=>d.edgePositions(positions,start));
+        }else{
+          storage.capacity=0;
+          const endpoints=d.edgePositions(positions);
+          gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.bufferData(gl.ARRAY_BUFFER,endpoints,gl.STATIC_DRAW);
+          return endpoints;
+        }
+      }
     }
     nodeGroupKey(index){
       const color=nodeRGB(this.displayDataset.records[index]),key=(color[0]<<16)|(color[1]<<8)|color[2];
@@ -324,17 +504,21 @@
     }
     beginNodeDrag(index){
       const dataset=this.displayDataset;if(!Number.isInteger(index)||index<0||index>=dataset.nodeCount)return null;
-      const key=this.nodeGroupKey(index),group=this.nodeGroups?.get(key);if(!group)return null;
+      const geometry=this.activeGeometry;
+      let key,group,slot=0;
       // Resolve the existing GPU slot once per gesture; movement itself touches
       // only one node and its incident edges, never reuploads the whole scene.
-      let slot=0;for(let i=0;i<index;i++)if(this.nodeGroupKey(i)===key)slot++;
+      if(!geometry){
+        key=this.nodeGroupKey(index);group=this.nodeGroups?.get(key);if(!group)return null;
+        for(let i=0;i<index;i++)if(this.nodeGroupKey(i)===key)slot++;
+      }
       const id=dataset.records[index].id,edges=[];
       dataset.edges.forEach((edge,i)=>{if(edge.subject_id===id||edge.object_id===id)edges.push(i);});
-      return {dataset,index,id,key,group,slot,edges,edgeCount:dataset.edgeCount};
+      return {dataset,index,id,key,group,slot,geometry,edges,edgeCount:dataset.edgeCount};
     }
     moveNode(drag,x,y){
       if(this.destroyed||this.lost||!drag||drag.dataset!==this.displayDataset||!Number.isFinite(x)||!Number.isFinite(y))return false;
-      if(this.nodeGroups?.get(drag.key)!==drag.group){
+      if(this.activeGeometry!==drag.geometry||(!this.activeGeometry&&this.nodeGroups?.get(drag.key)!==drag.group)){
         const refreshed=this.beginNodeDrag(drag.dataset.nodeIndex.get(drag.id));if(!refreshed)return false;
         Object.assign(drag,refreshed);
       }
@@ -343,38 +527,76 @@
       drag.edgeCount=d.edgeCount;
       if(this.renderPositions===d.positions)this.renderPositions=d.positions.slice();
       const p=this.renderPositions;
-      p[at]=x;p[at+1]=y;drag.group.positions[drag.slot*2]=x;drag.group.positions[drag.slot*2+1]=y;
+      p[at]=x;p[at+1]=y;
       (this.manualPositions||=new Map()).set(drag.id,[p[at],p[at+1]]);
       gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,at*4,p.subarray(at,at+2));
-      gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,(drag.group.first+drag.slot)*8,p.subarray(at,at+2));
-      const vertices=new Float32Array(4);gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);
+      if(drag.group){
+        drag.group.positions.set(p.subarray(at,at+2),drag.slot*2);
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,(drag.group.first+drag.slot)*8,p.subarray(at,at+2));
+      }
+      for(const cached of this.denseGeometries.keys())if(cached!==d&&cached.nodeIndex.has(drag.id))this.dropDenseGeometry(cached);
+      const vertices=new Float32Array(4),stroke=d.edgeCount<=curveEdgeLimit&&this.strokeBuffer?new Float32Array(36):null;
       for(const i of drag.edges){const edge=d.edges[i],a=d.nodeIndex.get(edge.subject_id)*2,b=d.nodeIndex.get(edge.object_id)*2;
-        vertices.set([p[a],p[a+1],p[b],p[b+1]]);gl.bufferSubData(gl.ARRAY_BUFFER,i*16,vertices);}
-      const bounds=this.nodeBounds;if(bounds){bounds.minX=Math.min(bounds.minX,x);bounds.maxX=Math.max(bounds.maxX,x);bounds.minY=Math.min(bounds.minY,y);bounds.maxY=Math.max(bounds.maxY,y);}
+        vertices.set([p[a],p[a+1],p[b],p[b+1]]);
+        gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,i*16,vertices);
+        if(stroke){writeStroke(stroke,0,...vertices);gl.bindBuffer(gl.ARRAY_BUFFER,this.strokeBuffer);gl.bufferSubData(gl.ARRAY_BUFFER,i*stroke.byteLength,stroke);}
+      }
+      if(this.nodeBounds)includeNodeInBounds(this.nodeBounds,x,y);
       this.invalidateViewCache();this.cachedDataset=null;
-      if(this.smallSession)this.syncStrokes(p);else if(d.edgeCount>4000)this.buildEdgeCache();
+      if(d.edgeCount>curveEdgeLimit)this.buildEdgeCache();
       this.requestDraw();return true;
     }
     flushNodeMove(){const pending=this.pendingNodeMove;this.pendingNodeMove=null;if(pending)this.moveNode(pending.context,pending.x,pending.y);}
-    syncStrokes(positions){
-      // The certified small-session gate bounds this at 400 quads. Large and
-      // unknown sessions retain their existing compact line/cache path.
+    syncStrokes(endpoints){
+      // One quad per visible relation, bounded independently of session size.
       const gl=this.gl;
       if(!this.strokeProgram){
         const compile=(type,source)=>{const shader=gl.createShader(type);gl.shaderSource(shader,source);gl.compileShader(shader);if(!gl.getShaderParameter(shader,gl.COMPILE_STATUS))throw new Error('关系轮廓着色器编译失败');return shader;};
-        const vertex=compile(gl.VERTEX_SHADER,'attribute vec2 a_position;attribute vec2 a_target;attribute vec2 a_corner;uniform vec2 u_center;uniform vec2 u_scale;uniform vec2 u_viewport;uniform float u_width;varying vec2 v_segment;varying float v_length;void main(){vec2 start=(a_position-u_center)*u_scale,end=(a_target-u_center)*u_scale,delta=(end-start)*u_viewport*.5;float span=max(length(delta),.001),padding=u_width*.5+1.;vec2 tangent=delta/span,normal=vec2(-tangent.y,tangent.x);v_segment=vec2(a_corner.x*(span+2.*padding)-padding,a_corner.y*padding);v_length=span;gl_Position=vec4(start+(tangent*v_segment.x+normal*v_segment.y)*2./u_viewport,0.,1.);}');
-        const fragment=compile(gl.FRAGMENT_SHADER,'precision mediump float;uniform vec4 u_color;uniform highp float u_width;varying vec2 v_segment;varying float v_length;void main(){float endDistance=max(max(-v_segment.x,v_segment.x-v_length),0.),distance=length(vec2(endDistance,v_segment.y));float coverage=1.-smoothstep(u_width*.5-.5,u_width*.5+.5,distance);if(coverage<=0.)discard;gl_FragColor=vec4(u_color.rgb,u_color.a*coverage);}');
+        const vertex=compile(gl.VERTEX_SHADER,`
+          attribute vec2 a_position,a_target,a_corner;
+          uniform vec2 u_center,u_scale,u_viewport;
+          uniform float u_width,u_curveness,u_maxBend;
+          varying highp vec2 v_segment;
+          varying highp float v_length,v_bend;
+          void main(){
+            vec2 start=(a_position-u_center)*u_scale,end=(a_target-u_center)*u_scale;
+            vec2 delta=(end-start)*u_viewport*.5;
+            float span=max(length(delta),.001),padding=u_width*.5+1.;
+            vec2 tangent=delta/span,normal=vec2(-tangent.y,tangent.x);
+            v_length=span;
+            v_bend=min(span*u_curveness,u_maxBend);
+            v_segment=vec2(a_corner.x*(span+2.*padding)-padding,
+              a_corner.y*padding+max(0.,a_corner.y)*v_bend*.5);
+            gl_Position=vec4(start+(tangent*v_segment.x+normal*v_segment.y)*2./u_viewport,0.,1.);
+          }`);
+        const fragment=compile(gl.FRAGMENT_SHADER,`
+          precision highp float;
+          uniform vec4 u_color;
+          uniform float u_width;
+          varying vec2 v_segment;
+          varying float v_length,v_bend;
+          void main(){
+            float t=clamp(v_segment.x/v_length,0.,1.);
+            float curve=2.*v_bend*t*(1.-t),slope=2.*v_bend*(1.-2.*t)/v_length;
+            float sideways=v_segment.y-curve;
+            float endDistance=max(max(-v_segment.x,v_segment.x-v_length),0.);
+            float distance=endDistance==0.?abs(sideways)*inversesqrt(1.+slope*slope):length(vec2(endDistance,sideways));
+            float coverage=1.-smoothstep(u_width*.5-.5,u_width*.5+.5,distance);
+            if(coverage<=0.)discard;
+            gl_FragColor=vec4(u_color.rgb,u_color.a*coverage);
+          }`);
         this.strokeProgram=gl.createProgram();gl.attachShader(this.strokeProgram,vertex);gl.attachShader(this.strokeProgram,fragment);gl.linkProgram(this.strokeProgram);gl.deleteShader(vertex);gl.deleteShader(fragment);if(!gl.getProgramParameter(this.strokeProgram,gl.LINK_STATUS))throw new Error('关系轮廓绘制程序创建失败');
-        const p=this.strokeLocations={};for(const name of ['position','target','corner'])p[name]=gl.getAttribLocation(this.strokeProgram,'a_'+name);for(const name of ['center','scale','viewport','width','color'])p[name]=gl.getUniformLocation(this.strokeProgram,'u_'+name);
+        const p=this.strokeLocations={};for(const name of ['position','target','corner'])p[name]=gl.getAttribLocation(this.strokeProgram,'a_'+name);for(const name of ['center','scale','viewport','width','color','curveness','maxBend'])p[name]=gl.getUniformLocation(this.strokeProgram,'u_'+name);
         this.strokeBuffer=gl.createBuffer();
       }
-      const vertices=new Float32Array(this.displayDataset.edgeCount*36),corners=[[0,-1],[1,-1],[0,1],[0,1],[1,-1],[1,1]];
-      this.displayDataset.edges.forEach((edge,i)=>{const a=this.displayDataset.nodeIndex.get(edge.subject_id)*2,b=this.displayDataset.nodeIndex.get(edge.object_id)*2;for(let j=0;j<6;j++)vertices.set([positions[a],positions[a+1],positions[b],positions[b+1],...corners[j]],i*36+j*6);});
+      const vertices=new Float32Array(endpoints.length*9);
+      for(let i=0;i<endpoints.length;i+=4)writeStroke(vertices,i*9,endpoints[i],endpoints[i+1],endpoints[i+2],endpoints[i+3]);
       gl.bindBuffer(gl.ARRAY_BUFFER,this.strokeBuffer);gl.bufferData(gl.ARRAY_BUFFER,vertices,gl.STATIC_DRAW);
     }
     drawStrokes(first,count,selected=false){
       const gl=this.gl,p=this.strokeLocations,min=Math.min(this.width,this.height);gl.useProgram(this.strokeProgram);gl.disableVertexAttribArray(this.locations.position);gl.disableVertexAttribArray(this.pointLocations.position);gl.disableVertexAttribArray(this.cacheLocations.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.strokeBuffer);
       for(const [offset,name] of ['position','target','corner'].entries()){gl.enableVertexAttribArray(p[name]);gl.vertexAttribPointer(p[name],2,gl.FLOAT,false,24,offset*8);}
+      gl.uniform1f(p.curveness,tokens.edgeCurveness);gl.uniform1f(p.maxBend,maxCurveControlOffset*this.dpr);
       gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform2f(p.viewport,this.canvas.width,this.canvas.height);gl.uniform1f(p.width,(selected?tokens.selectedEdgeWidth:tokens.edgeWidth)*this.dpr);gl.uniform4f(p.color,...(selected?theme.selected:theme.edge),selected ? 1 : this.focusNodes ? .1 : tokens.edgeOpacity);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.TRIANGLES,first*6,count*6);
       for(const name of ['position','target','corner'])gl.disableVertexAttribArray(p[name]);
     }
@@ -387,12 +609,27 @@
       // Wide/retina surfaces may exceed 2048 on one axis while fitting the same
       // 16MiB pixel-area budget. Keep their original resolution, within GL limits.
       if(this.displayDataset.nodeCount<5000||!b||this.viewCacheDisabled||typeof this.gl.copyTexImage2D!=='function'||w<1||h<1||w>this.viewMaxSize||h>this.viewMaxSize||w*h*4>16*1024*1024)return false;
-      const unit=this.camera.unit(this.width,this.height),size=Math.min(10,Math.max(2,Math.sqrt(this.camera.scale)*2)),margin=size/2+2;
-      // Relations lie between endpoints. Bounds plus sprite/filter margins
-      // certify complete geometry; a selected ring gets its own O(1) check.
-      const complete=this.width/2+(b.minX-this.camera.x)*unit>=margin&&this.width/2+(b.maxX-this.camera.x)*unit<=this.width-margin&&this.height/2-(b.maxY-this.camera.y)*unit>=margin&&this.height/2-(b.minY-this.camera.y)*unit<=this.height-margin;
-      if(!complete)return false;
-      if(this.selected>=0){const positions=this.renderPositions||this.displayDataset.positions,x=this.width/2+(positions[this.selected*2]-this.camera.x)*unit,y=this.height/2-(positions[this.selected*2+1]-this.camera.y)*unit,ring=(size+8)/2+2;return x>=ring&&x<=this.width-ring&&y>=ring&&y<=this.height-ring;}
+      const size=this.nodeScreenSize(0);
+      const [left,top]=this.camera.worldToScreen(b.minX,b.maxY,this.width,this.height);
+      const [right,bottom]=this.camera.worldToScreen(b.maxX,b.minY,this.width,this.height);
+      const available=Math.min(left,top,this.width-right,this.height-bottom);
+      if(available<size/2+2)return false;
+      const d=this.displayDataset,positions=this.renderPositions||d.positions;
+      if(this.selected>=0){
+        const at=this.selected*2,[x,y]=this.camera.worldToScreen(positions[at],positions[at+1],this.width,this.height),ring=(size+8)/2+2;
+        if(x<ring||x>this.width-ring||y<ring||y>this.height-ring)return false;
+      }
+      // Most views fit with the conservative sag allowance. Near the boundary,
+      // check only the bounded curve layer using its actual quadratic extrema.
+      if(this.showEdges&&d.edgeCount<=curveEdgeLimit&&available<maxCurveControlOffset/2+2){
+        for(const edge of d.edges){
+          const a=d.nodeIndex.get(edge.subject_id)*2,b=d.nodeIndex.get(edge.object_id)*2;
+          const [ax,ay]=this.camera.worldToScreen(positions[a],positions[a+1],this.width,this.height);
+          const [bx,by]=this.camera.worldToScreen(positions[b],positions[b+1],this.width,this.height);
+          const [cx,cy]=curveControlPoint(ax,ay,bx,by);
+          if(!curveFitsAxis(ax,cx,bx,this.width)||!curveFitsAxis(ay,cy,by,this.height))return false;
+        }
+      }
       return true;
     }
     setupViewCache(){
@@ -427,12 +664,14 @@
       // Sparse first batches need readable lines. Rebuild only when density
       // crosses a power-of-two bucket; otherwise append the new line segments.
       const bucket=Math.max(0,Math.floor(Math.log2(Math.max(1,count/400))));
-      const opacity=Math.max(.018,.5/Math.sqrt(2**bucket));
+      const opacity=Math.max(.018,tokens.edgeOpacity/Math.sqrt(2**bucket));
       const bounds=this.nodeBounds,edited=this.manualPositions?.size&&bounds;
       const extent=edited?[Math.max(1.05,Math.abs(bounds.minX)*1.05,Math.abs(bounds.maxX)*1.05),Math.max(1.05,Math.abs(bounds.minY)*1.05,Math.abs(bounds.maxY)*1.05)]:[1.05,1.05];
       const rebuild=this.cachedDataset!==this.displayDataset||this.cacheOpacity!==opacity||this.cachedRelations>count||extent.some((value,i)=>value!==this.cacheExtent?.[i]);
       this.cacheExtent=extent;
       const first=rebuild?0:this.cachedRelations;
+      if(!count){this.cachedDataset=null;this.cachedRelations=0;return;}
+      if(first===count)return;
       gl.bindFramebuffer(gl.FRAMEBUFFER,this.cacheFramebuffer);gl.viewport(0,0,this.cacheSize,this.cacheSize);
       if(rebuild){gl.clearColor(0,0,0,0);gl.clear(gl.COLOR_BUFFER_BIT);}
       gl.useProgram(this.program);if(this.viewLocations)gl.disableVertexAttribArray(this.viewLocations.position);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(this.pointLocations.position);gl.enableVertexAttribArray(l.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.vertexAttribPointer(l.position,2,gl.FLOAT,false,0,0);gl.uniform2f(l.center,0,0);gl.uniform2f(l.scale,1/extent[0],1/extent[1]);gl.uniform1i(l.point,false);gl.uniform4f(l.color,...theme.edge,opacity);
@@ -455,24 +694,22 @@
       if(focus){const id=this.displayDataset.records[active]?.id;for(const edge of this.displayDataset.edges)if(edge.subject_id===id||edge.object_id===id){focus.add(this.displayDataset.nodeIndex.get(edge.subject_id));focus.add(this.displayDataset.nodeIndex.get(edge.object_id));}}
       this.focusIndex=active;this.focusNodes=focus;
       if(this.viewLocations)gl.disableVertexAttribArray(this.viewLocations.position);gl.useProgram(this.program);gl.disableVertexAttribArray(this.pointLocations.position);gl.uniform2f(l.center,this.camera.x,this.camera.y);gl.uniform2f(l.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);
-      if(this.showEdges&&this.smallSession&&this.strokeBuffer){this.drawStrokes(0,this.displayDataset.edgeCount);
+      const showCurves=this.displayDataset.edgeCount>0&&this.displayDataset.edgeCount<=curveEdgeLimit&&this.strokeBuffer;
+      if(this.showEdges&&showCurves){this.drawStrokes(0,this.displayDataset.edgeCount);
         // A certified small scene can reveal one-hop structure without a force
         // animation. The large-session path never scans edges for focus styling.
-        if(active>=0){const id=this.displayDataset.records[active]?.id;
+        if(this.smallSession&&active>=0){const id=this.displayDataset.records[active]?.id;
           this.displayDataset.edges.forEach((edge,i)=>{if(edge.subject_id===id||edge.object_id===id)this.drawStrokes(i,1,true);});}
-      }else if(this.showEdges&&this.displayDataset.edgeCount<=4000){
-        // Small partial graphs get crisp screen-space lines at every zoom.
-        gl.enableVertexAttribArray(l.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.vertexAttribPointer(l.position,2,gl.FLOAT,false,0,0);gl.uniform1i(l.point,false);gl.uniform4f(l.color,...theme.edge,this.cacheOpacity||.5);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.LINES,0,this.displayDataset.edgeCount*2);
       }else if(this.showEdges&&this.displayDataset.edgeCount){const c=this.cacheLocations;gl.useProgram(this.cacheProgram);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(c.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.quadBuffer);gl.vertexAttribPointer(c.position,2,gl.FLOAT,false,0,0);gl.uniform2f(c.center,this.camera.x,this.camera.y);gl.uniform2f(c.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform2f(c.extent,...this.cacheExtent);gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,this.cacheTexture);gl.uniform1i(c.layer,0);gl.blendFunc(gl.ONE,gl.ONE_MINUS_SRC_ALPHA);gl.drawArrays(gl.TRIANGLE_STRIP,0,4);}
       if(this.showEdges&&this.selectedEdge>=0&&this.selectedEdge<this.displayDataset.edgeCount){
-        if(this.smallSession&&this.strokeBuffer)this.drawStrokes(this.selectedEdge,1,true);else{
+        if(showCurves)this.drawStrokes(this.selectedEdge,1,true);else{
         gl.useProgram(this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.enableVertexAttribArray(l.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.edgeBuffer);gl.vertexAttribPointer(l.position,2,gl.FLOAT,false,0,0);gl.uniform1i(l.point,false);gl.uniform4f(l.color,...theme.selected,1);gl.drawArrays(gl.LINES,this.selectedEdge*2,2);
         }
       }
       const size=this.nodeScreenSize(0);
-      const sparse=this.displayDataset.nodeCount<=800,p=sparse?this.pointLocations:l;
-      gl.useProgram(sparse?this.pointProgram:this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(p.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1f(p.size,size*this.dpr+(sparse?2:0));
-      if(sparse){gl.uniform1i(p.ring,false);gl.uniform1f(p.outline,size>=5?this.dpr:0);}else gl.uniform1i(l.point,true);
+      const smoothPoints=size>=5,p=smoothPoints?this.pointLocations:l;
+      gl.useProgram(smoothPoints?this.pointProgram:this.program);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.disableVertexAttribArray(this.cacheLocations.position);gl.disableVertexAttribArray(l.position);gl.enableVertexAttribArray(p.position);gl.bindBuffer(gl.ARRAY_BUFFER,this.groupedNodeBuffer);gl.vertexAttribPointer(p.position,2,gl.FLOAT,false,0,0);gl.uniform2f(p.center,this.camera.x,this.camera.y);gl.uniform2f(p.scale,min/this.width*this.camera.scale,min/this.height*this.camera.scale);gl.uniform1f(p.size,size*this.dpr+(smoothPoints?2:0));
+      if(smoothPoints){gl.uniform1i(p.ring,false);gl.uniform1f(p.outline,tokens.nodeOutlineWidth*this.dpr);}else gl.uniform1i(l.point,true);
       if(this.useNodeColorBuffer){
         gl.bindBuffer(gl.ARRAY_BUFFER,this.nodeColorBuffer);gl.enableVertexAttribArray(p.typeColor);gl.vertexAttribPointer(p.typeColor,3,gl.UNSIGNED_BYTE,true,0,0);
         gl.uniform1i(p.vertexColor,true);gl.uniform4f(p.color,0,0,0,1);gl.drawArrays(gl.POINTS,0,this.displayDataset.nodeCount);
@@ -509,8 +746,15 @@
       const project=index=>this.camera.worldToScreen(positions[index*2],positions[index*2+1],this.width,this.height);
       const radius=index=>this.nodeScreenSize(index)/2;
       ctx.save();ctx.globalAlpha=1;ctx.lineCap='round';
-      if(this.showEdges){ctx.strokeStyle=tokens.edge;ctx.lineWidth=1.5;for(const [a,b] of focus.edgeEndpoints){const start=project(a),end=project(b);ctx.beginPath();ctx.moveTo(...start);ctx.lineTo(...end);ctx.stroke();}}
-      for(const index of focus.nodeIndices){const [x,y]=project(index);ctx.beginPath();ctx.arc(x,y,radius(index),0,Math.PI*2);ctx.fillStyle='rgb('+Array.from(nodeRGB(d.records[index])).join(',')+')';ctx.fill();ctx.strokeStyle=tokens.outline;ctx.lineWidth=1;ctx.stroke();}
+      if(this.showEdges){
+        const selected=d.edges[this.selectedEdge]?.id;
+        for(const [id,[a,b]] of focus.edgeEndpoints){
+          const [ax,ay]=project(a),[bx,by]=project(b),[cx,cy]=curveControlPoint(ax,ay,bx,by);
+          ctx.beginPath();ctx.moveTo(ax,ay);ctx.quadraticCurveTo(cx,cy,bx,by);
+          ctx.strokeStyle=id===selected?tokens.selected:tokens.edge;ctx.lineWidth=id===selected?tokens.selectedEdgeWidth:1.5;ctx.stroke();
+        }
+      }
+      for(const index of focus.nodeIndices){const [x,y]=project(index);ctx.beginPath();ctx.arc(x,y,radius(index),0,Math.PI*2);ctx.fillStyle='rgb('+Array.from(nodeRGB(d.records[index])).join(',')+')';ctx.fill();ctx.strokeStyle=tokens.outline;ctx.lineWidth=tokens.nodeOutlineWidth;ctx.stroke();}
       if(focus.nodeIndices.includes(this.selected)){const [x,y]=project(this.selected);ctx.beginPath();ctx.arc(x,y,radius(this.selected)+4,0,Math.PI*2);ctx.strokeStyle=tokens.selected;ctx.lineWidth=2;ctx.stroke();}
       if(this.showLabels!==false&&this.width>=16&&this.height>=24){
         const occupied=[],order=focus.nodeIndices.includes(this.selected)?[this.selected,...focus.nodeIndices.filter(index=>index!==this.selected)]:focus.nodeIndices;let candidates=0;
@@ -526,7 +770,12 @@
       }
       ctx.restore();
     }
-    nodeScreenSize(index){return this.smallSession?smallNodeSize(this.nodeSizes?.[index]||16,this.camera.scale):Math.min(10,Math.max(this.displayDataset.nodeCount<=800?10:2,Math.sqrt(this.camera.scale)*2));}
+    nodeScreenSize(index){
+      if(this.smallSession)return smallNodeSize(this.nodeSizes?.[index]||16,this.camera.scale);
+      const count=this.displayDataset.nodeCount;
+      if(count<=200)return 14;
+      return Math.min(10,Math.max(count<=800?10:2,Math.sqrt(this.camera.scale)*2));
+    }
     drawSmallLabels(ctx,positions){
       const d=this.displayDataset,occupied=[],centers=d.records.map((_,i)=>this.camera.worldToScreen(positions[i*2],positions[i*2+1],this.width,this.height)),order=d.records.map((_,i)=>i);
       const active=this.hovered>=0?this.hovered:this.selected;
@@ -534,7 +783,7 @@
       const overlaps=(a,b,gap=3)=>a.left<b.right+gap&&a.right+gap>b.left&&a.top<b.bottom+gap&&a.bottom+gap>b.top;
       for(const i of order){
         if(occupied.length>=(d.nodeCount<=20?80:20))break;const [x,y]=centers[i],selected=i===active;if(!selected&&(x<0||x>this.width||y<0||y>this.height))continue;
-        ctx.font=(selected?'600 ':'')+'12px "Microsoft YaHei",sans-serif';
+        ctx.font=(selected?'600 ':'')+(root.GraphAppearance?.labelSize?.(d.nodeCount)||12)+'px "Microsoft YaHei",sans-serif';
         let text=String(d.records[i].text||d.records[i].id).slice(0,45),maxWidth=Math.min(selected?340:142,this.width-12);
         if(ctx.measureText(text).width>maxWidth){while(text.length&&ctx.measureText(text+'…').width>maxWidth)text=text.slice(0,-1);text+='…';}
         const radius=this.nodeScreenSize(i)/2,width=ctx.measureText(text).width,candidates=[[x+radius+5,y-8],[x-width/2,y+radius+5],[x-width/2,y-radius-21],[x-radius-width-5,y-8]];
@@ -562,12 +811,26 @@
       const index=this.nearestNode(x,y);this.selected=index;this.selectedEdge=-1;
       let record=index>=0?d.records[index]:null;
       if(!record&&this.showEdges){
-        let nearest=(edgeHitRadius/unit)**2;
+        const radius=edgeHitRadius/unit;
+        let nearest=radius**2;
+        const curved=d.edgeCount<=curveEdgeLimit,focusEdges=this.explorationFocus?.edgeEndpoints;
+        const liveBend=maxCurveControlOffset/unit;
+        const cachedBend=this.usedViewCache?liveBend*this.camera.scale/this.viewSnapshot.scale:liveBend;
         for(let i=0;i<d.edgeCount;i++){
           const edge=d.edges[i],a=d.nodeIndex.get(edge.subject_id)*2,b=d.nodeIndex.get(edge.object_id)*2;
           const ax=positions[a],ay=positions[a+1],dx=positions[b]-ax,dy=positions[b+1]-ay,length=dx*dx+dy*dy;
-          const t=length?Math.max(0,Math.min(1,((wx-ax)*dx+(wy-ay)*dy)/length)):0;
-          const dist=(wx-ax-t*dx)**2+(wy-ay-t*dy)**2;
+          const x=wx-ax,y=wy-ay;
+          let dist;
+          const focused=focusEdges?.has(edge.id);
+          if(length&&(curved||focused)){
+            // Outside the chord's bounds plus the maximum sag, a click cannot reach the curve.
+            const maxOffset=focused?liveBend:cachedBend,margin=radius+maxOffset/2;
+            if(x<Math.min(0,dx)-margin||x>Math.max(0,dx)+margin||y<Math.min(0,dy)-margin||y>Math.max(0,dy)+margin)continue;
+            dist=curveDistanceSquared(x,y,dx,dy,length,maxOffset);
+          }else{
+            const t=length?Math.max(0,Math.min(1,(x*dx+y*dy)/length)):0;
+            dist=(x-t*dx)**2+(y-t*dy)**2;
+          }
           if(dist<nearest){nearest=dist;record=edge;this.selectedEdge=i;}
         }
       }
@@ -589,7 +852,18 @@
       this.requestDraw();return true;
     }
     stats(){return {loaded_entities:this.dataset.nodeCount,loaded_relations:this.dataset.edgeCount,drawn_entities:this.drawnNodes||0,drawn_relations:this.drawnEdges||0,relation_layer:'complete-world-cache',cached_relations:this.cachedRelations||0,node_layer:this.usedViewCache?'complete-view-cache':'live-color-groups',cached_entities:this.viewSnapshot?.nodes||0,view_cache_error:this.viewCacheError||0,layout:this.smallSession?'small-relations-v1':'stable-id-v1',canonical_layout:'stable-id-v1',last_pick_ms:this.lastPickMs||0,gpu:this.gl.getParameter(this.gl.RENDERER),context_lost:!!this.lost};}
-    destroy(){if(this.destroyed)return;this.destroyed=true;this.hoverPreview?.clear();this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);if(!this.lost){this.gl.deleteBuffer(this.nodeBuffer);this.gl.deleteBuffer(this.groupedNodeBuffer);if(this.nodeColorBuffer)this.gl.deleteBuffer(this.nodeColorBuffer);this.gl.deleteBuffer(this.edgeBuffer);if(this.strokeBuffer)this.gl.deleteBuffer(this.strokeBuffer);if(this.strokeProgram)this.gl.deleteProgram(this.strokeProgram);this.gl.deleteBuffer(this.quadBuffer);this.gl.deleteTexture(this.cacheTexture);if(this.viewTexture)this.gl.deleteTexture(this.viewTexture);this.gl.deleteFramebuffer(this.cacheFramebuffer);this.gl.deleteProgram(this.cacheProgram);if(this.viewProgram)this.gl.deleteProgram(this.viewProgram);this.gl.deleteProgram(this.pointProgram);this.gl.deleteProgram(this.program);}this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();}
+    destroy(){
+      if(this.destroyed)return;this.destroyed=true;this.hoverPreview?.clear();this.setExplorationFocus(null);this.abort.abort();this.observer.disconnect();cancelAnimationFrame(this.pendingFrame);
+      for(const dataset of this.denseGeometries?.keys()||[])this.dropDenseGeometry(dataset);
+      if(!this.lost){
+        const gl=this.gl,classic=this.classicBuffers;
+        for(const buffer of [classic.nodes,classic.grouped,classic.edges.buffer,classic.colors,this.strokeBuffer,this.quadBuffer])if(buffer)gl.deleteBuffer(buffer);
+        for(const program of [this.strokeProgram,this.cacheProgram,this.viewProgram,this.pointProgram,this.program])if(program)gl.deleteProgram(program);
+        gl.deleteTexture(this.cacheTexture);if(this.viewTexture)gl.deleteTexture(this.viewTexture);gl.deleteFramebuffer(this.cacheFramebuffer);
+      }
+      this.host.innerHTML='';this.dataset=new GraphDataset();this.typeProjection=null;this.typeFilter=null;this.recentProjections?.clear();
+      this.activeGeometry=null;this.nodeGroups=null;this.nodeRanges=[];this.invalidateViewCache();
+    }
   }
   async function request(url,body,signal){
     const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal});
@@ -682,7 +956,7 @@
       const id=this.layoutSequence=(this.layoutSequence||0)+1;
       return new Promise((resolve,reject)=>{
         let worker;
-        try{if(!this.worker)this.worker=new Worker('/assets/full-graph-worker.js?v=redesign-1');worker=this.worker;}catch(error){reject(error);return;}
+        try{if(!this.worker)this.worker=new Worker('/assets/full-graph-worker.js?v=workspace-layout-20261124-3');worker=this.worker;}catch(error){reject(error);return;}
         const cleanup=()=>{signal.removeEventListener('abort',abort);for(const [type,listener] of [['message',receive],['error',failure],['messageerror',failure]])worker.removeEventListener(type,listener);};
         const fail=error=>{cleanup();worker.terminate();if(this.worker===worker)this.worker=null;reject(error);};
         const abort=()=>fail(new DOMException('加载已取消','AbortError'));

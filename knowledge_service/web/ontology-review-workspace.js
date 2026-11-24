@@ -14,6 +14,39 @@
     const ontology=draft.ontology?.summary||draft.ontology||{};
     return ['classes','relations','attributes'].flatMap((key,i)=>(ontology[key]||[]).map(term=>({...term,reviewKind:['实体类型','关系类型','属性'][i]})));
   }
+  function knowledgeRules(draft,el,onOpenKnowledge){
+    const bindings=draft?.source_context?.intake_bindings||[];
+    const effects=draft?.source_context?.publication_effects?.summary;
+    const bound=bindings.length&&bindings.every(row=>Array.isArray(row.selected_candidate_ids))
+      ?new Set(bindings.flatMap(row=>row.selected_candidate_ids)).size:null;
+    const selected=draft?.associated_knowledge?.selected??effects?.candidate_count??bound;
+    if(selected===0||(selected==null&&!bindings.length&&!effects))return null;
+    const rules=el('details','om-knowledge-rules');
+    rules.append(el('summary',null,selected==null?'关联知识如何处理':`${selected} 条关联候选 · 查看处理规则`));
+    const content=el('div','om-knowledge-rules-content'),list=el('dl');
+    for(const [label,description] of [
+      ['同名实体','复用类型只确定归类。同名实体会按各类型的身份规则核对，发布时不会仅凭名称合并。'],
+      ['相同事实','关系按类型和两端实体比对，属性还会核对值与数据类型。适用范围和有效期一致时，可复用事实并保留来源。'],
+      ['范围或值不同','适用范围或期间不同的事实可分别保留。同一范围、期间重叠的单值属性出现不同值时，需要核对冲突。'],
+      ['失效与未知日期','到达登记的失效时间后，知识保留为历史参考。日期不明或来源有疑问时，有效性待核对。'],
+    ])list.append(el('dt',null,label),el('dd',null,description));
+    content.append(list,el('p',null,'发布时按最终获批的定义校验关联知识。实际新增、复用和跳过数量以发布回执为准。'));
+    const batches=draft?.associated_knowledge?.per_batch||[];
+    if(batches.length){
+      const scope=el('ul','om-knowledge-batches');
+      for(const [index,batch] of batches.entries()){
+        scope.append(el('li',null,Number.isInteger(batch.selected)
+          ?`纳入批次 ${index+1} · 明确选中 ${batch.selected} 条`
+          :`纳入批次 ${index+1} · 选中条数待核对`));
+      }
+      content.append(scope);
+    }
+    if(onOpenKnowledge){
+      const open=el('button','om-btn','查看关联知识');
+      open.type='button';open.addEventListener('click',onOpenKnowledge);content.append(open);
+    }
+    rules.append(content);return rules;
+  }
   function groupDefinitions(draft,plan){
     const catalog=new Map(terms(draft).map(term=>[term.id,term])),groups=new Map();
     for(const item of plan.items||[]){
@@ -22,6 +55,7 @@
         const term=catalog.get(iri)||{},creation=(draft.operations||[]).find(op=>op.target_iri===iri&&op.action==='create_term');
         const kind=creation?.after?.kind;
         groups.set(iri,{iri,label:term.label_zh||term.label||term.name||creation?.after?.label||localName(iri),
+          identity:term.identity_policy,
           kind:term.reviewKind||({class:'实体类型',object_property:'关系类型',datatype_property:'属性'}[kind])||'定义',items:[]});
       }
       groups.get(iri).items.push(item);
@@ -137,14 +171,16 @@
     return {state,load,select,setFilter,navigate,visible,decide,bulkApprove,close(){closed=true;++epoch;}};
   }
 
-  function open({host,getContext,request,onSaved}){
+  function open({host,getContext,request,onSaved,onOpenKnowledge}){
     const doc=host.ownerDocument,el=(tag,cls,text)=>{const node=doc.createElement(tag);if(cls)node.className=cls;if(text!=null)node.textContent=text;return node;};
     const dialog=el('dialog','om-definition-review');dialog.setAttribute('aria-labelledby','om-definition-review-title');
     const header=el('header','odr-header'),titleBox=el('div'),title=el('h2',null,'按定义审核');title.id='om-definition-review-title';
-    titleBox.append(el('small',null,'草案审核'),title);
+    titleBox.append(title);
     const button=(text,handler,cls='om-btn')=>{const node=el('button',cls,text);node.type='button';node.addEventListener('click',handler);return node;};
     const close=button('关闭',()=>dialog.close());header.append(titleBox,close);
-    const summary=el('p','odr-summary'),toolbar=el('div','odr-toolbar'),filter=el('select');filter.setAttribute('aria-label','审核范围');
+    const summary=el('div','odr-summary'),summaryText=el('span'),progress=el('progress');
+    progress.setAttribute('aria-label','变更审核进度');summary.append(summaryText,progress);
+    const knowledge=el('div','odr-knowledge'),toolbar=el('div','odr-toolbar'),filter=el('select');filter.setAttribute('aria-label','审核范围');
     for(const [value,text] of [['pending','待审核定义'],['exceptions','需重点核对'],['completed','已完成定义'],['all','全部定义']]){
       const option=el('option',null,text);option.value=value;filter.append(option);
     }
@@ -153,13 +189,13 @@
     list.setAttribute('aria-label','定义列表');detail.tabIndex=0;
     const previous=button('上一项',()=>controller.navigate(-1)),following=button('下一项',()=>controller.navigate(1));
     const retry=button('重新读取',()=>{void controller.load();}),bulk=button('批量批准',()=>{void execute(()=>controller.bulkApprove());});
-    toolbar.append(filter,bulk,retry);body.append(list,detail);dialog.append(header,summary,toolbar,feedback,body,footer);
-    let reasonValue='',acknowledged=new Set(),shownIri=null,shownRevision=null;
+    toolbar.append(filter,bulk,retry);body.append(list,detail);dialog.append(header,summary,knowledge,toolbar,feedback,body,footer);
+    let reasonValue='',acknowledged=new Set(),shownIri=null,shownRevision=null,rulesDraft;
     const reason=el('textarea');reason.rows=2;reason.placeholder='说明批准或不批准的原因';reason.setAttribute('aria-label','处理理由');
     reason.addEventListener('input',()=>{reasonValue=reason.value;});
     async function execute(task){try{await task();}catch(error){feedback.textContent=controller.state.uncertain
       ?controller.state.error+' 请先重新读取审核结果。':error.message||String(error);}}
-    const approve=button('批准此定义',()=>{void execute(()=>controller.decide('approve',{reason:reasonValue,acknowledged:[...acknowledged]}));},'om-btn primary');
+    const approve=button('批准此定义',()=>{void execute(()=>controller.decide('approve',{reason:reasonValue,acknowledged:[...acknowledged]}));});
     const approveNext=button('批准并下一项',()=>{void execute(()=>controller.decide('approve',{reason:reasonValue,acknowledged:[...acknowledged],next:true}));},'om-btn primary');
     const reject=button('不批准此定义',()=>{void execute(()=>controller.decide('reject',{reason:reasonValue,acknowledged:[...acknowledged]}));});
     const rejectNext=button('不批准并下一项',()=>{void execute(()=>controller.decide('reject',{reason:reasonValue,acknowledged:[...acknowledged],next:true}));});
@@ -179,6 +215,13 @@
       affected_records:'受影响记录',affected_assertions:'受影响断言',dependencies:'依赖',dependency_count:'依赖数量',record_count:'记录数量',assertion_count:'断言数量',count:'数量',descendants:'子类',references:'引用',entity_count:'实体数量',relation_count:'关系数量',attribute_count:'属性数量'};
     function render(state){
       const locked=state.busy||state.loading||state.uncertain,groups=controller.visible(),active=state.groups.find(g=>g.iri===state.activeIri);
+      const draft=state.draft?.status==='pending'&&!state.sentBack?state.draft:null;
+      if(draft!==rulesDraft){
+        rulesDraft=draft;
+        const rules=knowledgeRules(draft,el,onOpenKnowledge?()=>{dialog.close();onOpenKnowledge();}:null);
+        if(rules)rules.open=knowledge.firstElementChild?.open||false;
+        knowledge.replaceChildren(...(rules?[rules]:[]));
+      }
       if(state.sentBack){
         // 退回后本轮校验已作废，草案回到可编辑态：这里只给明确出口，不再渲染审核项。
         dialog.setAttribute('aria-busy','false');
@@ -194,9 +237,10 @@
       const pending=state.groups.filter(g=>g.pending.length).length,total=state.plan?.items.length||0,done=state.plan?.items.filter(finalDecision).length||0;
       const eligible=state.plan?.items.filter(i=>!i.decision&&i.auto_approvable===true).length||0;
       dialog.setAttribute('aria-busy',String(state.busy||state.loading));
-      summary.textContent=state.draft?`${state.groups.length} 个定义 · ${total} 项变更；${pending} 个定义待审核，${done}/${total} 项变更已决定。审核保存后仍需发布草案。`:'正在读取草案与审核条件…';
+      summaryText.textContent=state.draft?`${state.groups.length} 个定义 · ${pending} 个待审核 · ${total} 项变更，已处理 ${done} 项`:'';
+      progress.max=total||1;progress.value=done;progress.hidden=!state.draft;
       const gateReason=state.stage?.stages?.review?.allowed===false?state.stage.stages.review.reason||'当前审核条件未满足，请返回草案处理后重新读取。':'';
-      feedback.textContent=state.busy?'正在保存审核决定，请稍候…':state.loading?'正在读取最新审核结果…':state.error||gateReason||'按一个类型、关系或属性集中核对；批量批准只处理服务端判定符合条件的变更。';
+      feedback.textContent=state.busy?'正在保存审核决定…':state.loading?'正在读取审核结果…':state.error||gateReason||'';
       feedback.classList.toggle('is-error',!!state.error);filter.value=state.filter;filter.disabled=state.busy||state.loading;
       bulk.textContent=`批量批准（${eligible} 项变更）`;bulk.disabled=locked||!eligible||state.stage?.stages?.review?.allowed!==true;
       retry.disabled=state.busy||state.loading;list.replaceChildren();
@@ -213,7 +257,12 @@
       if(shownIri!==state.activeIri||shownRevision!==state.draft?.revision){reasonValue='';acknowledged=new Set();shownIri=state.activeIri;shownRevision=state.draft?.revision;}
       detail.replaceChildren();
       if(!active){detail.append(el('div','odr-empty',state.loading?'正在加载定义…':state.error?'读取失败，点击「重新读取」重试。':'当前范围没有待处理的定义，可切换范围查看已完成内容。'));return;}
-      detail.append(el('small','odr-kicker',active.kind),el('h3',null,active.label),el('p','odr-description',`此定义共有 ${active.items.length} 项变更，${active.pending.length} 项待决定；一次审核会处理本定义全部待决定的变更。`));
+      detail.append(el('small','odr-kicker',active.kind),el('h3',null,active.label),el('p','odr-description',`本次审核 · ${active.pending.length} / ${active.items.length} 项变更待处理`));
+      if(active.identity?.mode){
+        const identity=active.identity,mode=identity.mode==='reference'?'可跨业务期间核对同一实体':'按范围和有效期区分';
+        const keys=identity.keys?.length?` · 身份键 ${identity.keys.join('、')}`:' · 未配置身份键';
+        detail.append(el('p','odr-identity',`实体身份规则 · ${identity.declared?'已声明':'默认'}${mode}${keys}`));
+      }
       const reasonLabels={medium_risk:'中风险变更：请核对定义与适用范围',high_risk:'高风险变更：需要理由与人工确认',
         irreversible_action:'涉及停用等影响较大的操作',rebase_conflict:'与当前基线冲突，请先处理冲突',blocking_error:'校验未通过，请先修正相关问题',
         operation_warning:'此操作有警告，请确认影响',draft_warning_requires_acknowledgement:'草案有警告，需要逐项确认并填写理由',requires_review:'需要人工核对'};
@@ -248,7 +297,15 @@
         change.append(el('h4',null,actions[item.action]||item.action),el('span','odr-change-state',finalDecision(item)?item.decision.action==='approve'?'已批准':'已不批准':item.approvable?'待审核':'校验阻断'));
         for(const error of item.errors||[])change.append(el('p','odr-error',error.message||error.code));
         if(item.risk==='high')change.append(el('p','odr-error','高风险变更：请核对影响并填写理由。'));
-        if(operation){const pair=el('dl','odr-values');for(const [key,label] of [['before','修改前'],['after','修改后']])pair.append(el('dt',null,label),el('dd',null,display(operation[key],state.draft)));change.append(pair);}
+        if(operation){
+          const pair=el('dl','odr-values');
+          for(const [key,label] of [['before','修改前'],['after','修改后']]){
+            if(operation[key]==null)continue;
+            const cell=el('div','odr-value-'+key);
+            cell.append(el('dt',null,label),el('dd',null,display(operation[key],state.draft)));pair.append(cell);
+          }
+          change.append(pair);
+        }
         const evidence=operation?.evidence;
         for(const reference of (Array.isArray(evidence)?evidence:evidence?[evidence]:[])){
           const text=typeof reference==='string'?'证据引用：'+reference:reference.quote||reference.text||reference.title||reference.document_id||reference.assertion_id;
@@ -277,5 +334,5 @@
     dialog.addEventListener('close',()=>{controller.close();dialog.remove();},{once:true});
     host.append(dialog);dialog.showModal();void controller.load();return {dialog,controller};
   }
-  return {groupDefinitions,createController,open};
+  return {groupDefinitions,createController,knowledgeRules,open};
 });

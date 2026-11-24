@@ -46,7 +46,12 @@
 
 /* 工具条：画布底部常驻，白纸浮卡 + 青灰描边；左统计、中提示、右动作。 */
 #tab-ontology-model.ontology-model .om-canvas-bar{position:absolute;left:0;right:0;bottom:0;z-index:6;display:flex;flex-wrap:wrap;align-items:center;gap:5px;padding:8px 12px;border-top:1px solid #e8eee8;background:rgba(255,255,255,.97)}
-#tab-ontology-model.ontology-model .om-canvas-help{position:absolute;left:12px;right:78px;top:12px;z-index:3;color:#3d5e5e;font-size:11px;line-height:1.5;pointer-events:none}
+#tab-ontology-model.ontology-model .om-canvas-zoom{position:absolute;left:12px;top:12px;z-index:5;display:flex;background:#fff;border:1px solid #c2d6d5;border-radius:7px;overflow:hidden}
+#tab-ontology-model.ontology-model .om-canvas-zoom button{width:36px;height:34px;margin:0;padding:0;border:0;border-radius:0;background:transparent;color:#185f55;font:600 18px/1 Arial,sans-serif;cursor:pointer}
+#tab-ontology-model.ontology-model .om-canvas-zoom button+button{border-left:1px solid #d5e4e4}
+#tab-ontology-model.ontology-model .om-canvas-zoom button:hover{background:#e7f2f1}
+#tab-ontology-model.ontology-model .om-canvas-zoom button:focus-visible{outline-offset:-2px}
+#tab-ontology-model.ontology-model .om-canvas-hint:empty{display:none}
 #tab-ontology-model.ontology-model .om-canvas-stats{color:#86978a;font-size:10px;line-height:1.6;flex:1 0 100%}
 #tab-ontology-model.ontology-model .om-canvas-hint{color:#2a776b;font-size:11.5px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
 /* 工具条按钮：白底青灰描边的 ghost 工具钮，hover 浅青。 */

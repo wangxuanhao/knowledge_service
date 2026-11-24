@@ -64,12 +64,14 @@ class AssertionStore:
             self.repo.get_project(project_id)
             return self._create(project_id, item)
 
-    def _create(self, project_id, item, *, recorded_at=None):
+    def _create(self, project_id, item, *, recorded_at=None, initial_acceptance=None):
         item = self._validate_assertion(item)
         old = self._db.execute(
             'SELECT * FROM assertions WHERE id=?', (item['id'],)
         ).fetchone()
         if old is not None:
+            if initial_acceptance is not None:
+                raise ValueError('版本冲突：断言已存在')
             existing = self._assertion(old)
             comparable = {
                 key: existing.get(key) for key in (
@@ -81,11 +83,25 @@ class AssertionStore:
                 return existing
             raise ValueError('断言出现 ID 冲突')
         now = recorded_at or utc_now()
+        status, version, canonical_id = 'pending', 1, None
+        reason, actor, decided_at = 'created', item['actor'], None
+        if initial_acceptance is not None:
+            canonical_id, reason, actor = initial_acceptance
+            if not isinstance(canonical_id, str) or not canonical_id:
+                raise ValueError('接受的断言必须关联规范记录')
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError('缺少断言决策原因')
+            if not isinstance(actor, str) or not actor.strip():
+                raise ValueError('缺少断言操作者')
+            # Keep the accepted CAS token compatible with existing formal writes.
+            status, version = 'accepted', 2
+            reason, actor, decided_at = reason.strip(), actor.strip(), now
         values = (
             item['id'], project_id, item['kind'], item.get('document_id'),
             item.get('document_version_id'), item.get('chunk_id'), item.get('source_hash'),
             item.get('start_char'), item.get('end_char'), item.get('quote'),
-            _json(item['payload']), 'pending', None, None, 1, now, None, item['actor'])
+            _json(item['payload']), status, canonical_id, reason if decided_at else None,
+            version, now, decided_at, actor)
         self._db.execute(
             '''INSERT INTO assertions
                (id,project_id,kind,document_id,document_version_id,chunk_id,source_hash,
@@ -96,8 +112,8 @@ class AssertionStore:
             '''INSERT INTO assertion_events
                (id,assertion_id,project_id,from_status,to_status,decision_version,reason,
                 actor,canonical_record_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)''',
-            (str(uuid4()), item['id'], project_id, None, 'pending', 1, 'created',
-             item['actor'], None, now))
+            (str(uuid4()), item['id'], project_id, None, status, version, reason,
+             actor, canonical_id, now))
         return self._assertion(self._db.execute(
             'SELECT * FROM assertions WHERE id=?', (item['id'],)).fetchone())
 

@@ -37,7 +37,7 @@ body main #scope>#cb-details .scope-choice>summary{margin:0;padding:8px 10px;gap
 #scope .scope-choice-options{max-height:170px;padding:4px;overflow-y:auto;border-top:1px solid var(--ks-line)}
 #scope .scope-choice-options label{display:flex;align-items:center;gap:8px;padding:6px;border-radius:4px;cursor:pointer;overflow-wrap:anywhere}
 #scope .scope-choice-options label:hover{background:var(--ui-surface-2)}
-#scope .scope-choice-options input{flex:none;width:14px;height:14px;margin:0;accent-color:var(--ui-accent)}
+#scope .scope-choice-options input{flex:none;width:14px;height:14px;padding:0;margin:0;accent-color:var(--ui-accent)}
 #scope .scope-choice-options small{display:block;padding:6px;color:var(--ui-ink-2)}
 .project-card[hidden]{display:none}
 @media(max-width:700px){

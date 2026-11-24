@@ -254,6 +254,21 @@ def check(width=1600, inheritance_only=False, relations_only=False, link_only=Fa
           OntologyModel.select('urn:thing');OntologyModel.select(null);
           OntologyModel.sendCommand=async command=>{if(failWrite)throw Error('模拟提交失败');writes.push(command);};
         }''')
+        page.evaluate("OntologyModel.setInspector(false)")
+        directory = page.get_by_role('button', name='术语目录', exact=True)
+        if width <= 650:
+            assert directory.get_attribute('aria-expanded') == 'false'
+            assert not page.get_by_role('searchbox', name='搜索本体术语').is_visible()
+            directory.click()
+            assert page.get_by_role('searchbox', name='搜索本体术语').is_visible()
+            directory.click()
+            assert directory.get_attribute('aria-expanded') == 'false'
+        page.get_by_role('button', name='适应画布', exact=True).click()
+        initial_zoom = page.evaluate('OntologyCanvas.__cy().zoom()')
+        page.get_by_role('button', name='放大画布', exact=True).click()
+        assert page.evaluate('OntologyCanvas.__cy().zoom()') > initial_zoom
+        page.get_by_role('button', name='缩小画布', exact=True).click()
+        assert abs(page.evaluate('OntologyCanvas.__cy().zoom()') - initial_zoom) < .001
         if inheritance_only:
             result = check_inheritance(page, width)
             assert not errors, errors
@@ -270,6 +285,8 @@ def check(width=1600, inheritance_only=False, relations_only=False, link_only=Fa
             browser.close()
             return result
         if attributes_only:
+            if width <= 650:
+                directory.click()
             result = check_attributes(page, width)
             assert not errors, errors
             browser.close()

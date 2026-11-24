@@ -293,3 +293,54 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     expect(questions.get_by_text(first['quote'], exact=True)).to_be_visible()
     assert requests[-1]['mode'] == 'semantic' and 'level' not in requests[-1]
     assert not errors
+
+
+@pytest.mark.parametrize('width', [1440, 390])
+def test_missing_community_index_uses_one_compact_action(redesign_page, width):
+    expect = pytest.importorskip('playwright.sync_api').expect
+    page, errors = redesign_page
+    page.set_viewport_size({'width': width, 'height': 850})
+    status = {'state': 'disabled', 'browseable': False}
+
+    def community_list(route):
+        route.fulfill(json={'status': status, 'communities': [], 'total': 0})
+
+    page.route('**/api/projects/p/communities', community_list)
+    page.route('**/api/projects/p/communities/status', lambda route: route.fulfill(json=status))
+    search = page.locator('#graph-workspace-header')
+    community_tab = search.get_by_role('button', name='社区', exact=True)
+    search.locator('#query').fill('商品')
+    community_tab.click()
+    community = page.locator('#community-browser')
+    state = community.locator('.community-browse-state')
+    build = state.get_by_role('button', name='前往社区索引', exact=True)
+    ask = community.get_by_role('button', name='社区问答', exact=True)
+    expect(state.get_by_role('status')).to_have_text('当前范围尚未构建社区索引')
+    expect(state.locator('.workspace-icon')).to_be_visible()
+    expect(build).to_be_visible()
+    expect(ask).to_be_hidden()
+    expect(community.locator('.community-browse-controls')).to_be_hidden()
+    expect(community.get_by_role('button')).to_have_count(1)
+    assert state.bounding_box()['height'] < 65
+    assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+
+    output = Path('.benchmarks/community-workspace')
+    output.mkdir(parents=True, exist_ok=True)
+    page.screenshot(path=str(output / f'empty-compact-{width}.png'),
+                    style='.ks-notice { visibility: hidden; }')
+    build.click()
+    expect(page.locator('#tab-community-index')).to_be_visible()
+    expect(page.locator('#community-build-kind')).to_have_value('project')
+    expect(page.locator('#community-build')).to_be_visible()
+
+    page.evaluate("() => { Auth.isAdmin = () => false; KnowledgeTabs.open('search'); }")
+    expect(state.get_by_role('status')).to_have_text('当前范围尚未构建社区索引')
+    expect(community.get_by_role('button')).to_have_count(0)
+
+    status.update(state='ready', browseable=True, counts={'communities': 1, 'reports_ready': 1})
+    search.get_by_role('button', name='检索', exact=True).click()
+    expect(build).to_be_hidden()
+    expect(ask).to_be_visible()
+    ask.click()
+    expect(page.locator('#community-questions')).to_be_visible()
+    assert not errors

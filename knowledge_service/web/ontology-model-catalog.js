@@ -111,26 +111,22 @@
       title.setAttribute('aria-pressed',String(state.selected===entry.id));
       const heading=el('h3','om-type-heading');heading.append(title);
       const meta=el('div','om-type-card-meta'),change=changes.get(entry.id);
-      meta.append(el('small','om-type-kind',`${{class:'实体类型',relation:'关系类型',attribute:'属性'}[entry.kind]}${entry.active===false?' · 已停用':''}`),
-        el('span','om-type-state',state.preview?'历史只读':change?(change.created?'本轮新增':'本轮调整'):state.showingDraft?'草案视图':'已发布'));
+      meta.append(el('small','om-type-kind',`${{class:'实体类型',relation:'关系类型',attribute:'属性'}[entry.kind]}${entry.active===false?' · 已停用':''}`));
+      if(change && !state.preview)meta.append(el('span','om-type-state',change.created?'本轮新增':'本轮调整'));
       card.append(meta,heading);
       if(entry.description){const description=el('p','om-type-description',entry.description);description.title=entry.description;card.append(description);}
       if(entry.kind==='class'){
         const parents=el('div','om-type-members om-type-parents');
-        parents.append(el('small','om-type-section-label','上级类型'));
-        if(!model.parents.length)parents.append(el('span','om-type-empty','无（顶层类型）'));
+        if(model.parents.length)parents.append(el('small','om-type-section-label','上级类型'));
         for(const id of model.parents)parents.append(button(label(summaryIndex(state.summary).byId.get(id)||{id}),()=>ctx.select(id),'om-type-link'));
-        card.append(parents);
+        if(model.parents.length)card.append(parents);
       }else{
         const endpoints=el('div','om-type-members');
         endpoints.append(el('small','om-type-section-label',entry.kind==='relation'?'主体类型 → 客体类型':'适用类型 / 值类型'),el('p','om-type-endpoints',model.endpointText));
         card.append(endpoints);
       }
-      const footer=el('div','om-type-card-footer');
-      const actions=el('div','om-type-card-actions');
-      if(entry.kind==='class')actions.append(el('small','om-type-counts',`属性 ${model.attributes.length}${model.inheritedAttributes.length?` · 继承 ${model.inheritedAttributes.length}`:''} · 关系 ${model.relations.length}`));
-      actions.append(button('查看定义 →',()=>ctx.select(entry.id)));
-      footer.append(actions);card.append(footer);cards.append(card);
+      if(entry.kind==='class')card.append(el('small','om-type-counts',`属性 ${model.attributes.length}${model.inheritedAttributes.length?` · 继承 ${model.inheritedAttributes.length}`:''} · 关系 ${model.relations.length}`));
+      cards.append(card);
     }
     if(!entries.length){list.append(el('p','om-catalog-empty',state.loading?'正在读取本体与草案…':'没有匹配的术语。'));if(state.view==='cards')cards.append(el('p','om-catalog-empty',state.loading?'正在读取本体…':'没有匹配的术语，可调整搜索或插入新术语。'));}
   }

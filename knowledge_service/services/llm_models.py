@@ -110,31 +110,25 @@ class LLMModels:
         self.store = LLMModelStore(repository)
 
     def _fernet(self):
+        def resolve_key(marker, has_unmarked_ciphertext):
+            if has_unmarked_ciphertext:
+                raise LLMKeyError(_KEY_ERROR)
+            explicit = (os.getenv('KG_LLM_ENCRYPTION_KEY') or '').strip()
+            if explicit:
+                key = explicit.encode('ascii')
+            else:
+                default = Path(__file__).resolve().parents[2] / 'data/runtime/llm.key'
+                path = Path(os.getenv('KG_LLM_KEY_FILE') or default)
+                key = _local_key(path, allow_create=not marker)
+            cipher = Fernet(key)
+            if not marker:
+                return cipher, cipher.encrypt(_KEY_MARKER).decode()
+            if cipher.decrypt(marker.encode()) != _KEY_MARKER:
+                raise LLMKeyError(_KEY_ERROR)
+            return cipher, None
+
         try:
-            # Row lock serializes first-use initialization across app instances.
-            with self.repository._transaction():
-                row = self.repository._db.execute(
-                    'SELECT key_check FROM llm_model_settings FOR UPDATE').fetchone()
-                marker = row['key_check']
-                if not marker and self.repository._db.execute(
-                        '''SELECT EXISTS(SELECT 1 FROM llm_models)
-                            OR EXISTS(SELECT 1 FROM llm_task_snapshots)''').fetchone()[0]:
-                    raise LLMKeyError(_KEY_ERROR)
-                explicit = (os.getenv('KG_LLM_ENCRYPTION_KEY') or '').strip()
-                if explicit:
-                    key = explicit.encode('ascii')
-                else:
-                    default = Path(__file__).resolve().parents[2] / 'data/runtime/llm.key'
-                    path = Path(os.getenv('KG_LLM_KEY_FILE') or default)
-                    key = _local_key(path, allow_create=not marker)
-                cipher = Fernet(key)
-                if marker:
-                    if cipher.decrypt(marker.encode()) != _KEY_MARKER:
-                        raise LLMKeyError(_KEY_ERROR)
-                else:
-                    self.repository._db.execute('UPDATE llm_model_settings SET key_check=?',
-                        (cipher.encrypt(_KEY_MARKER).decode(),))
-                return cipher
+            return self.store.ensure_key_marker(resolve_key)
         except (OSError, ValueError, InvalidToken, UnicodeError):
             raise LLMKeyError(_KEY_ERROR) from None
 

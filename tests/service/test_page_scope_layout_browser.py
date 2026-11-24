@@ -5,6 +5,43 @@ import pytest
 from test_workspace_redesign_ui import redesign_page  # noqa: F401
 
 
+@pytest.mark.parametrize('width', [1440, 320])
+def test_scope_choice_checkboxes_align_with_their_labels_and_apply(redesign_page, width):
+    page, errors = redesign_page
+    choices = {
+        'platforms': ['京东', '小红书', '抖音电商'],
+        'businesses': ['零售', '售后'],
+        'audiences': ['商家', '消费者'],
+    }
+    page.route('**/applicability-values', lambda route: route.fulfill(json=choices))
+    page.evaluate("KnowledgeTabs.open('search')")
+    page.set_viewport_size({'width': width, 'height': 850})
+    page.locator('#scope-toggle').click()
+    selected = {}
+    for dimension, values in choices.items():
+        picker = page.locator(f'#query-{dimension}')
+        picker.locator('summary').click()
+        checkbox = picker.get_by_role('checkbox', name=values[1], exact=True)
+        checkbox.wait_for()
+        option = picker.locator('label').filter(has_text=values[1])
+        layout = option.evaluate('''row => {
+          const box = row.querySelector('input').getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNode(row.lastChild);
+          const text = range.getBoundingClientRect();
+          return {width: box.width, gap: text.left - box.right,
+            centerOffset: Math.abs((box.top + box.bottom - text.top - text.bottom) / 2)};
+        }''')
+        assert 12 <= layout['width'] <= 18 and layout['gap'] >= 4 and layout['centerOffset'] <= 3, layout
+        option.click()
+        assert checkbox.is_checked()
+        selected[dimension] = values[1]
+    page.locator('#apply-scope').click()
+    applied = page.evaluate("WorkspaceContext.read('p','search').applicability")
+    assert {dimension: value['values'][0] for dimension, value in applied.items()} == selected
+    assert not errors
+
+
 @pytest.mark.parametrize('width', [1440, 768, 390, 320])
 def test_inline_scope_entries_and_qa_popover(redesign_page, width):
     page, errors = redesign_page

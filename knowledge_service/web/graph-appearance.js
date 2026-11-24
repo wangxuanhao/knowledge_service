@@ -1,8 +1,8 @@
 /* Shared presentation only: canonical type identity is independent of labels and pages. */
 (function(root){
   'use strict';
-  const tokens=Object.freeze({background:'#ffffff',edge:'#a8c9e2',text:'#888995',outline:'#ffffff',selected:'#1689e9',
-    nodeOpacity:1,edgeOpacity:.35,edgeWidth:1,selectedEdgeWidth:2});
+  const tokens=Object.freeze({background:'#ffffff',edge:'#819db4',text:'#4e646c',outline:'#ffffff',selected:'#1689e9',
+    nodeOpacity:1,nodeOutlineWidth:1.2,edgeOpacity:.35,edgeWidth:1,edgeCurveness:.1,selectedEdgeWidth:2});
   const rgbCache=new Map();
   const attribute=record=>record?.kind==='attribute_value'||record?.virtual===true&&record?.type==='KS_ATTRIBUTE_VALUE';
   function categoryKey(record){return attribute(record)?'attribute:':'entity:'+String(record?.type||'');}
@@ -22,8 +22,10 @@
     const degrees=new Map(nodes.map(node=>[node.id,0]));
     for(const edge of edges){if(edge.subject_id===edge.object_id||!degrees.has(edge.subject_id)||!degrees.has(edge.object_id))continue;
       degrees.set(edge.subject_id,degrees.get(edge.subject_id)+1);degrees.set(edge.object_id,degrees.get(edge.object_id)+1);}
-    return new Map(Array.from(degrees,([id,degree])=>[id,14+Math.min(degree*.45,8)]));
+    const base=nodes.length<=24?18:14;
+    return new Map(Array.from(degrees,([id,degree])=>[id,Math.min(22,base+degree*.45)]));
   }
+  const labelSize=count=>count<=24?14:12;
   function labelsFor(nodes,preferred=[],limit=50){
     const present=new Set(nodes.map(node=>node.id)),ordered=new Set();
     for(const id of preferred)if(present.has(id))ordered.add(id);
@@ -49,5 +51,5 @@
     if(!visible.size)for(const id of candidates){const p=points.get(id);if(p&&p[0]>=0&&p[0]<width&&p[1]>=0&&p[1]<height){visible.add(id);break;}}
     return visible;
   }
-  root.GraphAppearance=Object.freeze({tokens,colorFor,rgbFor,sizesFor,categoryKey,labelsFor,avoidLabelOverlap});
+  root.GraphAppearance=Object.freeze({tokens,colorFor,rgbFor,sizesFor,categoryKey,labelSize,labelsFor,avoidLabelOverlap});
 })(typeof window!=='undefined'?window:globalThis);

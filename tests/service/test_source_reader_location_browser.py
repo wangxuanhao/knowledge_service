@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from playwright.sync_api import sync_playwright
 from test_chunk_preview_ui import browser
 
@@ -115,6 +116,112 @@ def test_reader_tabs_wait_until_initial_source_metadata_is_ready():
         assert parsed.get_attribute('aria-pressed') == 'true'
         assert '已加载正文' in page.locator('.source-reader-body').inner_text()
         browser.close()
+
+
+def test_reader_uses_each_assertion_verified_range_with_the_same_quote(browser):
+    page = browser.new_page()
+    page.set_default_timeout(5000)
+    quote = '处置措施'
+    sections = ['规则标题', '前一份说明涉及处置措施。', '后一份说明也涉及处置措施。']
+    spans = []
+    offset = 0
+    for index, text in enumerate(sections):
+        spans.append(dict(block_id=f'block-{index}', chunk_version_id='chunk-v',
+                          chunk_start_char=offset, chunk_end_char=offset + len(text),
+                          block_start_char=0, block_end_char=len(text)))
+        offset += len(text) + 1
+    doc = dict(original_name='规则.md', assets=[], blocks=[
+        dict(block_id=f'block-{index}', normalized_text=text)
+        for index, text in enumerate(sections)])
+
+    def location(index):
+        span = spans[index]
+        start = sections[index].index(quote)
+        return dict(document_version_id='v', status='available', precision='evidence', spans=[{
+            **span, 'chunk_start_char': span['chunk_start_char'] + start,
+            'chunk_end_char': span['chunk_start_char'] + start + len(quote),
+            'block_start_char': start, 'block_end_char': start + len(quote),
+        }])
+
+    def respond(route):
+        url = route.request.url
+        if url.endswith('/rendered'):
+            return route.fulfill(content_type='text/html', body=''.join(
+                f'<p data-block-id="block-{index}">{text}</p>' for index, text in enumerate(sections)))
+        if '/locate?' in url:
+            return route.fulfill(json={'status':'available', 'spans':spans})
+        if url.endswith('/source-documents/v'):
+            return route.fulfill(json=doc)
+        if url.endswith('/assertions/first/evidence'):
+            return route.fulfill(json={'source_location':location(1), 'location':{'mode':'exact'}})
+        if url.endswith('/assertions/second/evidence'):
+            return route.fulfill(json={'source_location':location(2), 'location':{'mode':'exact'}})
+        if url.endswith('/assertions/unverified/evidence'):
+            source = dict(document_version_id='v', status='available', precision='chunk', spans=spans)
+            return route.fulfill(json={'source_location':source, 'location':{'mode':'chunk'}})
+        if url.endswith('/assertions/mismatched/evidence'):
+            return route.fulfill(json={'source_location':{**location(2), 'document_version_id':'other-v'},
+                                       'location':{'mode':'exact'}})
+        return route.fulfill(content_type='text/html', body='<button>打开</button>')
+
+    page.route('http://reader.test/**', respond)
+    page.goto('http://reader.test/')
+    page.add_script_tag(path=str(WEB / 'source-content.js'))
+    page.add_script_tag(path=str(WEB / 'source-reader.js'))
+    marks = page.locator('.source-reader-body mark')
+    for assertion_id, block_id in [('first', 'block-1'), ('second', 'block-2')]:
+        page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='v',
+                      assertionId=assertion_id, focusText=quote))
+        assert marks.all_inner_texts() == [quote]
+        assert marks.evaluate('(mark)=>mark.parentElement.dataset.blockId') == block_id
+    for assertion_id, message in [('unverified', '未核验精确引文位置'), ('mismatched', '未找到证据位置')]:
+        page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='v',
+                      assertionId=assertion_id, focusText=quote))
+        assert marks.count() == 0
+        assert message in page.locator('.source-reader-note').first.inner_text()
+        assert sections[0] in page.locator('.source-reader-body').inner_text()
+    page.close()
+
+
+@pytest.mark.parametrize('missing_step', ['metadata', 'locate', 'rendered'])
+def test_reader_preserves_frozen_evidence_when_source_read_returns_404(browser, missing_step):
+    page = browser.new_page()
+    page.set_default_timeout(5000)
+    base = '/api/projects/p/source-documents/frozen-v1'
+    quote = '保存的引文 <img src=x>。'
+
+    def respond(route):
+        url = route.request.url
+        if url.endswith(base):
+            if missing_step == 'metadata':
+                return route.fulfill(status=404, json={'detail':'源版本不存在'})
+            return route.fulfill(json={'original_name':'平台规则.md', 'assets':[], 'blocks':[]})
+        if url.endswith('/assertions/a1/evidence'):
+            if missing_step == 'locate':
+                return route.fulfill(status=404, json={'detail':'定位不存在'})
+            return route.fulfill(json={'source_location':{'document_version_id':'frozen-v1',
+                'status':'available', 'precision':'chunk', 'spans':[]}, 'location':{'mode':'chunk'}})
+        if url.endswith(base + '/rendered'):
+            if missing_step == 'rendered':
+                return route.fulfill(status=404, json={'detail':'原文内容不存在'})
+            return route.fulfill(content_type='text/html', body='<p>已打开固定版本正文</p>')
+        return route.fulfill(content_type='text/html', body='<button>打开</button>')
+
+    page.route('http://reader.test/**', respond)
+    page.goto('http://reader.test/')
+    page.add_script_tag(path=str(WEB / 'source-content.js'))
+    page.add_script_tag(path=str(WEB / 'source-reader.js'))
+    page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='frozen-v1',
+                  assertionId='a1', fallbackEvidence=dict(documentTitle='平台规则.md',
+                  documentVersionId='receipt-v1', quote=quote)))
+    if missing_step == 'locate':
+        assert '已打开固定版本正文' in page.locator('.source-reader-body').inner_text()
+        assert '未找到证据位置' in page.locator('.source-reader-note').first.inner_text()
+    else:
+        assert page.locator('.source-reader-body pre').inner_text() == quote
+        assert '已保存引文' in page.locator('.source-reader-body').inner_text()
+        assert page.locator('.source-reader-body img').count() == 0
+    page.close()
 
 
 if __name__ == '__main__':

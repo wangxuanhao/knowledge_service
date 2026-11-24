@@ -351,9 +351,10 @@
 
 @media (max-width: 600px) {
     .projects-header {
-        flex-direction: column;
-        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 8px;
     }
+    .projects-header h2 { flex-basis: 100%; }
 
     .projects-create-form {
         grid-template-columns: 1fr;
@@ -408,4 +409,31 @@
 
 .project-id-copy:hover {
     background: rgba(56, 189, 248, .10);
+}
+
+.projects-header { gap: 10px; margin-bottom: 12px; }
+.projects-header h2 { margin: 0 auto 0 0; }
+.projects-header small { font: inherit; color: var(--ks-muted); margin-inline-start: 4px; }
+#projects-find { flex: 0 1 18rem; width: 0; min-width: 6rem; margin: 0; height: 36px; }
+.projects-header button { min-height: 36px; white-space: nowrap; }
+#projects-root .project-card[hidden] { display: none; }
+@media (min-width: 1050px) {
+    .projects-grid { grid-template-columns: 1fr; gap: 10px; }
+    .projects-grid .project-card {
+        display: grid;
+        grid-template-columns: minmax(12rem,1.4fr) minmax(14rem,1fr) auto;
+        grid-template-areas: "name counts actions" "meta counts actions" "id counts actions";
+        align-items: center; column-gap: clamp(16px,3vw,48px); row-gap: 4px; padding: 16px 20px;
+    }
+    .project-card-head { grid-area: name; justify-content: flex-start; flex-wrap: wrap; }
+    .project-created { grid-area: meta; }
+    .project-id { grid-area: id; margin: 2px 0 0; width: fit-content; max-width: 100%; padding: 0; border: 0; background: transparent; }
+    .project-counts { grid-area: counts; border: 0; }
+    .project-actions { grid-area: actions; margin: 0; }
+    .project-actions button { white-space: nowrap; }
+}
+@media (max-width: 600px) {
+    #projects-find { flex: 1 1 6rem; }
+    .project-card { gap: 9px; padding: 15px; }
+    .project-id { margin: 0; }
 }

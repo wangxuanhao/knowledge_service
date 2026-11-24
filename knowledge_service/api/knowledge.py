@@ -38,8 +38,9 @@ def install(app, service):
 
     # ------------------------------------------------------------------ 知识 CRUD
     @router.post('/api/projects/{project_id}/records', status_code=201)
-    def write(project_id: str, request: RecordBatch):
-        rows = service.write(project_id, [r.model_dump(exclude_none=True) for r in request.records])
+    def write(project_id: str, request: RecordBatch, http_request: Request):
+        rows = service.write(project_id, [r.model_dump(exclude_none=True) for r in request.records],
+                             manual_actor=audit_actor(http_request))
         return {'records': [public(r) for r in rows]}
 
     @router.get('/api/projects/{project_id}/records/{record_id}')
@@ -59,7 +60,7 @@ def install(app, service):
         return detail
 
     @router.put('/api/projects/{project_id}/records/{record_id}')
-    def revise(project_id: str, record_id: str, request: Revision):
+    def revise(project_id: str, record_id: str, request: Revision, http_request: Request):
         row = request.record.model_dump(exclude_none=True)
         if row.get('id') and row['id'] != record_id:
             raise ValueError('路径与记录 ID 不一致')
@@ -73,14 +74,21 @@ def install(app, service):
                 row['ontology_id'] = latest.get('ontology_id')
                 if row['kind'] in ('entity', 'relation', 'attribute') and not row['ontology_id']:
                     raise ValueError('未知本体归属：请显式指定本体或使用受控迁移')
-            return public(service.write(project_id, [row], request.expected_version, revision=True)[0])
+            return public(service.write(project_id, [row], request.expected_version, revision=True,
+                                        manual_actor=audit_actor(http_request))[0])
 
     @router.get('/api/projects/{project_id}/records/{record_id}/history')
     def history(project_id: str, record_id: str):
         versions = repository.history(project_id, record_id)
         if not versions:
             raise KeyError(record_id)
-        return {'versions': [public(r) for r in versions]}
+        history = []
+        for row in versions:
+            item = public(row)
+            if actor := row.get('metadata', {}).get('_manual_actor'):
+                item['manual_change'] = {'actor': actor}
+            history.append(item)
+        return {'versions': history}
 
     @router.post('/api/projects/{project_id}/assertions/batch')
     def assertion_batch(project_id: str, request: AssertionBatchRead):
@@ -98,7 +106,10 @@ def install(app, service):
     @router.get('/api/projects/{project_id}/ingest-runs')
     def ingest_runs(project_id: str, document_id: str | None = None):
         items = service.ingest_runs(project_id, document_id=document_id)
-        return {'runs': items, 'total': len(items)}
+        result = {'runs': items, 'total': len(items)}
+        if document_id is not None:
+            result['processing_task'] = repository.latest_document_processing_status(project_id, document_id)
+        return result
 
     @router.get('/api/projects/{project_id}/resolution-reviews')
     def resolution_reviews(project_id: str, status: str | None = None):

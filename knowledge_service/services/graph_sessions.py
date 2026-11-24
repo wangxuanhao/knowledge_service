@@ -12,7 +12,7 @@ from functools import wraps
 from uuid import uuid4
 
 from ..core.time import utc_now
-from ..repository.scoped_reads import ScopedReads
+from ..repository.scoped_reads import ScopedReads, uses_fact_scope
 
 
 def _independent_page(operation):
@@ -35,13 +35,16 @@ class GraphSessions:
         self.repo = repository
         self.reads = ScopedReads(repository)
 
+    def _read_snapshot(self, scope):
+        return self.repo.read_snapshot(disable_jit=uses_fact_scope(scope))
+
     def create(self, project, scope, *, actor_id=None, ttl_seconds=3600):
         scope = json.loads(json.dumps(scope, ensure_ascii=False, allow_nan=False))
         scope.pop('kinds', None)
         # A current session is frozen by the checked project watermark. Keeping
         # current reads lets PostgreSQL use its partial current-version indexes;
         # explicit historical requests retain their requested knowledge time.
-        with self.repo.read_snapshot():
+        with self._read_snapshot(scope):
             self.repo.get_project(project)
             watermark = self.repo.projections.project_watermark(project)
             entities = self.reads.count(project, scope, kinds=['entity'])
@@ -103,7 +106,7 @@ class GraphSessions:
         if datetime.fromisoformat(session['expires_at'].replace('Z', '+00:00')) <= datetime.now(timezone.utc):
             raise ValueError('全量图会话已过期，请重新加载')
         after = self._decode(session, kind, cursor)
-        with self.repo.read_snapshot():
+        with self._read_snapshot(session['scope']):
             self.repo.get_project(project)
             if self.repo.projections.project_watermark(project) != session['watermark']:
                 raise ValueError('项目知识或来源已发生变化，请重新加载全量图以重新核对资格')

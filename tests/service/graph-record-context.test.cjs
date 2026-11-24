@@ -65,7 +65,7 @@ test('source canonical navigation preserves the applied source scope before chan
   const context={body,document:{createElement:tag=>node(tag)},scope:()=>live,
     window:{WorkspaceDrawers:{close(){}},KnowledgeTabs:{open(){live={known_at:null,filters:null};}},openKnowledgeRecord:async value=>calls.push(value)}};
   vm.createContext(context);const source=fs.readFileSync(path.join(__dirname,'../../knowledge_service/web/sources-view.js'),'utf8');
-  vm.runInContext(source.slice(source.indexOf('  function renderAssertions('),source.indexOf('  function load({')),context);
+  vm.runInContext(source.slice(source.indexOf('  function distinctSourceEvidence('),source.indexOf('  function load({')),context);
   context.renderAssertions([{kind:'relation',status:'accepted',canonical_record_id:'exact-edge',payload:{text:'关系'}}],'p');
   await body.children[0].children.find(child=>child.tag==='button').onclick();
   assert.equal(calls[0].id,'exact-edge');assert.deepEqual(JSON.parse(JSON.stringify(calls[0].scope)),fixed);

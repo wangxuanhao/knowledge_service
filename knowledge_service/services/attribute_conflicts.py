@@ -7,13 +7,15 @@ from ..repository.attribute_conflicts import ConflictReads
 
 def allow_quarantine_deficits(report,before_report,context):
     """Only new minCount deficits on the quarantined owner/property may pass."""
-    if not before_report.get('conforms') or not context.get('preview_fingerprint') or not context.get('member_ids'):
+    contexts = context if isinstance(context, list) else [context]
+    allowed = {(item['entity_id'], path) for item in contexts if item.get('entity_id')
+               and item.get('preview_fingerprint') and item.get('member_ids') for path in item.get('predicates', [])}
+    if not before_report.get('conforms') or not allowed:
         return False
     violations=report.get('violations') or []
     if not violations or report.get('errors')!=violations:return False
     return all(v.get('constraint')=='MinCountConstraintComponent'
-        and v.get('record_id')==context.get('entity_id')
-        and v.get('path') in context.get('predicates',[]) for v in violations)
+        and (v.get('record_id'),v.get('path')) in allowed for v in violations)
 
 
 def member_versions(members):
@@ -50,12 +52,11 @@ class AttributeConflicts:
             for member in detail['members']:
                 frozen=self.repo.get_record_version(project,member['version_id'])
                 record=self.repo.get_record_version(project,member.get('current_version_id') or member['version_id'])
-                current=self.repo._db.execute('''SELECT version_id FROM record_versions
-                    WHERE project_id=? AND id=? AND superseded_at IS NULL''',(project,record['id'])).fetchone()
+                current_version_id=self.reads.current_member_version_id(project,record['id'])
                 expected_support={a['id']:a for a in member['assertion_versions']}
                 current_support=[a for a in support_by_id.get(record['id'],[]) if a['id'] in expected_support]
                 unexpected=[a for a in support_by_id.get(record['id'],[]) if a['id'] not in expected_support and a['status'] in {'accepted','contradicting'}]
-                if (current is None or current['version_id']!=member.get('current_version_id',member['version_id'])
+                if (current_version_id is None or current_version_id!=member.get('current_version_id',member['version_id'])
                     or sorted((a['id'],a['decision_version']) for a in current_support)!=sorted((a['id'],a['version']) for a in member['assertion_versions'])
                     or unexpected or any(a['status']=='accepted' for a in current_support)):
                     raise ValueError('版本冲突：成员事实或来源支持已变化，请重新复核')

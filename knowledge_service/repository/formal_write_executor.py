@@ -62,10 +62,17 @@ class FormalWriteExecutor:
             assertion['id'], event_id, created_at=None if replay else self.operation_time)
 
     def _execute_assertion_accept(self, project_id, action):
-        created = self.repository._create_assertion(
-            project_id, action['assertion'], recorded_at=self.operation_time)
         mode = action['mode']
-        if mode in {'create', 'pending'}:
+        if mode not in {'create', 'pending', 'replay'}:
+            raise ValueError('正式写入计划断言接受模式无效')
+        if mode == 'create':
+            created = self.repository._create_assertion(
+                project_id, action['assertion'], recorded_at=self.operation_time,
+                initial_acceptance=(action['canonical_record_id'], action['reason'], action['actor']))
+        else:
+            created = self.repository._create_assertion(
+                project_id, action['assertion'], recorded_at=self.operation_time)
+        if mode == 'pending':
             expected = action['resulting_version'] - 1
             if (created['status'] != 'pending'
                     or created['decision_version'] != expected):
@@ -74,20 +81,14 @@ class FormalWriteExecutor:
                 project_id, created['id'], expected, 'accepted',
                 action['reason'], action['actor'],
                 action['canonical_record_id'], recorded_at=self.operation_time)
-            replay = False
-        elif mode == 'replay':
-            if (created['status'] != 'accepted'
-                    or created['canonical_record_id']
-                    != action['canonical_record_id']
-                    or created['decision_version'] != action['resulting_version']):
-                raise ValueError('断言重放与其规范决策冲突')
-            replay = True
-        else:
-            raise ValueError('正式写入计划断言接受模式无效')
+        if (created['status'] != 'accepted'
+                or created['canonical_record_id'] != action['canonical_record_id']
+                or created['decision_version'] != action['resulting_version']):
+            raise ValueError('断言接受与其规范决策冲突')
         self._map_accepted_assertion(
             project_id, created,
             self._version_for_ref(project_id, action['record_ref']),
-            replay=replay)
+            replay=mode == 'replay')
         return created
 
     def _execute_assertion_transition(self, project_id, action):
@@ -228,7 +229,8 @@ class FormalWriteExecutor:
                     record = {**record, 'ontology_id': publication_id}
                 saved = self.repository._put(
                     project_id, record, action['expected_version'],
-                    operation=operation_context)
+                    operation=operation_context, **({'manual_actor': action['manual_actor']}
+                                                    if 'manual_actor' in action else {}))
                 self.tokens[action['token']] = saved
                 context_records.add(saved['id'])
             elif kind in {
@@ -236,7 +238,8 @@ class FormalWriteExecutor:
                 self._execute_fact_key(project_id, action)
             elif kind == 'assertion_accept':
                 updated = self._execute_assertion_accept(project_id, action)
-                context_records.add(action['canonical_record_id'])
+                if action['mode'] != 'replay':
+                    context_records.add(action['canonical_record_id'])
                 if action['result']:
                     assertion_results.append(updated)
             elif kind == 'assertion_create':

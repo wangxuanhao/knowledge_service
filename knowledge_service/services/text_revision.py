@@ -1,6 +1,7 @@
-"""Conservative qualification and planning for an existing entity text edit."""
+"""Unchanged manual saves and bounded planning for an existing entity text edit."""
 from __future__ import annotations
 
+import json
 import logging
 
 from rdflib.namespace import RDFS, SH
@@ -42,18 +43,42 @@ def _profile(ontology):
 
 def _normalized(record):
     row = RecordWrite.model_validate(record).model_dump(exclude_none=True)
+    row['metadata'].pop('_manual_actor', None)
     for key in ('valid_from', 'valid_until'):
         row[key] = normalize_time(row.get(key))
     return row
 
 
-def try_entity_text_revision(service, project_id, records, *, expected_version,
+def _same_fields(candidate, saved):
+    return json.dumps(candidate, sort_keys=True) == json.dumps(saved, sort_keys=True)
+
+
+def _unchanged_fact(repository, project_id, candidate, expected_version):
+    if candidate.get('source_id'):
+        return None
+    try:
+        saved = repository.latest_record_revision(project_id, candidate['id'])
+    except KeyError:
+        return None
+    fields = {key: value for key, value in saved.items() if key not in _SYSTEM}
+    metadata = saved.get('metadata', {})
+    if (saved.get('superseded_at') is not None or metadata.get('_deleted') or metadata.get('_quarantined')
+            or set(fields) - RecordWrite.model_fields.keys()):
+        return None
+    if not _same_fields(candidate, _normalized(fields)):
+        return None
+    if saved['version'] != expected_version:
+        raise ValueError('版本冲突：记录已变更')
+    return [saved]
+
+
+def try_manual_revision(service, project_id, records, *, expected_version,
                              revision, completion, expected_versions, operation,
                              assertions, pending_assertions, assertion_decisions,
                              resolution_reviews, ledger, resolution_decisions,
                              suppress_auto_assertions, recorded_at,
                              operation_context, relation_constraint_mode,
-                             shacl_mode, shacl_review_out, defer_milvus_sync):
+                             shacl_mode, shacl_review_out, defer_milvus_sync, manual_actor=None):
     if (not revision or len(records) != 1 or operation != 'manual_write'
             or type(expected_version) is not int or expected_version < 0
             or expected_versions is not None or completion is not None
@@ -65,11 +90,15 @@ def try_entity_text_revision(service, project_id, records, *, expected_version,
             or shacl_review_out is not None):
         return _fallback('调用包含额外治理或非默认写入选项') if revision else None
     repository = service.repository
+    candidate = _normalized(records[0])
+    if not candidate.get('id'):
+        return None
+    if candidate['kind'] in ('relation', 'attribute'):
+        return _unchanged_fact(repository, project_id, candidate, expected_version)
+    if candidate['kind'] != 'entity':
+        return None
     scope = getattr(repository, 'entity_text_revision', None)
     if not callable(scope):
-        return None
-    candidate = _normalized(records[0])
-    if candidate['kind'] != 'entity' or not candidate.get('id'):
         return None
     with scope(project_id, candidate['id'], expected_version) as session:
         if session is None or session.record is None:
@@ -80,10 +109,13 @@ def try_entity_text_revision(service, project_id, records, *, expected_version,
                 or set(writable) - RecordWrite.model_fields.keys()
                 or old.get('source_id') or candidate.get('source_id')
                 or old.get('metadata', {}).get('_deleted')
+                or old.get('metadata', {}).get('_quarantined')
                 or SOURCE_METADATA.intersection(old.get('metadata', {}))
                 or not old.get('ontology_id')):
             return _fallback('记录包含来源锚点、额外字段或待处理状态')
         normalized_old = _normalized(writable)
+        if _same_fields(candidate, normalized_old):
+            return [old]
         if {key: value for key, value in candidate.items() if key != 'text'} != {
                 key: value for key, value in normalized_old.items() if key != 'text'}:
             return _fallback('文字以外的字段发生变化')
@@ -103,12 +135,12 @@ def try_entity_text_revision(service, project_id, records, *, expected_version,
         snapshot = session.snapshot(candidate, assertion_id, latest_row)
         plan = FormalFactWriter(repository).prepare(
             operation, project_id, [], {candidate['id']: expected_version},
-            {'records': [candidate]}, snapshot=snapshot, _parsed_ontology=latest)
+            {'records': [candidate], 'manual_actor': manual_actor},
+            snapshot=snapshot, _parsed_ontology=latest)
         result = session.execute(plan)
         LOG.info('实体文字修订已通过有界权威读集提交')
     # The session is deliberately outermost: these callbacks see committed data.
     accepted = result['accepted_records']
-    service.annotate_structure_pending(project_id, accepted)
     if not defer_milvus_sync:
         service._drain_projections(project_id)
     return accepted

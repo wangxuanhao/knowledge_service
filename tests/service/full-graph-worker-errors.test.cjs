@@ -55,3 +55,21 @@ test('worker layout ignores an unrelated response and releases listeners after s
   assert.equal(worker.listenerCount(),0);
   controller.abort();assert.equal(worker.terminated,false);
 });
+
+test('worker batches return the same circular positions as the main-thread fallback',()=>{
+  const web=path.join(__dirname,'../../knowledge_service/web');
+  let response;
+  const context=vm.createContext({postMessage:(message,transfer)=>{response={message,transfer};}});
+  context.self=context;
+  context.importScripts=url=>vm.runInContext(fs.readFileSync(path.join(web,url.split('?')[0]),'utf8'),context);
+  vm.runInContext(fs.readFileSync(path.join(web,'full-graph-worker.js'),'utf8'),context);
+  const ids=Array.from({length:128},(_,index)=>'实体-'+index);
+  context.onmessage({data:{id:7,ids}});
+  assert.equal(response.message.id,7);
+  assert.equal(response.transfer[0],response.message.positions.buffer);
+  const {GraphDataset}=vm.runInNewContext(fs.readFileSync(path.join(web,'full-graph.js'),'utf8')+'\nFullGraph');
+  const data=new GraphDataset();
+  data.addNodes(ids.map(id=>({id})));
+  assert.deepEqual(Array.from(response.message.positions),Array.from(data.positions));
+  for(let i=0;i<response.message.positions.length;i+=2)assert.ok(Math.hypot(response.message.positions[i],response.message.positions[i+1])<=.951);
+});

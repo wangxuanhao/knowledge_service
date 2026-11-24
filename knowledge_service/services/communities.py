@@ -83,6 +83,10 @@ def _empty_answer(status, selected_count, answer):
 
 
 class Communities:
+    @classmethod
+    def for_service(cls, service, jobs):
+        return cls(service.repository, jobs, service.llm_models, search_service=service)
+
     def __init__(self, repository, jobs, llm_models, *, search_service=None):
         self.repo = repository
         self.jobs = jobs

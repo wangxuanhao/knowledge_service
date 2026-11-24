@@ -227,7 +227,7 @@ def test_merge_collision_plan_is_deterministic_and_contains_business_decisions()
         'records': [source, occupied],
         'assertions': [{
             'id': 'support-z', 'project_id': 'project-1', 'kind': 'attribute',
-            'payload': {}, 'status': 'accepted',
+            'payload': {'value': occupied['value'], 'datatype': occupied['datatype']}, 'status': 'accepted',
             'canonical_record_id': 'z-fact', 'decision_version': 2,
             'decision_reason': 'accepted', 'actor': 'reviewer',
             'created_at': '2026-01-01T00:00:00Z',

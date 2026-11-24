@@ -11,6 +11,19 @@ class LLMModelStore:
             self._db.execute('''INSERT INTO llm_model_settings(singleton) VALUES (true)
                 ON CONFLICT(singleton) DO NOTHING''')
 
+    def ensure_key_marker(self, resolve_key):
+        """Run key validation under the row lock, then publish any initial marker."""
+        with self.repository._transaction():
+            marker = self._db.execute(
+                'SELECT key_check FROM llm_model_settings FOR UPDATE').fetchone()['key_check']
+            has_unmarked_ciphertext = not marker and self._db.execute('''
+                SELECT EXISTS(SELECT 1 FROM llm_models)
+                    OR EXISTS(SELECT 1 FROM llm_task_snapshots)''').fetchone()[0]
+            value, initial_marker = resolve_key(marker, has_unmarked_ciphertext)
+            if not marker and initial_marker is not None:
+                self._db.execute('UPDATE llm_model_settings SET key_check=?', (initial_marker,))
+            return value
+
     def list(self):
         with self.repository._lock:
             return [dict(row) for row in self._db.execute('''

@@ -83,7 +83,7 @@
       const technical=el('details','om-ws-technical');technical.append(el('summary',null,'纳入批次身份'),el('code',null,run.id));row.append(technical);
       if(!state.preview&&run.candidateIds.length)row.append(button('核对当前关联候选',()=>{
         if(project()!==openedProject||model.S.draft?.id!==draftId||model.S.draft?.revision!==revision||model.S.preview)return;
-        model.openIntake?.({projectId:openedProject,candidateIds:[...run.candidateIds]});
+        model.openIntake?.({projectId:openedProject,candidateIds:[...run.candidateIds],reviewDraft:true});
       }));
       host.append(row);
     }

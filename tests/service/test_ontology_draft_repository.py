@@ -157,6 +157,34 @@ def test_ontology_history_repair_rows_reject_duplicate_insert(tmp_path, statemen
         (repair_key,)).fetchone()[0] == 1
 
 
+def test_review_decisions_append_in_one_write_and_preserve_chain_order(tmp_path, monkeypatch):
+    repo = Repository(tmp_path / 'batch-review-decisions.sqlite')
+    project_id = repo.create_project('batch review decisions')['id']
+    store = repo._ontology_drafts
+    store.create(project_id, _draft(project_id))
+    store.append_operations(project_id, 'draft-1', [_operation('op-one'), _operation('op-two')])
+    execute = repo._db.execute
+    writes = []
+
+    def trace(statement, params=()):
+        if 'INSERT INTO ontology_review_decisions' in statement:
+            writes.append(statement)
+        return execute(statement, params)
+
+    monkeypatch.setattr(repo._db, 'execute', trace)
+    decisions = store.append_decisions(project_id, 'draft-1', [
+        _decision('z-first', 'op-one', 'sha256:op-one'),
+        _decision('a-second', 'op-two', 'sha256:op-two'),
+        _decision('m-third', 'op-one', 'sha256:op-one', supersedes='z-first'),
+    ])
+    assert len(writes) == 1
+    assert [row['id'] for row in decisions] == ['z-first', 'a-second', 'm-third']
+    assert len({row['created_at'] for row in decisions}) == 1
+    _, history = store.history(project_id, 'draft-1')
+    assert history == decisions
+    assert [row['id'] for row in store.effective_decisions(project_id, 'draft-1')] == ['a-second', 'm-third']
+
+
 def test_store_rejects_self_supersession_and_two_node_cycles(tmp_path):
     repo = Repository(tmp_path / 'supersession-cycles.sqlite')
     project_id = repo.create_project('cycles')['id']

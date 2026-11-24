@@ -53,8 +53,11 @@ class GraphProgressiveSearch(GraphNeighborhood):
     filter_steps: list[GraphFilterStep] = Field(default_factory=list, max_length=50)
 
 
-class RecordsPage(Scope):
+class RecordCounts(Scope):
     query: str = Field(default='', max_length=2000)
+
+
+class RecordsPage(RecordCounts):
     cursor: str | None = Field(default=None, max_length=10000)
     limit: int = Field(default=50, ge=1, le=1000)
     include_total: bool = True
@@ -95,5 +98,9 @@ def install(app, service):
     @router.post('/records/page')
     def records_page(project: str, body: RecordsPage):
         return workspace.records_page(project, body.model_dump())
+
+    @router.post('/records/counts')
+    def record_counts(project: str, body: RecordCounts):
+        return workspace.record_counts(project, body.model_dump())
 
     app.include_router(router)

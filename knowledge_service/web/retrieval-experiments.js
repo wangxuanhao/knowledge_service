@@ -29,18 +29,16 @@
   if(extraction)page.insertBefore(tabs,extraction);else page.append(tabs);
   const panel=document.createElement('div');panel.id='retrieval-experiments';panel.className='rex-panel hidden';
   panel.innerHTML=`
-    <header class="rex-heading"><div><span class="rex-eyebrow">RETRIEVAL LAB</span><h2>检索与问答消融</h2><p>用同一题集、范围与知识版本，比较实际执行的检索策略。</p></div><button type="button" class="secondary" data-rex-refresh>刷新运行记录</button></header>
-    <div class="rex-notice">语义与混合检索只使用 Milvus。索引未就绪时会记录失败。模型未配置时仅保存实际检索证据，不计答案得分。</div>
     <div class="rex-layout"><form class="rex-config">
       <h3>固定实验输入</h3><label>实验名称<input name="name" maxlength="200" placeholder="例如：退款规则 · 第一轮"></label>
       <label>固定题集<textarea name="questions" rows="7" placeholder="每行一个问题；也可填写带 expected_record_ids、expected_answer 的 JSON 数组"></textarea></label>
-      <details><summary>如何提供标准依据与答案</summary><pre>[{"id":"q1","query":"退款需要哪些材料？","expected_record_ids":["实际记录 ID"],"expected_answer":"人工标准答案"}]</pre><p>依据指标按记录 ID 精确比对；答案指标仅对真实模型回答做文本精确比对。未提供标准项显示「未评分」。</p></details>
+      <details><summary>题集格式与评分规则</summary><p>语义与混合检索使用 Milvus。索引未就绪时记录失败。模型未配置时仅保存检索证据。</p><pre>[{"id":"q1","query":"退款需要哪些材料？","expected_record_ids":["实际记录 ID"],"expected_answer":"人工标准答案"}]</pre><p>依据指标按记录 ID 精确比对；答案指标仅对真实模型回答做文本精确比对。未提供标准项显示「未评分」。</p></details>
       <div class="rex-fields"><label>检索模式<select name="retrieval_mode"><option value="hybrid">混合 · Milvus RRF</option><option value="semantic">语义 · Milvus 向量</option><option value="keyword">关键词</option></select></label><label>实体预算<input name="k_entities" type="number" min="0" max="50" value="5"></label><label>原文预算<input name="k_chunks" type="number" min="1" max="50" value="5"></label><label>关系跳数<input name="hops" type="number" min="0" max="3" value="2"></label></div>
       <details><summary>本实验自己的 Metadata / 时间范围</summary><p>默认读取当前项目。此处只影响本次实验，不沿用其他页面的筛选条件。</p><textarea name="scope" rows="5" aria-label="实验范围 JSON">{}</textarea></details>
       <fieldset class="rex-variants"><legend>比较变体</legend>${Object.entries(VARIANTS).map(([key,[label,description]])=>`<label><input type="checkbox" name="variants" value="${key}" checked><span><b>${label}</b><small>${description}</small></span></label>`).join('')}</fieldset>
       <label class="rex-inline"><input type="checkbox" name="generate">调用已配置模型生成回答</label>
       <button type="submit">创建并运行固定实验</button>
-    </form><aside class="rex-history"><h3>运行记录</h3><div data-rex-runs class="subtle">选择项目后刷新记录。</div></aside></div>
+    </form><aside class="rex-history"><div class="row"><h3>运行记录</h3><button type="button" class="secondary" data-rex-refresh>刷新运行记录</button></div><div data-rex-runs class="subtle">选择项目后刷新记录。</div></aside></div>
     <div data-rex-status role="status" aria-live="polite"></div><section data-rex-detail class="rex-detail"></section>`;
   page.append(panel);
   const form=panel.querySelector('form'),runsHost=panel.querySelector('[data-rex-runs]'),detail=panel.querySelector('[data-rex-detail]'),statusHost=panel.querySelector('[data-rex-status]');

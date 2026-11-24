@@ -163,23 +163,38 @@
         const changeEditor=kind==='validation'?'':`<details class="ontology-change-editor"><summary>本体变更草案</summary><div class="change-fields"><label>操作<select class="change-operation"><option value="add">新增定义</option><option value="update">调整现有定义</option></select></label><label class="change-existing-label" hidden>要调整的现有术语<select class="change-existing"><option value="">请选择现有术语</option>${existingOptions}</select></label><label>技术标识 IRI<input class="change-uri-preview" value="保存时由后端根据名称生成" readonly></label><label>显示名称<input class="change-label" value="${esc(proposed)}"></label><label>中文名称<input class="change-label-zh" maxlength="200"></label><label>定义说明<input class="change-description" placeholder="该术语表达什么"></label>${kind==='entity'?`<label>父类<select class="change-parent"><option value="">不指定</option>${classOptions}</select></label>`:`<label>定义域<select class="change-domain"><option value="">不指定</option>${optionsFor(domainType)}</select></label><label>值域<select class="change-range"><option value="">不指定</option>${kind==='attribute'?'<option value="http://www.w3.org/2001/XMLSchema#string">字符串</option><option value="http://www.w3.org/2001/XMLSchema#integer">整数</option><option value="http://www.w3.org/2001/XMLSchema#decimal">小数</option><option value="http://www.w3.org/2001/XMLSchema#boolean">布尔值</option>':optionsFor(rangeType)}</select></label>`}<label class="change-rationale">变更理由<input maxlength="2000" placeholder="为什么现有本体无法表达这条知识"></label><button data-submit-proposal>提交草案</button></div></details>`;
         return `<article class="review-item ${kind==='validation'?'validation-review':''}" data-review="${i}"><small>${labels[kind]}</small><h3>${heading}</h3><p>${esc(r.document_title)} · ${esc(r.reason)}</p>${validationDetails}${issues?`<p class="constraint-conflict">${esc(issues)}</p>`:''}${r.conflict?.code==='attribute_max_count_one'?`<p class="constraint-conflict">该属性为单值字段，候选值与当前正式属性冲突。${r.status==='contradicting'?'请选择保留旧值或接受新值。':'普通批准只会登记冲突，不会覆盖或写入候选值。'}</p>`:''}${changeState}<small>抽取本体 ${esc(r.ontology_id)} · 原文字符 ${r.start_char}–${r.end_char}</small>${r.blocked?'<p class="error">关联实体尚未入图或已删除，请先审核实体；拒绝实体不会自动拒绝这些依赖候选。</p>':''}<details><summary>查看原文证据</summary><pre>${esc(r.attribute_evidence||r.evidence)}</pre></details>${kind==='attribute'?`<details><summary>当前正式属性值</summary><pre>${esc(JSON.stringify(r.current_values||[],null,2))}</pre></details>`:''}${mapping}<label>审核理由（必填）<input class="review-note" maxlength="2000" placeholder="填写确认例外、整改或知识审核理由"></label><div class="review-actions">${actions}</div>${changeEditor}</article>`;
       }).join('');
-      if(!pending.length)host.insertAdjacentHTML('beforeend','<p class="subtle">当前视图没有待处理事项。</p>');
-      if(reviewView==='facts'&&(!filter||filter==='attribute')){
-        const section=document.createElement('section');section.className='entity-review-card';host.append(section);
-        const add=(tag,text)=>{const node=document.createElement(tag);node.textContent=text;section.append(node);return node;};
-        add('h3','全项目属性冲突集合');let cursor=conflictPage.next_cursor||null;
+      const showConflicts=reviewView==='facts'&&(!filter||filter==='attribute')&&
+        (conflictPage.error||conflictPage.conflict_sets?.length||conflictPage.next_cursor);
+      if(!pending.length&&!showConflicts)host.insertAdjacentHTML('beforeend','<p class="subtle">当前视图没有待处理事项。</p>');
+      if(showConflicts){
+        const make=(tag,text)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;return node;};
+        const section=make('section'),list=make('ul'),feedback=make('p');
+        section.className='review-conflicts';list.className='review-conflict-list';
+        feedback.className='error review-conflict-feedback';feedback.setAttribute('role','status');
+        let cursor=conflictPage.next_cursor||null;
         const appendSets=page=>{
-          if(page.error){add('p','冲突集合读取失败：'+page.error+'；请刷新审核重试。');return;}
           for(const set of page.conflict_sets||[]){
-            add('p',`${set.entity_id} · ${set.predicate} · ${set.members.length} 个冲突值 · 集合修订 ${set.version}`);
-            const open=add('button',window.Auth?.isAdmin?.()?'处理属性冲突集合':'查看属性冲突证据');open.type='button';open.className='secondary';
+            const row=make('li'),info=make('div');
+            const title=make('strong',safeLabel(set.predicate)||set.predicate);
+            const meta=make('small',`${set.entity_id} · ${set.members.length} 个冲突值 · 集合修订 ${set.version}`);
+            const open=make('button',window.Auth?.isAdmin?.()?'处理属性冲突集合':'查看属性冲突证据');open.type='button';open.className='secondary';
             open.onclick=()=>{if(p!==current||serial!==generation)return;return window.openAttributeConflictReview(set,{projectId:p,onResolved:reviews});};
+            info.append(title,meta);row.append(info,open);list.append(row);
           }
-        };appendSets(conflictPage);
-        const more=add('button','更多属性冲突集合');more.type='button';more.className='secondary';more.hidden=!cursor;
-        more.onclick=async()=>{more.disabled=true;try{const page=await api('/api/projects/'+encodeURIComponent(p)+'/attribute-conflicts',{limit:20,cursor});
-          if(p!==current||serial!==generation)return;appendSets(page);cursor=page.next_cursor||null;more.hidden=!cursor;
-        }catch(error){add('p','读取失败：'+error.message+'；可再次点击更多重试。');}finally{more.disabled=false;}};
+        };
+        appendSets(conflictPage);
+        if(conflictPage.error)feedback.textContent='冲突集合读取失败：'+conflictPage.error+'。请刷新审核重试。';
+        const more=make('button','更多属性冲突集合');more.type='button';more.className='secondary';more.hidden=!cursor;
+        more.onclick=async()=>{
+          more.disabled=true;feedback.textContent='';
+          try{
+            const page=await api('/api/projects/'+encodeURIComponent(p)+'/attribute-conflicts',{limit:20,cursor});
+            if(p!==current||serial!==generation)return;
+            appendSets(page);cursor=page.next_cursor||null;more.hidden=!cursor;
+          }catch(error){feedback.textContent='读取失败：'+error.message+'。可再次点击更多重试。';}
+          finally{more.disabled=false;}
+        };
+        section.append(make('h3','属性冲突集合'),list,feedback,more);host.append(section);
       }
       host.querySelectorAll('[data-review]').forEach(article=>{
         const r=pending[Number(article.dataset.review)];

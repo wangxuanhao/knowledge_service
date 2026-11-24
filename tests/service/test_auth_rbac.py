@@ -167,6 +167,10 @@ def test_viewer_readonly_post_allowed(tmp_path, monkeypatch):
                            headers=_h(viewer))
         assert resp.status_code not in (401, 403)
         assert 'hits' in resp.json()
+        counts = client.post(f'/api/projects/{pid}/records/counts', json={'kinds': ['entity']},
+                             headers=_h(viewer))
+        assert counts.status_code == 200, counts.text
+        assert counts.json() == {'counts': {'entity': 0}}
 
 
 # ── 当前用户 /me ──────────────────────────────────────────────────────────────

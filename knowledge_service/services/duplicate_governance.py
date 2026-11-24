@@ -3,11 +3,11 @@ import hashlib
 import json
 import base64
 from contextlib import contextmanager,nullcontext
-from uuid import uuid4
 
-from ..domain.entity_identity import compatible_identity,source_boundary,require_projection_ready
+from .duplicate_partitions import commit_merges, survivor_identity
+from ..repository import OntologyNotPublished
 from ..repository.attribute_conflicts import ConflictReads
-from ..repository.duplicate_entities import DuplicateReads
+from ..repository.duplicate_entities import DuplicateReads, DuplicateReviewRequired
 
 
 class DuplicateGovernance:
@@ -18,37 +18,55 @@ class DuplicateGovernance:
     def inputs(self,project,key):
         from .ontology import Ontology
         from .formal_writes import _published_identity_policy
-        members=self.reads.group(project,key);keep=members[0]
+        members, document_scope = self.reads.group_context(project, key)
+        if self.reads.current_review_receipt(project, key, members, document_scope):
+            raise DuplicateReviewRequired('本组已确认保留多个独立实体。如需调整，请重新逐成员分配并预览。')
+        keep = members[0]
         ontology=Ontology(self.repo.get_ontology(project)['turtle']);policy=_published_identity_policy(ontology,keep['type'])
-        from ..domain.entity_identity import merge_identity_keys
-        accumulated=keep
-        for row in members[1:]:
-            if not compatible_identity(accumulated,row,policy):raise ValueError('存在身份范围、唯一键或业务区间冲突，请先复核身份规则')
-            accumulated={**accumulated,'metadata':{**accumulated.get('metadata',{}),
-                'identity_keys':merge_identity_keys(accumulated,row,policy)}}
-            if source_boundary(keep)!=source_boundary(row):require_projection_ready(self.repo,project)
+        survivor_identity(self.repo, project, keep, members[1:], policy)
         rows=self.reads.merge_rows(project,[r['id'] for r in members]);ids={r['id'] for r in members}
         if any(r.get('metadata',{}).get('_quarantined') and r.get('subject_id') in ids for r in rows.values()):
-            raise ValueError('组内已有待审核属性冲突，请先处理现有冲突集合')
+            raise DuplicateReviewRequired('组内已有待审核属性冲突，可在「知识审核」处理现有冲突集合。')
         attributes=[r for r in rows.values() if r['kind']=='attribute' and r.get('subject_id') in ids and not r.get('metadata',{}).get('_deleted')]
         conflicts=self.governance._attribute_conflicts(project,keep,attributes)
         supports=ConflictReads(self.repo).support_versions(project,list(rows))
-        fingerprint=hashlib.sha256(json.dumps(dict(project=project,key=key,
+        fingerprint_inputs = dict(project=project,key=key,
             members=members,records=sorted(rows.values(),key=lambda r:r['id']),supports=supports,
-            policy=policy.summary(),conflicts=conflicts),ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
-        return members,rows,attributes,conflicts,fingerprint,policy
+            policy=policy.summary(),conflicts=conflicts)
+        if document_scope:
+            fingerprint_inputs['document_support'] = self.reads.document_support_fingerprint(project, list(ids), document_scope)
+        fingerprint = hashlib.sha256(json.dumps(fingerprint_inputs, ensure_ascii=False, sort_keys=True,
+                                                separators=(',', ':')).encode()).hexdigest()
+        return members,rows,attributes,conflicts,fingerprint,policy,document_scope
+
+    @staticmethod
+    def _relation_context(rows, members):
+        contexts = {member['id']: dict(total=0, examples=[]) for member in members}
+        relations = sorted((row for row in rows.values() if row['kind'] == 'relation'), key=lambda row: row['id'])
+        for row in relations:
+            subject_id, object_id = row.get('subject_id'), row.get('object_id')
+            for entity_id in {subject_id, object_id} & contexts.keys():
+                context = contexts[entity_id]
+                context['total'] += 1
+                if len(context['examples']) < 5:
+                    context['examples'].append(dict(id=row['id'], type=row['type'], subject_id=subject_id,
+                        subject_label=rows.get(subject_id, {}).get('text') or subject_id, object_id=object_id,
+                        object_label=rows.get(object_id, {}).get('text') or object_id,
+                        valid_from=row.get('valid_from'), valid_until=row.get('valid_until')))
+        return contexts
 
     def preview(self,project,key):
         from .service import public
-        members,rows,attributes,conflicts,fingerprint,policy=self.inputs(project,key)
+        members,rows,attributes,conflicts,fingerprint,policy,document_scope=self.inputs(project,key)
         drops={r['id'] for r in members[1:]}
-        relations=[r for r in rows.values() if r['kind']=='relation' and drops.intersection((r.get('subject_id'),r.get('object_id')))]
-        source_pages=self.reads.source_pages(project,[member['id'] for member in members])
+        relation_context = self._relation_context(rows, members)
+        source_pages=self.reads.source_pages(project,[member['id'] for member in members],document_scope=document_scope)
         public_members=[]
         for member in members:
             page=source_pages[member['id']];after=page.pop('next_after')
             public_members.append({**public(member),**page,'source_contexts_truncated':bool(after),
-                'source_next_cursor':self._source_cursor(project,key,fingerprint,member,after) if after else None})
+                'source_next_cursor':self._source_cursor(project,key,fingerprint,member,after) if after else None,
+                'relation_context': relation_context[member['id']]})
         from ..domain.formal_facts import canonical_attribute_key,canonical_relation_key
         fact_groups={}
         for row in rows.values():
@@ -81,6 +99,36 @@ class DuplicateGovernance:
             reasons=['已发布跨来源身份规则' if policy.declared else '保守身份规则：业务区间和适用范围一致'],
             requires_review=bool(conflicts) or not policy.declared,blocked=False)
 
+    def members(self,project,key,*,limit=10,after_id=None):
+        from .service import public
+        members,after,document_scope=self.reads.member_page(project,key,limit=limit,after_id=after_id)
+        if not members:
+            return dict(key=key,members=[],next_after_id=None)
+        pages=self.reads.source_pages(project,[member['id'] for member in members],limit=3,document_scope=document_scope)
+        relations=self.reads.relation_contexts(project,[member['id'] for member in members])
+        result=[]
+        for member in members:
+            page=pages[member['id']]
+            source_after=page.pop('next_after')
+            result.append({**public(member),**page,'relation_context':relations[member['id']],'source_next_cursor':
+                self._source_cursor(project,key,None,member,source_after) if source_after else None})
+        return dict(key=key,members=result,next_after_id=after)
+
+    def preview_batch(self, project, keys):
+        if not 1 <= len(keys) <= 20:
+            raise ValueError('每批预览1..20个重复组')
+        results = []
+        for key in keys:
+            try:
+                results.append({**self.preview(project, key), 'status': 'ready'})
+            except DuplicateReviewRequired as exc:
+                results.append(exc.result(key))
+            except (ValueError, KeyError) as exc:
+                results.append(dict(key=key, status='failed', error=str(exc)))
+            except OntologyNotPublished:
+                results.append(dict(key=key, status='failed', error='本项目尚未发布本体，无法预览重复组'))
+        return dict(results=results)
+
     @staticmethod
     def _source_identity(project,key,fingerprint,member):
         return hashlib.sha256(json.dumps([project,key,fingerprint,member['id'],member['version_id']],ensure_ascii=False).encode()).hexdigest()
@@ -90,18 +138,22 @@ class DuplicateGovernance:
         return base64.urlsafe_b64encode(json.dumps([cls._source_identity(project,key,fingerprint,member),after]).encode()).decode()
 
     def sources(self,project,key,fingerprint,entity_id,expected_version_id,*,limit=10,cursor=None):
-        members,_,_,_,actual,_=self.inputs(project,key)
-        if actual!=fingerprint:raise ValueError('版本冲突：重复组来源已变化，请重新预览')
-        member=next((m for m in members if m['id']==entity_id),None)
-        if member is None:raise KeyError(entity_id)
+        if fingerprint is None:
+            member,document_scope=self.reads.review_member(project,key,entity_id)
+        else:
+            members,_,_,_,actual,_,document_scope=self.inputs(project,key)
+            if actual!=fingerprint:raise ValueError('版本冲突：重复组来源已变化，请重新预览')
+            member=next((m for m in members if m['id']==entity_id),None)
+            if member is None:raise KeyError(entity_id)
         if member['version_id']!=expected_version_id:raise ValueError('版本冲突：实体修订已变化')
         after=''
         if cursor:
             try:
                 identity,after=json.loads(base64.urlsafe_b64decode(cursor.encode()))
-                if identity!=self._source_identity(project,key,fingerprint,member):raise ValueError()
+                if not isinstance(after, str) or identity!=self._source_identity(project,key,fingerprint,member):raise ValueError()
             except Exception as exc:raise ValueError('来源游标不属于当前预览') from exc
-        page=self.reads.source_pages(project,[entity_id],limit=limit,after=after)[entity_id];after=page.pop('next_after')
+        page=self.reads.source_pages(project,[entity_id],limit=limit,after=after,document_scope=document_scope)[entity_id]
+        after=page.pop('next_after')
         return dict(entity_id=entity_id,version_id=member['version_id'],**page,
             next_cursor=self._source_cursor(project,key,fingerprint,member,after) if after else None)
 
@@ -119,55 +171,44 @@ class DuplicateGovernance:
         finally:ingest_commit_guard.reset(token)
 
     def confirm(self,project,key,fingerprint,*,actor):
-        from .governance import writable
-        from ..domain.entity_identity import merge_identity_keys
         with self.service.lock:
-            members,rows,attributes,conflicts,actual,policy=self.inputs(project,key)
+            members,rows,_,conflicts,actual,policy,_=self.inputs(project,key)
             if fingerprint!=actual:raise ValueError('版本冲突：重复组预览已变化，请重新预览')
-            keep=members[0];drops={r['id'] for r in members[1:]};before=list(members)
-            survivor=writable(keep);metadata=dict(survivor.get('metadata') or {})
-            aliases=list(metadata.get('aliases',[]));keys=dict(metadata.get('identity_keys') or {})
-            for member in members[1:]:
-                aliases.extend([member['text'],*(member.get('metadata') or {}).get('aliases',[])])
-                probe={**survivor,'metadata':{**metadata,'identity_keys':keys}}
-                keys=merge_identity_keys(probe,member,policy)
-            survivor['metadata']={**metadata,'aliases':list(dict.fromkeys(aliases)),'identity_keys':keys,
-                'merge_backend':'confirmed_identity_group'}
-            updates=[survivor,*[{**writable(row),'metadata':{**row.get('metadata',{}),'_deleted':True,'merged_into':keep['id']}} for row in members[1:]]]
-            for row in rows.values():
-                if row['kind']=='relation' and drops.intersection((row.get('subject_id'),row.get('object_id'))):
-                    changed=writable(row)
-                    for field in ('subject_id','object_id'):
-                        if changed[field] in drops:changed[field]=keep['id']
-                    before.append(row);updates.append(changed)
-            by_predicate={}
-            for conflict in conflicts:by_predicate.setdefault(conflict['predicate'],set()).update(conflict['record_ids'])
-            actions=[dict(kind='conflict_set_create',id='conflict:'+str(uuid4()),entity_id=keep['id'],predicate=predicate,member_ids=sorted(ids)) for predicate,ids in sorted(by_predicate.items())]
-            conflict_ids=set().union(*by_predicate.values()) if by_predicate else set()
-            assertions=[]
-            for row in attributes:
-                if row['subject_id'] not in drops and row['id'] not in conflict_ids:continue
-                changed=writable(row);changed['subject_id']=keep['id']
-                if row['id'] in conflict_ids:
-                    changed['metadata']={**row.get('metadata',{}),'_quarantined':True,
-                        'conflict_set_ids':[a['id'] for a in actions if row['id'] in a['member_ids']]}
-                    for assertion in self.repo.list_assertions(project,status='accepted',canonical_record_id=row['id']):
-                        assertions.append(dict(id=assertion['id'],expected_version=assertion['decision_version'],status='contradicting',
-                            canonical_record_id=row['id'],reason='确认身份融合；单值属性隔离，等待集合审核',actor=actor))
-                before.append(row);updates.append(changed)
+            keep, drops = members[0], members[1:]
+            target = dict(keep_id=keep['id'], drop_ids=[r['id'] for r in drops], attribute_conflicts=conflicts)
+            metadata = survivor_identity(self.repo, project, keep, drops, policy)
             with self.guard(project,key,fingerprint):
-                result=self.governance._commit(project,before,updates,'merge','confirmed_identity_group',
-                    redirects={drop:keep['id'] for drop in drops},assertion_decisions=assertions,
-                    expected_dependencies={r['id']:r['version'] for r in attributes},
-                    audit_extra=dict(actor=actor,preview_fingerprint=fingerprint,duplicate_group=key),conflict_actions=actions,
-                    quarantine_conflicts=dict(entity_id=keep['id'],predicates=list(by_predicate),member_ids=sorted(conflict_ids),preview_fingerprint=fingerprint) if actions else None)
+                result, actions = commit_merges(self.governance, project, key, fingerprint, [target], rows,
+                    {r['id']: r for r in members}, {keep['id']: metadata}, actor)
             return {**result,'key':key,'name':keep['text'],'status':'merged',
                 'conflict_sets':[ConflictReads(self.repo).read(project,a['id'],{}) for a in actions]}
 
+    def _batch_group_errors(self, project, groups):
+        errors = {}
+        keys_by_entity = {}
+        with self.repo.independent_read_view() as reader:
+            reads = DuplicateReads(reader)
+            for key in dict.fromkeys(group['key'] for group in groups):
+                try:
+                    members = reads.group(project, key)
+                except (ValueError, KeyError) as exc:
+                    errors[key] = str(exc)
+                    continue
+                for member in members:
+                    keys_by_entity.setdefault(member['id'], set()).add(key)
+        for keys in keys_by_entity.values():
+            if len(keys) > 1:
+                errors.update(dict.fromkeys(keys, '所选重复组的实体成员重叠，请分批复核后重新预览'))
+        return errors
+
     def batch(self,project,groups,*,actor):
         if not 1<=len(groups)<=20:raise ValueError('每批确认1..20个重复组')
+        errors = self._batch_group_errors(project, groups)
         results=[]
         for group in groups:
+            if group['key'] in errors:
+                results.append(dict(key=group['key'], status='failed', error=errors[group['key']], retryable=True))
+                continue
             try:results.append(self.confirm(project,group['key'],group['preview_fingerprint'],actor=actor))
             except (ValueError,KeyError) as exc:
                 results.append(dict(key=group['key'],status='failed',error=str(exc),retryable=True))

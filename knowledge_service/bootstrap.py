@@ -20,9 +20,17 @@ from .repository import (
 from .repository.connection import resolve_dsn
 from .repository.users_store import UserStore
 
+
+def cached_document_encoder(encoder, cache_root):
+    from .integrations.embedding_cache import CachedDocumentEncoder
+
+    return CachedDocumentEncoder(encoder, cache_root)
+
+
 __all__ = [
     'DocumentParseError', 'EmbeddingDimensionConfigurationError',
     'configured_encoder', 'encoder_dimension', 'MilvusStore', 'MilvusSchemaMismatch',
     'VectorDimensionMismatch', 'Neo4jProjectionAdapter', 'install_neo4j', 'OntologyNotPublished',
     'OntologyPublicationConflict', 'Repository', 'resolve_dsn', 'UserStore',
+    'cached_document_encoder',
 ]

@@ -56,6 +56,26 @@
   }
   let session=null;try{if(typeof sessionStorage!=='undefined')session=sessionStorage;}catch{}
   const store=createStore(session);let page='search',bridge=null;
+  const scopeLookups=new Set();
+  function createLookup(){
+    let entry=null;
+    const fresh=key=>entry?.key===key&&entry.ownsSession()&&entry.expires>Date.now();
+    const clear=()=>{entry=null;};
+    scopeLookups.add(clear);
+    return {
+      peek(key){return fresh(key)?entry.value:undefined;},
+      read(key,load){
+        if(fresh(key))return entry.promise;
+        const ownsSession=(typeof window==='object'&&window.Auth?.scopeCacheOwner?.())||(()=>true);
+        const next={key,ownsSession,expires:Infinity};entry=next;
+        next.promise=Promise.resolve().then(load).then(value=>{
+          next.value=value;next.expires=Date.now()+30_000;return value;
+        },error=>{if(entry===next)clear();throw error;});
+        return next.promise;
+      },
+    };
+  }
+  function invalidateLookups(){for(const clear of scopeLookups)clear();}
   function projectPayload(name){name=String(name||'').trim();if(!name)throw Error('请输入项目名称');return {name,ontology_mode:'discovery',use_default_ontology:false};}
   function accountPolicy(actor,target){
     const writer=['admin','superadmin'].includes(actor?.role),self=actor?.id===target?.id;
@@ -68,7 +88,7 @@
     const active=result.active_mode?[result.active_mode]:result.active_modes||[];
     if(result.degraded||active.some(mode=>mode!==requested))throw Error('Milvus 语义检索未按所选模式完成。请到「构建与任务」检查向量连接、模型维度和索引后重试。');
   }
-  return {createStore,store,projectPayload,accountPolicy,requireRetrievalMode,isContentPage:name=>pages.has(name),get page(){return page;},
+  return {createStore,store,createLookup,invalidateLookups,projectPayload,accountPolicy,requireRetrievalMode,isContentPage:name=>pages.has(name),get page(){return page;},
     read(project,name=page){return store.read(project,name);},
     enter(name){page=name;bridge?.restore();},
     register(value){bridge=value;bridge.restore();},
@@ -77,6 +97,6 @@
     reset(){return bridge?.reset();},
     ticket(project,name=page){return store.ticket(project,name);},
     accepts(ticket,project,name=page){return store.accepts(ticket,project,name);},
-    clear(){store.clear();bridge?.restore();},
+    clear(){store.clear();invalidateLookups();bridge?.restore();},
   };
 });

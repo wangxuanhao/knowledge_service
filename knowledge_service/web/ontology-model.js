@@ -546,11 +546,17 @@
     const el = root(); if (!el) return;
     if (!built) { buildSkeleton(el); built = true; }
     el.setAttribute?.('data-ontology-view',S.view);
-    el.querySelectorAll('[data-om-view]').forEach(button=>button.classList.toggle('on',button.dataset.omView===S.view));
+    el.querySelectorAll('[data-om-view]').forEach(button=>{
+      const chosen=button.dataset.omView===S.view;
+      button.classList.toggle('on',chosen);button.setAttribute?.('aria-pressed',String(chosen));
+    });
     const display=document.getElementById('om-node-display');
     el.querySelectorAll('[data-om-create]').forEach(button=>button.disabled=!!S.preview);
     const pendingButton=document.getElementById('om-pending-intake');if(pendingButton)pendingButton.disabled=!!S.preview;
-    if(display){display.value=S.nodeDisplay;display.disabled=S.view==='cards';}
+    if(display){
+      display.value=S.nodeDisplay;display.disabled=S.view==='cards';
+      const field=display.closest?.('.om-display-control');if(field)field.hidden=display.disabled;
+    }
     setInspector(inspectorOpen);
     const parentButton = document.getElementById('om-discover-parents');
     if (parentButton) {
@@ -593,11 +599,14 @@
     const indexLabels={not_requested:'未请求构建',pending:'已排队',queued:'已排队',running:'构建中',completed:'已完成',failed:'构建失败'};
     index.textContent='索引（本次发布回执快照）：'+(Object.hasOwn(indexLabels,indexStatus)?indexLabels[indexStatus]:'未提供索引状态')+'。当前状态请查看构建任务。';
     const state=document.createElement('p');state.textContent=receipt.refreshState==='error'?'版本已发布，页面同步失败，可单独重试。':receipt.refreshState==='complete'?'页面已同步。':'页面正在同步，你可以继续操作。';
-    host.append(heading,text,knowledge,index,state);
+    host.append(heading,text,knowledge);
+    if(window.ProjectVectorIndex?.mount)window.ProjectVectorIndex.mount(host,{compact:false});
+    else host.append(index);
+    host.append(state);
     function button(label,action){const item=document.createElement('button');item.className='om-btn';item.type='button';item.textContent=label;item.addEventListener('click',action);host.append(item);}
     if(receipt.refreshState==='error')button('重试页面同步',()=>{void refreshPublished(receipt);});
     button('查看发布记录',()=>{if(S.publication===receipt&&current===receipt.projectId)window.OntologyPanel?.openHistory(receipt.versionId);});
-    if(receipt.index?.task_id||['pending','queued','running','completed','failed'].includes(indexStatus))button('查看构建任务',async()=>{
+    if(!window.ProjectVectorIndex?.mount&&(receipt.index?.task_id||['pending','queued','running','completed','failed'].includes(indexStatus)))button('查看构建任务',async()=>{
       if(S.publication!==receipt||current!==receipt.projectId)return;
       try{
         if(!window.KnowledgeNavigation?.open)throw Error('构建任务导航尚未就绪，请刷新页面。');
@@ -622,7 +631,7 @@
       const base=S.draft.base_ontology_id;
       viewedLabel=`${!base?'初始草案':'工作草案'} · ${S.draft.title||'本轮建模变更'}${base?' · 基于 '+(base===S.ontologyId&&S.ontologyVersion!=null?'v'+S.ontologyVersion:'历史发布版本'):''} · 尚未发布`;
       if(base&&base!==S.ontologyId)viewedLabel+=' · 基线变化';
-    } else viewedLabel=S.draftLoadError||(S.draftChoices.length>1?'有多份工作草案，请在「草案变更」中选择。':'当前没有未发布的结构修改。');
+    } else viewedLabel=S.draftLoadError||(S.draftChoices.length>1?'在「草案变更」选择工作草案':'');
     host.replaceChildren();
     const currentPart = document.createElement('span');
     currentPart.className = 'om-version-context-current';
@@ -633,17 +642,19 @@
     const viewedPart = document.createElement('span');
     viewedPart.className = 'om-version-context-viewed';
     viewedPart.textContent = viewedLabel;
-    host.append(currentPart, divider, viewedPart);
+    host.append(currentPart);
+    if(viewedLabel)host.append(divider,viewedPart);
   }
 
   function buildSkeleton(el) {
     el.innerHTML = `
       <div class="om-page">
         <div class="om-topbar">
-          <span class="om-brand">◆ 本体建模层</span>
+          <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
           <span class="om-ctx" id="om-version" hidden>当前本体 v?</span>
           <button type="button" class="om-btn ghost" id="om-history" title="查看发布版本、来源草案与恢复记录">版本历史</button>
           <button type="button" class="om-btn om-workspace-toggle" id="om-workspace-toggle" aria-controls="om-workspace-shell" aria-expanded="false">草案变更</button>
+          <span id="om-vector-index-state"></span>
           <details class="om-definition-menu admin-only" id="om-definition-menu"><summary class="om-btn primary">新增定义</summary><div role="group" aria-label="新增定义种类"><button type="button" data-om-create="class">实体类型</button><button type="button" data-om-create="relation">关系类型</button><button type="button" data-om-create="attribute">属性字段</button></div></details>
         </div>
         <div class="om-worktools">
@@ -661,16 +672,18 @@
           <span id="om-preview-text"></span>
           <button type="button" class="om-btn ghost" id="om-preview-exit">回到最新</button>
         </div>
-        <div class="om-version-context" id="om-version-context" aria-live="polite"></div>
         <div class="om-publication-feedback" id="om-publication-feedback" hidden></div>
         <div class="om-body">
           <!-- 用 div 不用 aside：全站 style.css 有一条给应用侧栏的全局规则
                aside{position:fixed;inset:0 auto 0 0;width:206px}，任何 aside 都会被固定到
                视口左上角、脱离三栏流（P1 实测踩到：三栏塌成空白）。 -->
           <div class="om-side" aria-label="本体术语目录">
+            <button type="button" class="om-directory-toggle" aria-controls="om-directory-content" aria-expanded="false">术语目录</button>
+            <div class="om-directory-content" id="om-directory-content">
             <section id="om-candidate-tasks" class="om-candidate-tasks" aria-label="候选与草案待办" aria-live="polite"></section>
             <div id="om-catalog-host"></div>
             <details class="om-hierarchy-directory"><summary>继承导航</summary><div id="om-side" aria-label="本体三维清单"></div></details>
+            </div>
           </div>
           <div class="om-stage"><div class="om-cards-host" id="om-cards-host"></div><div class="om-canvas-host" id="om-canvas-host" hidden></div></div>
           <button type="button" class="om-inspector-backdrop" id="om-inspector-backdrop" aria-label="关闭定义详情"></button>
@@ -704,13 +717,19 @@
     document.getElementById('om-pending-intake')?.addEventListener('click',()=>openIntake());
     if (parentButton) parentButton.addEventListener('click', () => { void discoverParents(); });
     const display=document.getElementById('om-node-display');
+    const directoryToggle=el.querySelector?.('.om-directory-toggle');
+    directoryToggle?.addEventListener('click',()=>{
+      const open=directoryToggle.getAttribute('aria-expanded')!=='true';
+      directoryToggle.setAttribute('aria-expanded',String(open));
+      el.classList.toggle('om-directory-open',open);
+      window.OntologyCanvas?.resize?.();
+    });
     display?.addEventListener('change',()=>{S.nodeDisplay=display.value;window.OntologyCanvas?.setDisplay(S.nodeDisplay);});
     document.getElementById('om-inspector-toggle')?.addEventListener('click',()=>setInspector(!inspectorOpen,true));
     for(const id of ['om-inspector-close','om-inspector-backdrop'])document.getElementById(id)?.addEventListener('click',()=>setInspector(false,true));
     el.addEventListener?.('keydown',event=>{if(event.key==='Escape'&&inspectorOpen)setInspector(false,true);});
     el.querySelectorAll('[data-om-view]').forEach(btn => btn.addEventListener('click', () => {
       S.view = btn.dataset.omView;
-      el.querySelectorAll('[data-om-view]').forEach(b => b.classList.toggle('on', b === btn));
       emit('view:changed', { view: S.view });
       if(S.view==='hierarchy'){const directory=el.querySelector?.('.om-hierarchy-directory');if(directory)directory.open=true;}
       if(display)display.disabled=S.view==='cards';
@@ -731,6 +750,7 @@
     if (window.OntologyPanel) window.OntologyPanel.mount(
       document.getElementById('om-detail-host'), document.getElementById('om-actions-host'), ctx);
     window.OntologyWorkspace?.mount(ctx);
+    window.ProjectVectorIndex?.mount(document.getElementById('om-vector-index-state'));
   }
 
   // 左栏三维清单（类 / 关系 / 属性）。点谁 = 选中谁（唯一入口 select）。
@@ -772,7 +792,7 @@
       <ul>${attrs.map(a => `<li class="${a.id === S.selected ? 'sel' : ''}" data-sel="${escHtml(a.id)}">
           <span class="om-chip attr"></span>${escHtml(label(a))}
           <span class="om-dtype">${escHtml(dtypeOf(a) || '?')}</span></li>`).join('') || '<li class="om-none">（还没有属性）</li>'}</ul>
-      <div class="om-tip">点名称查看定义 · 箭头展开子类<br>实线箭头 = 业务关系 · 虚线空心箭头 = 继承</div>`;
+      `;
     host.querySelectorAll('[data-tree-toggle]').forEach(button=>button.addEventListener('click',event=>{event.stopPropagation();const id=button.dataset.treeToggle;if(collapsedBranches.has(id))collapsedBranches.delete(id);else collapsedBranches.add(id);renderSidebar();}));
     host.querySelectorAll('[data-sel]').forEach(li => li.addEventListener('click', (e) => {
       e.stopPropagation(); // 树是嵌套 li：阻止子类点击冒泡到父类，否则点到子类却选中父类

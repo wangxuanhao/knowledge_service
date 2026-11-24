@@ -148,13 +148,20 @@
     else{get('metadata-value-choice').innerHTML='<option value="">先选择字段</option>';get('metadata-facet-summary').textContent=`${fields.length} 个可选字段${records!=null?' · '+records+' 条记录':''}${get('cb-show-system')?.checked?' · 包含系统字段':' · 系统字段已收起'}`;}
   }
   get('cb-show-system')?.addEventListener('change',()=>{renderFacetChoices();renderCB();});
+  const metadataLookup=window.WorkspaceContext.createLookup();
+  let displayedMetadataKey=null;
   async function discoverMetadata(){
-    const p=current,page=window.WorkspaceContext?.page,stamp=JSON.stringify(scope());
+    const p=current,page=window.WorkspaceContext?.page;
     // A closed page-owned filter rail must not scan the project at startup.
     if(!p||!details.open||!window.WorkspaceContext?.isContentPage(window.WorkspaceContext.page))return;
     if(!usesPostgresFields()){cb.facets=[];renderFacetChoices();renderCB();return;}
-    const result=await api(endpoint('/metadata/facets'),scope());
-    if(p!==current||page!==window.WorkspaceContext?.page||!details.open||!usesPostgresFields()||stamp!==JSON.stringify(scope()))return;
+    // Metadata discovery ignores the Metadata predicate so users can edit it.
+    const {filters,...range}=scope(),key=JSON.stringify([p,range]),url=endpoint('/metadata/facets');
+    if(displayedMetadataKey!==key){cb.facets=[];renderFacetChoices();renderCB();}
+    const result=await metadataLookup.read(key,()=>api(url,{...range,filters}));
+    const {filters:currentFilters,...currentRange}=scope();
+    if(p!==current||page!==window.WorkspaceContext?.page||!details.open||!usesPostgresFields()||key!==JSON.stringify([current,currentRange])||metadataLookup.peek(key)!==result)return;
+    displayedMetadataKey=key;
     cb.facets=result.fields;
     renderFacetChoices(result.records);
     renderCB();
@@ -674,7 +681,7 @@
       inspect(row);
     });
     chart.dispatchAction({type:'hideTip'});
-    const appearance=window.GraphAppearance?.tokens||{text:'#888995',edge:'#a8c9e2',outline:'#ffffff',selected:'#1689e9'};
+    const appearance=window.GraphAppearance?.tokens||{text:'#4e646c',edge:'#819db4',outline:'#ffffff',selected:'#1689e9'};
     const showLabels=get('graph-labels').checked;
     const showEdgeLabels=get('graph-edge-labels').checked;
     // The force layout plus the fit pass below are the client half of "the graph feels
@@ -688,7 +695,7 @@
     // ECharts 5's series-wide label manager detaches graph edge text and applies
     // its inverse graph scale a second time. GraphWorkbench culls node names; let
     // native graph edge labels retain their own screen-space transform.
-chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor:'#ffffff',borderColor:'#e1e2e8',textStyle:{color:'#27272a'},padding:16,extraCssText:'border-radius:10px;box-shadow:0 8px 24px #10182824;max-width:310px'},legend:[{show:false,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:appearance.selected,borderWidth:3},lineStyle:{color:appearance.selected,width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:12,color:appearance.text,distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:11,color:'#92939f'},emphasis:{focus:'adjacency',lineStyle:{color:appearance.selected,width:1.5,opacity:.7},label:{show:showLabels,color:'#3f3f46'},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n)),size=nodeSizes?.get(n.id)||nodeSize;return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,size+6):size),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:appearance.outline,borderWidth:result.nodes.length>100?0:1.2,...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:appearance.selected,borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:appearance.edge,opacity:appearance.edgeOpacity??.35,width:appearance.edgeWidth??1,curveness:.1}}]},{replaceMerge:['series']});
+chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor:'#ffffff',borderColor:'#e1e2e8',textStyle:{color:'#27272a'},padding:16,extraCssText:'border-radius:10px;box-shadow:0 8px 24px #10182824;max-width:310px'},legend:[{show:false,type:'scroll',data:types,formatter:categoryLabel,bottom:0,textStyle:{fontSize:12,color:'#627b82'}}],series:[{type:'graph',layout:'none',draggable:true,roam:'scale',scaleLimit:{min:.05,max:4},...GraphWorkbench.bounds(positioned,chart.getWidth(),chart.getHeight()),center:null,zoom:1,...viewport,selectedMode:'single',select:{itemStyle:{borderColor:appearance.selected,borderWidth:3},lineStyle:{color:appearance.selected,width:2,opacity:1},label:{show:showLabels,fontWeight:600},edgeLabel:{show:showEdgeLabels}},labelLayout:null,label:{show:showLabels,position:'right',fontSize:window.GraphAppearance?.labelSize?.(result.nodes.length)||12,color:appearance.text,distance:6,width:128,overflow:'truncate',backgroundColor:null,padding:0,borderRadius:0},edgeSymbol:['none','arrow'],edgeLabel:{show:showEdgeLabels&&result.nodes.length<=20,formatter:'{c}',fontSize:12,color:'#506570',opacity:1},emphasis:{focus:'adjacency',lineStyle:{color:appearance.selected,width:1.5,opacity:.7},label:{show:showLabels,color:'#3f3f46'},edgeLabel:{show:showEdgeLabels}},force:{repulsion:320,edgeLength:100,gravity:.1,initLayout:'circular',layoutAnimation:false},categories:types.map(name=>({name,itemStyle:{color:name==='attribute:'?attrColor:nodeColor({type:name.slice(7)})}})),data:positioned.map(n=>{const attribute=GraphTypeFilter.isAttributeNode(n),label=attribute?'属性值':(n.type_label||displayType(n.type));const index=catIndex(categoryKey(n)),size=nodeSizes?.get(n.id)||nodeSize;return {id:n.id,name:n.text,x:n.x,y:n.y,category:index,categoryName:label,symbol:attribute?'roundRect':'circle',symbolSize:attribute?[72,22]:(matched.has(n.id)?Math.max(18,size+6):size),label:{show:labelIds.has(n.id)?undefined:false},itemStyle:{color:attribute?attrColor:nodeColor(n),borderColor:appearance.outline,borderWidth:result.nodes.length>100?0:(appearance.nodeOutlineWidth??1.2),...(attribute&&n.status==='contradicting'?{borderColor:'#b42318',borderWidth:2,borderType:'dashed'}:{}),...(matched.has(n.id)?{borderColor:appearance.selected,borderWidth:3}:{})}}}),links:result.edges.map(e=>{const attribute=GraphTypeFilter.isAttributeEdge(e);return {id:e.id,source:e.subject_id,target:e.object_id,name:e.type_label||displayType(e.type),value:e.type_label||displayType(e.type),rawType:term(e.type),lineStyle:attribute?{type:'dashed',opacity:.55,width:1}:undefined};}),lineStyle:{color:appearance.edge,opacity:appearance.edgeOpacity??.35,width:appearance.edgeWidth??1,curveness:appearance.edgeCurveness??.1}}]},{replaceMerge:['series']});
     const visibleEntities=GraphTypeFilter.entityNodes(result),visibleRelations=GraphTypeFilter.relationEdges(result),attributeCount=result.nodes.length-visibleEntities.length;
     GraphWorkbench.mount(chart,result,current,inspect,effectiveGraphScope(),options);
     bindLocalExploration(result,selectedType);
@@ -1023,7 +1030,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     }
   };
   window.invalidateKnowledgeGraph=(detail={})=>{
-    if(!detail.refreshOnly){dirtyGraphModes.add('local');dirtyGraphModes.add('full');}
+    if(!detail.refreshOnly){window.WorkspaceContext?.invalidateLookups();dirtyGraphModes.add('local');dirtyGraphModes.add('full');}
     const mode=window.FullGraphView?.mode||'local',owner=JSON.stringify(graphScope());
     if(!changedGraph||changedGraph.mode!==mode||changedGraph.owner!==owner){
       const plan=localBranches?.refreshPlan()||[];
@@ -1189,10 +1196,14 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     const page=window.WorkspaceContext?.page;
     if(page==='search'){
       const project=current,generation=ontologyLoadGeneration,ticket=WorkspaceContext.ticket(project,page);
-      invalidateGraphContext({pending:true});ui.request++;window.clearGraphWorkspace();
+      invalidateGraphContext();ui.request++;window.clearGraphWorkspace();
+      // Let the scope event clear the old canvas before starting the new graph.
+      // Candidate and facet requests do not determine the graph's scope.
+      await Promise.resolve();
+      if(!WorkspaceContext.accepts(ticket,current,page))return;
+      if(graphContextReady)graphContextRestored(project,generation);
       await Promise.all([options(),discoverMetadata()]);
       if(!WorkspaceContext.accepts(ticket,current,page))return;
-      graphContextRestored(project,generation);
       if(WorkspaceContext.page===page&&get('query').value.trim()&&get('scope-purpose')?.value!=='graph'&&
         (window.RetrievalWorkspace?.mode??'knowledge')==='knowledge')await runSearch();
     }
@@ -1200,7 +1211,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   }
   const updateOwnedScope=()=>{refreshOwnedScope().catch(error=>status(error.message,true));};
   document.addEventListener('workspace:scope-changed',event=>{
-    if(event.detail.page==='qa'){searchScopeDirty=true;invalidateGraphContext({pending:true});return;}
+    if(event.detail.page==='qa'){searchScopeDirty=true;invalidateGraphContext();return;}
     updateOwnedScope();
   });
   document.addEventListener('workspace:page-changed',event=>{
@@ -1259,6 +1270,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
     get('project').title=get('project').selectedOptions[0]?.textContent||'';
     get('type-scope').value='';get('predicate-scope').value='';
     get('query').value='';get('graph-node').value='';updateChip();
+    window.WorkspaceContext?.restore();
     if(current){const project=current;sessionStorage.setItem('knowledge-project',project);loadOntologyTerms().then(result=>{
       if(project!==current||generation!==ontologyLoadGeneration)return;ui.ontology=result;return Promise.all([options(),discoverMetadata()]);
     }).then(()=>{graphContextRestored(project,generation);}).catch(e=>{if(project===current&&generation===ontologyLoadGeneration)status(e.message,true);});}
@@ -1367,7 +1379,7 @@ chart.setOption({animation:false,tooltip:{formatter:graphTooltip,backgroundColor
   // 等认证就绪再拉项目列表：未登录时先挂着。以前这里直接 projects()，
   // 会带着空令牌打 /api/projects 拿 401（登录框因此误报"登录状态已失效"）。
   (window.Auth&&window.Auth.whenReady?window.Auth.whenReady():Promise.resolve())
-   .then(()=>projects()).then(()=>{const saved=sessionStorage.getItem('knowledge-project');if(saved&&[...get('project').options].some(o=>o.value===saved))get('project').value=saved;else if(get('project').options.length>1)get('project').selectedIndex=1;if(get('project').value)get('project').onchange();}).catch(e=>status(e.message,true));
+   .then(()=>projects()).then(()=>{const project=get('project'),saved=sessionStorage.getItem('knowledge-project');if(saved&&[...project.options].some(o=>o.value===saved))project.value=saved;else if(project.options.length>1)project.selectedIndex=1;if(project.value)project.dispatchEvent(new Event('change',{bubbles:true}));}).catch(e=>status(e.message,true));
 })();
 
 /* Upload mode selector and extraction guidance. */

@@ -162,6 +162,20 @@ function uiFixture(options={}){
   const all=node=>[node,...node.children.flatMap(all)];
   return {ui:window.OntologyIntake,drawers,calls,all,context,find:text=>all(drawers[0].content).find(item=>item.textContent===text)};
 }
+test('linked draft candidates open under draft status with their saved mapping and business expiry',async()=>{
+  const f=uiFixture({terms:[{iri:'urn:Rule',kind:'class',label:'规则文档'}],candidates:[
+    {id:'a',text:'旧版细则',kind:'entity',proposed_type:'旧规则',document_id:'doc',valid_until:'2020-07-11T00:00:00Z',
+      linked_drafts:[{draft_id:'draft',status:'draft_created',confirmed_mapping:{target_iri:'urn:Rule',target_kind:'class'}}]},
+  ]});
+  await f.ui.open({projectId:'p',candidateIds:['a'],reviewDraft:true});
+  assert.equal(f.ui.state.filters.status,'draft');
+  assert.ok(f.find('本草案复用 · 规则文档（实体类）'));
+  assert.equal(f.find('预览选中内容（只读）'),undefined);
+  const text=f.all(f.drawers[0].content).map(node=>node.textContent||'').join(' ');
+  assert.match(text,/已失效.*2020-07-11/);
+  assert.equal(f.calls.some(call=>call.method==='POST'),false);
+});
+
 test('drawer previews real selected candidate identities and explicit target without draft creation',async()=>{
   const f=uiFixture();await f.ui.open({projectId:'p',documentId:'doc'});
   const checkbox=f.all(f.drawers[0].content).find(item=>item.type==='checkbox');checkbox.checked=true;await checkbox.onchange();

@@ -1,8 +1,8 @@
 // Optional graph storage controls; credentials are only read on the server.
 (() => {
-  const panel = document.createElement('section');
+  const panel = document.createElement('details');
   panel.className = 'panel neo4j-panel';
-  panel.innerHTML = '<h2>Neo4j 图谱副本 · 同步与核验</h2><p class="subtle">这里只做一件事：把本地图谱按项目复制到 Neo4j，并核验两边是否一致。<b>本地始终是权威</b>——检索、问答、版本历史都不走 Neo4j，同步失败也不影响本地数据。连接凭据通过服务环境变量配置。</p><div class="row"><button data-storage="check" class="secondary">检查连接</button><button data-storage="status" class="secondary">当前项目同步状态</button><button data-storage="sync">同步当前项目</button></div><pre aria-live="polite"></pre>';
+  panel.innerHTML = '<summary>Neo4j 图谱副本 · 同步与核验</summary><p class="subtle">按项目将本地图谱同步到 Neo4j，并核验副本。检索、问答与版本历史使用本地数据。</p><div class="row"><button data-storage="check" class="secondary">检查连接</button><button data-storage="status" class="secondary">当前项目同步状态</button><button data-storage="sync">同步当前项目</button></div><pre aria-live="polite"></pre>';
   document.getElementById('tab-dashboard').appendChild(panel);
   const output = panel.querySelector('pre');
   let generation = 0;

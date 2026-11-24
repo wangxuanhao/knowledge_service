@@ -16,8 +16,7 @@ function open(){
  window.KnowledgeTabs?.open('useradmin',{trigger:false});window.WorkspaceContext?.enter('useradmin');
  drawer=document.getElementById('tab-useradmin');if(!drawer)return;
  drawer.innerHTML=`<section class="ua-page">
- <header class="ua-head"><div><h2>人员管理</h2><p class="ua-sub">全局登录账号与系统角色</p></div><button type="button" id="ua-add">添加人员</button></header>
- <p class="ua-description">查看谁可以登录、拥有什么权限，以及账号是否启用。</p>
+ <header class="ua-head"><h2 class="ua-sub">全局登录账号与系统角色</h2><button type="button" id="ua-add">添加人员</button></header>
  <p class="ua-flash" data-ua-flash role="status" aria-live="polite"></p>
  <div class="ua-search"><label class="ua-search-field" for="ua-search">搜索人员<input id="ua-search" type="search" placeholder="展示名或登录账号"></label><label class="ua-state-field" for="ua-state">账号状态<select id="ua-state"><option value="">全部状态</option><option value="on">启用</option><option value="off">停用</option></select></label><button type="button" id="ua-refresh" class="secondary">刷新</button></div>
  <div class="ua-list-head"><h3>账号列表</h3><span id="ua-result-count" role="status" aria-live="polite">正在读取账号…</span></div>

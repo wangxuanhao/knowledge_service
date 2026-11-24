@@ -76,6 +76,12 @@ class AnswerPromptGraphTests(unittest.TestCase):
             def get_project(self, project):
                 return {'id': project}
 
+            def ontology_version_signature(self, project):
+                return tuple(version['id'] for version in self.list_ontologies(project))
+
+            def get_ontology(self, project):
+                return self.list_ontologies(project)[-1]
+
             def list_ontologies(self, _project):
                 return [{'id': 'ontology', 'turtle': '''
                     @prefix owl: <http://www.w3.org/2002/07/owl#> .

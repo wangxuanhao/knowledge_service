@@ -1297,10 +1297,11 @@
         el('p',null,'一个定义可能包含创建、名称说明、继承等多项底层操作；操作数不等于定义数，也不等于关联候选事实数。'));
       bar.append(technical);
     }
-    if(associated?.per_batch?.length){
-      const scope=el('details','om-ab-linked-scope');scope.append(el('summary',null,'同时处理的关联知识 · 按来源运行核对'));
-      associated.per_batch.forEach((batch,index)=>{const entry=el('details');entry.append(el('summary',null,`第 ${index+1} 次候选加入 · 明确选中 ${batch.selected??'未提供'} 条`),el('pre',null,JSON.stringify(batch,null,2)));scope.append(entry);});
-      bar.append(scope);
+    const rules=window.OntologyReview?.knowledgeRules?.(draft,el,
+      st.preview?null:()=>model()?.openWorkspace?.('facts'));
+    if(rules){
+      rules.open=actionsHost.querySelector?.('.om-knowledge-rules')?.open||false;
+      bar.append(rules);
     }
     renderReadinessItems(st,bar);
     if(localTask){const progress=el('p','om-ab-progress',localTask.message+(localTask.slow?' 仍在处理，请勿重复点击；收到结果后会自动更新。':''));progress.setAttribute('role','status');progress.setAttribute('aria-live','polite');bar.append(progress);}
@@ -1551,6 +1552,7 @@
     window.OntologyReview.open({
       host:document.getElementById('tab-ontology-model')||document.body,
       getContext:()=>({projectId:activeProject(),draftId:M.S.draft?.id,revision:M.S.draft?.revision,preview:!!M.S.preview}),
+      onOpenKnowledge:()=>{if(activeProject()===project&&M.S.draft?.id===id&&!M.S.preview)M.openWorkspace?.('facts');},
       request:(route,body,method)=>(route===''||route.startsWith('/decisions/')?draftApi:api)(route==='/stage-availability'?stageRoute:base+route,body,method),
       onSaved:draft=>{
         if(activeProject()!==project||M.S.draft?.id!==id||M.S.preview)return;

@@ -271,6 +271,7 @@ def test_batch_reports_uncertain_group_failures_and_continues_other_groups():
         if key=='one':raise RuntimeError('transport interrupted')
         return dict(key=key,status='merged')
     batch.confirm=confirm
+    batch._batch_group_errors=lambda project,groups:{}
     result=batch.batch('p',[dict(key=k,preview_fingerprint='a'*64) for k in ('one','two')],actor='reviewer')
     assert [r['status'] for r in result['results']]==['failed','merged']
     assert result['results'][0]['refresh_required'] is True
@@ -287,6 +288,206 @@ def document_supported_conflict(tmp_path,right_value=2,*,turtle=TTL):
              datatype='http://www.w3.org/2001/XMLSchema#integer',subject_id=entity,source_id=document)
         for id,value,entity,document in [('left',1,'keep','doc-left'),('right',right_value,'drop','doc-right')]])
     return repo,service,p,Governance(service)
+
+
+def test_document_duplicate_scan_scopes_members_and_revalidates_support(tmp_path):
+    repo, service, project, governance = document_supported_conflict(tmp_path)
+    service.write(project, [
+        dict(id='extra', kind='entity', type='Person', text='甲', source_id='doc-left'),
+        *[dict(id=entity, kind='entity', type='Person', text=text, source_id=document)
+          for entity, text, document in [('b1', '乙', 'doc-left'), ('b2', '乙', 'doc-left'),
+                                         ('c1', '丙', 'doc-right'), ('c2', '丙', 'doc-right')]],
+    ])
+    version = repo.get_record(project, 'doc-left')['version_id']
+    scope = dict(document_id='doc-left', document_version_id=version)
+    with pytest.raises(ValueError, match='资料版本'):
+        governance.scan_duplicates(project, document_id='doc-right', document_version_id=version,
+                                   document_mode='within')
+    with pytest.raises(ValueError):
+        governance.scan_duplicates(project, document_id='doc-left')
+
+    first = governance.scan_duplicates(project, **scope, document_mode='within', limit=1)
+    second = governance.scan_duplicates(project, **scope, document_mode='within', cursor=first['next_cursor'])
+    with pytest.raises(ValueError, match='游标'):
+        governance.scan_duplicates(project, **scope, document_mode='related', cursor=first['next_cursor'])
+    with pytest.raises(ValueError, match='游标'):
+        governance.scan_duplicates(project, cursor=first['next_cursor'])
+    legacy_cursor = governance.scan_duplicates(project, limit=1)['next_cursor']
+    with pytest.raises(ValueError, match='游标'):
+        governance.scan_duplicates(project, **scope, document_mode='within', cursor=legacy_cursor)
+
+    within = {group['name']: group for group in first['groups'] + second['groups']}
+    assert set(within) == {'甲', '乙'}
+    assert {member['id'] for member in within['甲']['members']} == {'keep', 'extra'}
+    related = {group['name']: group for group in governance.scan_duplicates(
+        project, **scope, document_mode='related')['groups']}
+    assert set(related) == {'甲', '乙'}
+    assert {member['id'] for member in related['甲']['members']} == {'keep', 'extra', 'drop'}
+    preview = governance.preview_duplicate_group(project, within['甲']['key'])
+    assert set(preview['expected_versions']) == {'keep', 'extra'}
+    support = repo.list_assertions(project, canonical_record_id='extra')[0]
+    repo.transition_assertion(project, support['id'], support['decision_version'],
+                              'superseded', '来源撤回', 'reviewer')
+    after_withdrawal = governance.scan_duplicates(project, **scope, document_mode='within')['groups']
+    assert {group['name'] for group in after_withdrawal} == {'乙'}
+    still_related = governance.scan_duplicates(project, **scope, document_mode='related')['groups']
+    assert {group['name'] for group in still_related} == {'甲', '乙'}
+    result = governance.confirm_duplicate_groups(project, [
+        dict(key=within['甲']['key'], preview_fingerprint=preview['preview_fingerprint']),
+    ], actor='reviewer')['results'][0]
+    assert result['status'] == 'failed'
+    assert '版本冲突' in result['error']
+    assert not repo.get_record(project, 'keep')['metadata'].get('_deleted')
+
+
+def test_batch_preview_is_ordered_bounded_and_readable_by_viewer(tmp_path):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+
+    app = create_app(tmp_path / 'duplicate-preview-viewer.sqlite', HashingEncoder(), auth_disabled=False)
+    with TestClient(app) as client:
+        admin = client.post('/api/auth/login', json={'username': 'admin', 'password': 'admin123'}).json()['access_token']
+        assert client.post('/api/users', headers={'Authorization': 'Bearer ' + admin},
+                           json={'username': 'duplicate-viewer', 'password': 'pass123', 'role': 'viewer'}).status_code == 201
+        viewer = client.post('/api/auth/login', json={'username': 'duplicate-viewer', 'password': 'pass123'}).json()['access_token']
+        headers = {'Authorization': 'Bearer ' + viewer}
+        _, _, project, governance = setup_conflict(tmp_path, app.state.service)
+        key = governance.scan_duplicates(project)['groups'][0]['key']
+        other = app.state.service.repository.create_project('other')['id']
+        endpoint = '/api/projects/' + project + '/duplicates/preview-batch'
+        response = client.post(endpoint, json={'keys': ['bad', key]}, headers=headers)
+        assert response.status_code == 200, response.text
+        failed, ready = response.json()['results']
+        assert failed['status'] == 'failed' and failed['key'] == 'bad' and failed['error']
+        assert ready == {**governance.preview_duplicate_group(project, key), 'status': 'ready'}
+        assert client.post(endpoint, json={'keys': []}, headers=headers).status_code == 422
+        assert client.post(endpoint, json={'keys': [key] * 21}, headers=headers).status_code == 422
+        foreign = client.post('/api/projects/' + other + '/duplicates/preview-batch',
+                              json={'keys': [key]}, headers=headers).json()['results'][0]
+        assert foreign['status'] == 'failed' and foreign['key'] == key
+
+
+def test_review_reads_large_and_incompatible_duplicate_groups_without_a_merge_preview(tmp_path):
+    from fastapi.testclient import TestClient
+    from knowledge_service.api import create_app
+    from knowledge_service.api.security_middleware import requires_write_access
+
+    app = create_app(tmp_path / 'duplicate-member-review.sqlite', HashingEncoder())
+    with TestClient(app) as client:
+        _, service, project, governance = setup_conflict(tmp_path, app.state.service)
+        large = [dict(id=f'large-{i:02}', kind='entity', type='Person', text='大组') for i in range(24)]
+        mixed = [dict(id=f'mixed-{i}', kind='entity', type='Person', text='冲突组', valid_from=start)
+                 for i, start in enumerate(['2025-01-01', '2025-01-01', '2026-01-01'])]
+        service.write(project, large + mixed)
+        groups = {group['name']: group for group in governance.scan_duplicates(project)['groups']}
+        oversized, incompatible = groups['大组'], groups['冲突组']
+        assert oversized['blocked'] and oversized['member_count'] == 24
+
+        root = f'/api/projects/{project}/duplicates'
+        assert not requires_write_access('POST', root + '/members')
+        result = client.post(root + '/preview-batch', json={'keys':[incompatible['key']]}).json()['results'][0]
+        assert result['status'] == 'review_required' and '业务有效期' in result['error']
+        single = client.post(root + '/preview', json={'key':incompatible['key']})
+        assert single.status_code == 200 and single.json() == result
+
+        for group, expected in [(oversized, large), (incompatible, mixed)]:
+            reviewed = []
+            after = None
+            while True:
+                response = client.post(root + '/members', json={'key':group['key'], 'limit':10, 'after_id':after})
+                assert response.status_code == 200, response.text
+                page = response.json()
+                assert 0 < len(page['members']) <= 10
+                assert all(row['version_id'] and 'source_contexts' in row for row in page['members'])
+                reviewed.extend(row['id'] for row in page['members'])
+                after = page['next_after_id']
+                if after is None:
+                    break
+                assert after == reviewed[-1]
+            assert reviewed == [row['id'] for row in expected]
+
+        assert client.post(root + '/members', json={'key':oversized['key'], 'limit':21}).status_code == 422
+        other = service.repository.create_project('other-project')['id']
+        assert client.post(f'/api/projects/{other}/duplicates/members', json={'key':oversized['key']}).status_code == 422
+        rows = client.post(root + '/members', json={'key':incompatible['key']}).json()['members']
+        assert client.post(root + '/sources', json={'key':incompatible['key'], 'entity_id':rows[0]['id'],
+            'expected_version_id':rows[0]['version_id']}).status_code == 200
+        assert client.post(root + '/sources', json={'key':incompatible['key'], 'entity_id':'large-00',
+            'expected_version_id':rows[0]['version_id']}).status_code == 404
+        merge_preview = f'/api/projects/{project}/merge/preview'
+        for drop, status in [('mixed-1', 200), ('mixed-2', 422)]:
+            expected_versions = {row['id']:row['version'] for row in rows if row['id'] in ('mixed-0', drop)}
+            response = client.post(merge_preview, json={'keep_id':'mixed-0', 'drop_id':drop,
+                                   'expected_versions':expected_versions})
+            assert response.status_code == status, response.text
+
+
+def test_batch_confirm_blocks_every_overlapping_group_before_any_write(tmp_path):
+    repo, service, project, governance = setup_conflict(tmp_path)
+    governance.alias(project, 'keep', '乙', 1)
+    service.write(project, [dict(id=entity, kind='entity', type='Person', text=name)
+                            for entity, name in [('other', '乙'), ('c1', '丙'), ('c2', '丙')]])
+    previews = [governance.preview_duplicate_group(project, group['key']) for group in
+                governance.scan_duplicates(project)['groups']]
+    independent = next(group for group in previews if set(group['expected_versions']) == {'c1', 'c2'})
+    results = governance.confirm_duplicate_groups(project, [
+        dict(key=group['key'], preview_fingerprint=group['preview_fingerprint']) for group in previews
+    ], actor='reviewer')['results']
+    for result in results:
+        if result['key'] == independent['key']:
+            assert result['status'] == 'merged'
+        else:
+            assert result['status'] == 'failed' and '重叠' in result['error']
+    for entity in ('keep', 'drop', 'other'):
+        assert not repo.get_record(project, entity)['metadata'].get('_deleted')
+
+
+@pytest.mark.parametrize('artifact_id', ['original-artifact', None])
+def test_document_duplicate_scope_matches_frozen_ingest_receipt(tmp_path, artifact_id):
+    ontology = TTL + '\n:links a owl:ObjectProperty; rdfs:domain :Person; rdfs:range :Person .'
+    repo, service, project, governance = document_supported_conflict(tmp_path, turtle=ontology)
+    metadata = {'status': 'processing'}
+    if artifact_id:
+        metadata['source_document_version_id'] = artifact_id
+    document = dict(id='ingested', kind='document', text='同一来源', metadata=metadata)
+    receipt = repo.put_record(project, document, expected_version=0)
+    run = repo.create_ingest_run(project, receipt['id'], receipt['version_id'])
+    service.write(project, [
+        dict(id='a', kind='entity', type='Person', text='乙', source_id=receipt['id']),
+        dict(id='b', kind='entity', type='Person', text='乙', source_id=receipt['id']),
+        dict(id='neighbor', kind='entity', type='Person', text='关系另一端'),
+        dict(id='relation', kind='relation', type='links', subject_id='a', object_id='neighbor', text='关联'),
+    ])
+    ready = repo.put_record(project, {**document, 'metadata': {**metadata, 'status': 'ready', 'run_id': run['id']}},
+                            expected_version=receipt['version'])
+    unrelated_docs = service.write(project, [dict(id=f'n-{n}', kind='document', text='另一来源') for n in range(11)])
+    service.write(project, [], operation='adopt_discovery', assertions=[
+        dict(id=f'other-context-{n}', kind='entity', document_id=source['id'],
+             document_version_id=source['version_id'], canonical_record_id='a', quote='另一来源',
+             payload=dict(id='a', kind='entity', type='https://conflict.test/Person', text='乙'))
+        for n, source in enumerate(unrelated_docs)
+    ])
+    governance.alias(project, 'a', '新增别名', repo.get_record(project, 'a')['version'])
+    group, = governance.scan_duplicates(project, document_id=ready['id'], document_version_id=ready['version_id'],
+                                         document_mode='within')['groups']
+    preview = governance.preview_duplicate_group(project, group['key'])
+    entity = next(member for member in preview['members'] if member['id'] == 'a')
+    assert entity['document_count'] == 12
+    source = entity['source_contexts'][0]
+    assert source['document_version_id'] == receipt['version_id']
+    assert source['source_document_version_id'] == artifact_id
+    relation, = entity['relation_context']['examples']
+    assert entity['relation_context']['total'] == 1
+    assert relation['id'] == 'relation' and relation['object_label'] == '关系另一端'
+    next_page = governance.duplicate_sources(project, group['key'], preview['preview_fingerprint'],
+        entity['id'], entity['version_id'], cursor=entity['source_next_cursor'])
+    contexts = entity['source_contexts'] + next_page['source_contexts']
+    assert len({context['context_id'] for context in contexts}) == len(contexts) == entity['support_count']
+
+    replacement = repo.put_record(project, {**document, 'metadata': {'source_document_version_id':'different-artifact'}},
+                                  expected_version=ready['version'])
+    assert governance.scan_duplicates(project, document_id=replacement['id'],
+        document_version_id=replacement['version_id'], document_mode='within')['groups'] == []
 
 
 def test_complete_conflict_read_resolves_two_independent_platform_pairs(tmp_path):
