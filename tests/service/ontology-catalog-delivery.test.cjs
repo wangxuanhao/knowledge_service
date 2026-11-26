@@ -63,11 +63,23 @@ test('Turtle import and editing follow write permissions while viewers can read 
   assert.equal(find('导入 Turtle 本体').hidden,false);
   find('导入 Turtle 本体').events.click();
   await new Promise(resolve=>setImmediate(resolve));
-  const save=find('把源码差异加入草案');
-  assert.equal(save.hidden,false);
+  const save=find('加入草案');
+  const file=nodes.find(node=>node.type==='file');
+  const dialog=nodes.findLast(node=>node.tag==='dialog');
+  assert.equal(save.disabled,true);
+  assert.equal(dialog.children.some(node=>node.tag==='pre'||node.tag==='textarea'),false);
+  file.files=[{name:'rules.ttl',text:async()=>'<urn:class> a <http://www.w3.org/2002/07/owl#Class> .'}];
+  await file.onchange();
+  assert.equal(save.disabled,false);
+  assert.deepEqual(writes,[]);
+  assert.equal(dialog.children.some(node=>node.tag==='pre'||node.tag==='textarea'),false);
   canWrite=false;
   await save.events.click();
   assert.deepEqual(writes,[]);
+  canWrite=true;
+  await save.events.click();
+  assert.equal(writes[0].action,'import_turtle');
+  assert.match(writes[0].turtle,/urn:class/);
 });
 
 test('class card summaries preserve direct datatypes, declared required flags and inherited properties', () => {

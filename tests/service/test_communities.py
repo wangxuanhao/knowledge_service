@@ -51,6 +51,50 @@ def test_partition_is_deterministic_and_excludes_isolates():
         frozenset({'a', 'b', 'c'}), frozenset({'d', 'e', 'f'})}
 
 
+def test_community_spans_documents_connected_by_an_accepted_relation(tmp_path, monkeypatch):
+    from knowledge_service.services import community_reports
+
+    def report_with_one_source(_title, content, _config):
+        first = next(item for item in content['evidence'] if item['kind'] == 'document')
+        return {'status': 'ready', 'title': '共同主题', 'summary': '跨文档社区',
+                'findings': [{'text': '已核实的发现', 'citations': [first['id']]}]}
+
+    monkeypatch.setattr(community_reports, 'build_report', report_with_one_source)
+    app = create_app(tmp_path / 'cross-source-community', encoder=HashingEncoder())
+    repo = app.state.service.repository
+    project = repo.create_project('cross-source')['id']
+    doc_ids = set()
+    for suffix in ('a', 'b'):
+        entity = put_entity(repo, project, f'entity-{suffix}')
+        doc = repo.put_record(project, {'id': f'doc-{suffix}', 'kind': 'document', 'text': '不同文档的依据'})
+        doc_ids.add(doc['id'])
+        chunk = repo.put_record(project, {'id': f'chunk-{suffix}', 'kind': 'chunk', 'text': doc['text'],
+             'source_id': doc['id'], 'metadata': {'source_version_id': doc['version_id'],
+                                                 'start_char': 0, 'end_char': len(doc['text'])}})
+        candidate = repo.create_assertion(project, {
+            'id': f'candidate-{suffix}', 'kind': 'entity', 'payload': {}, 'actor': 'reviewer',
+            'document_id': doc['id'], 'document_version_id': doc['version_id'],
+            'chunk_id': chunk['id'], 'quote': doc['text'], 'start_char': 0, 'end_char': len(doc['text'])})
+        repo.transition_assertion(project, candidate['id'], 1, 'accepted',
+                                  'reviewed', 'reviewer', canonical_record_id=entity['id'])
+        event = repo.list_assertion_events(project, candidate['id'])[-1]
+        repo.add_record_version_assertion(project, entity['id'], entity['version_id'],
+                                          candidate['id'], event['id'])
+    put_relation(repo, project, 'linked', 'entity-a', 'entity-b')
+
+    url = f'/api/projects/{project}/communities'
+    with TestClient(app) as client:
+        assert client.post(url + '/build', json={}).status_code == 200
+        wait_status(client, url, {'kind': 'project'}, lambda status: status['state'] == 'ready')
+        listing = client.post(url, json={}).json()
+        assert listing['total'] == 1
+        detail = client.post(url + '/detail', json={'community_id': listing['communities'][0]['id']}).json()
+        assert {row['id'] for row in detail['members']} == {'entity-a', 'entity-b'}
+        assert {item['document_id'] for item in detail['evidence'] if item['kind'] == 'document'} == doc_ids
+        assert detail['source_document_count'] == 2
+        assert detail['cited_document_count'] == 1
+
+
 def test_community_routes_limit_scope_and_refresh_only_for_qualified_changes(tmp_path, monkeypatch):
     from knowledge_service.services import community_reports
 
@@ -112,6 +156,11 @@ def test_community_routes_limit_scope_and_refresh_only_for_qualified_changes(tmp
         }).json()
         assert keyword_answer['coverage']['retrieval'] == 'keyword'
         assert keyword_answer['communities'][0]['keyword_match'] == matched['communities'][0]['keyword_match']
+        follow_up = {'scope': scope, 'question': '那第二次呢？', 'match_only': True}
+        assert client.post(url + '/ask', json=follow_up).json()['communities'] == []
+        followed = client.post(url + '/ask', json={**follow_up, 'conversation_context': [
+            {'question': 'PAIRED 首次违规怎么处置？'}]}).json()
+        assert followed['communities'][0]['id'] == community['id']
 
         put_entity(repo, project, 'taobao2', platform='淘宝')
         app.state.community_refresh.refresh()
@@ -207,9 +256,11 @@ def test_community_reports_retry_in_place_and_cite_frozen_sources(tmp_path, monk
     entity = put_entity(repo, project, 'reviewed-entity')
     put_entity(repo, project, 'related-entity')
     put_relation(repo, project, 'reviewed-relation', 'reviewed-entity', 'related-entity')
-    doc = repo.put_record(project, {'id': 'source', 'kind': 'document', 'text': '复核规则依据'})
+    applicability = {'platforms': {'mode': 'specific', 'values': ['抖音电商']}}
+    doc = repo.put_record(project, {'id': 'source', 'kind': 'document', 'text': '复核规则依据',
+                                    'metadata': {'applicability': applicability}})
     chunk = repo.put_record(project, {'id': 'source-chunk', 'kind': 'chunk', 'text': doc['text'],
-        'source_id': doc['id'], 'metadata': {'source_version_id': doc['version_id'],
+        'source_id': doc['id'], 'metadata': {'source_version_id': doc['version_id'], 'applicability': applicability,
                                              'start_char': 0, 'end_char': len(doc['text'])}})
     candidate = repo.create_assertion(project, {
         'id': 'candidate', 'kind': 'entity', 'payload': {}, 'actor': 'reviewer',
@@ -266,9 +317,61 @@ def test_community_reports_retry_in_place_and_cite_frozen_sources(tmp_path, monk
         assert not rule['generated']
         assert rule['coverage']['reports_with_eligible_evidence'] == 0
         assert not rule['evidence']
+        def stream_model(messages, config, emit):
+            emit('delta', {'text': '逐段回答'})
+            evidence = json.loads(messages[1]['content'])['evidence']
+            return {'answer': '逐段回答', 'citations': [evidence[0]['id']]}
+
+        def stream_events(question, **options):
+            streamed = client.post(url + '/ask', headers={'Accept': 'text/event-stream'},
+                                   json={'question': question, 'generate': True, **options})
+            return [(name.removeprefix('event: '), json.loads(data.removeprefix('data: ')))
+                    for block in streamed.text.strip().split('\n\n') for name, data in [block.splitlines()]]
+
+        with monkeypatch.context() as patch:
+            patch.setattr(community_reports, '_stream_completion', stream_model)
+            for options in ({'community_ids': [community['id']]}, {'mode': 'semantic'}, {'mode': 'global', 'level': 0}):
+                events = stream_events('有哪些主题？', **options)
+                assert events[0] == ('progress', {'stage': 'retrieving'})
+                assert events[1][0] == 'evidence', events
+                assert global_answer['citations'][0] in {item['id'] for item in events[1][1]['evidence']}
+                assert ('delta', {'text': '逐段回答'}) in events[2:-1]
+                assert events[-1][0] == 'done' and events[-1][1]['citations'] == global_answer['citations']
+            insufficient = stream_events('现在适用什么规则？', mode='global', level=0)
+            assert [name for name, _ in insufficient] == ['progress', 'done']
+            assert not insufficient[-1][1]['evidence']
+
+        original_searches = []
+        search_service = app.state.communities.search_service
+        real_search = search_service.search
+
+        def raw_search(_project, request):
+            original_searches.append(request)
+            return real_search(_project, request)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(search_service, 'search', raw_search)
+            patch.setattr(community_reports, 'complete', lambda *_: {'questions': [
+                {'query': '复核规则依据适用于哪个平台？'}, {'query': '{platform} 有哪些其他限制？', 'platform_from': 1},
+            ]})
+            patch.setattr(community_reports, '_stream_completion', stream_model)
+            events = stream_events('有哪些主题？', mode='hybrid', plan=True)
+        assert ('progress', {'stage': 'planning'}) in events
+        assert [data['subquestion']['number'] for name, data in events if name == 'evidence'] == [1, 2]
+        assert events[-1][0] == 'done' and events[-1][1]['generated']
+        planned = events[-1][1]
+        assert planned['answer_purpose'] == 'document_explanation'
+        assert planned['subquestions'][1]['platform'] == '抖音电商'
+        assert planned['subquestions'][0]['channels'] == ['keyword', 'semantic', 'original_keyword']
+        assert planned['evidence'][0]['source_platforms'] == ['抖音电商']
+        assert original_searches[-1]['applicability'] == applicability
+
         repo.put_record(project, {'id': doc['id'], 'kind': 'document', 'text': '修订后的文本'},
                         expected_version=1)
         detail = client.post(url + '/detail', json={'community_id': community['id']}).json()
+        assert detail['source_document_count'] == detail['cited_document_count'] == 1
+        page = client.post(url + '/detail', json={'community_id': community['id'], 'offset': 1, 'limit': 1}).json()
+        assert page['source_document_count'] == page['cited_document_count'] == 1
         source = detail['evidence'][0]
         assert source['kind'] == 'document'
         assert source['quote'] == '规则'
@@ -281,6 +384,7 @@ def test_community_reports_retry_in_place_and_cite_frozen_sources(tmp_path, monk
         assert answer.status_code == 200, answer.text
         assert answer.json()['generated']
         assert answer.json()['citations'] == [source['id']]
+
         broad = client.post(url + '/ask', json={'question': '项目有哪些主要主题？', 'generate': True}).json()
         assert broad['generated']
         assert broad['coverage']['retrieval'] == 'representative'

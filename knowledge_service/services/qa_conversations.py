@@ -121,6 +121,10 @@ def _scope(value):
         result['applicability'] = _applicability(value['applicability'])
     if isinstance(value.get('filters'), dict):
         result['filters'] = _filter(value['filters'])
+    community = value.get('community')
+    if isinstance(community, dict) and community.get('kind') in ('project', 'platform'):
+        result['community'] = _display_object(community, ('kind', 'platform', 'mode'), ('level',), ('generate',))
+        result['community']['community_ids'] = _string_list(community.get('community_ids'), count=32, length=200)
     return result
 
 
@@ -134,6 +138,59 @@ def _display_object(value, strings=(), numbers=(), booleans=()):
         for key in booleans:
             if type(value.get(key)) is bool:
                 result[key] = value[key]
+    return result
+
+
+def _community_result(value):
+    result = _display_object(value, ('as_of', 'answer_purpose', 'generation_error'),
+                             booleans=('generated', 'planning_fallback'))
+    result['citations'] = _string_list(value.get('citations'), count=24, length=200)
+    result['coverage'] = _display_object(value.get('coverage'), ('mode', 'retrieval'), (
+        'level', 'reports_ready', 'target_communities', 'reports_with_eligible_evidence', 'reports_mapped',
+        'preview_communities', 'included_communities', 'selected_communities', 'matched_communities',
+        'scope_communities', 'reports_included', 'evidence_available', 'evidence_returned'), ('complete',))
+    if isinstance(value.get('evidence'), list):
+        result['evidence'] = []
+        for item in value['evidence'][:24]:
+            evidence = _strings(item, ('id', 'kind', 'title', 'quote', 'source_version_id',
+                'document_id', 'document_version_id', 'chunk_version_id', 'assertion_id', 'validity_status'), limit=2000)
+            if not evidence.get('id'):
+                continue
+            evidence.update(_display_object(item, numbers=('start_char', 'end_char')))
+            if isinstance(item.get('source_platforms'), list):
+                evidence['source_platforms'] = _string_list(item['source_platforms'], count=10, length=128)
+            location = _display_object(item.get('source_location'), ('kind', 'sheet', 'path'),
+                ('page', 'row', 'paragraph', 'start_char', 'end_char'))
+            if location:
+                evidence['source_location'] = location
+            result['evidence'].append(evidence)
+    if isinstance(value.get('communities'), list):
+        result['communities'] = []
+        for item in value['communities'][:32]:
+            if not isinstance(item, dict):
+                continue
+            report = item.get('report') if isinstance(item.get('report'), dict) else item
+            display = _strings(item, ('title', 'report_title'), limit=200)
+            display.update(_display_object(item, numbers=('semantic_score',)))
+            display['keyword_match'] = _strings(item.get('keyword_match'),
+                ('field', 'before', 'term', 'after', 'source_title'), limit=500)
+            display['summary'] = _strings(report, ('summary',), limit=1600).get('summary') or _strings(item, ('summary',), limit=1600).get('summary', '')
+            if isinstance(report.get('findings'), list):
+                display['findings'] = [
+                    {'text': finding['text'][:800], 'citations': _string_list(finding.get('citations'), count=24, length=200)}
+                    for finding in report['findings'][:12]
+                    if isinstance(finding, dict) and isinstance(finding.get('text'), str)]
+            result['communities'].append(display)
+    if isinstance(value.get('subquestions'), list):
+        result['subquestions'] = []
+        for row in value['subquestions'][:4]:
+            if not isinstance(row, dict) or type(row.get('number')) is not int or not 1 <= row['number'] <= 4:
+                continue
+            clean = _strings(row, ('question', 'platform', 'state'), limit=2000)
+            clean['number'] = row['number']
+            for key in ('channels', 'warnings', 'evidence_ids'):
+                clean[key] = _string_list(row.get(key), count=6, length=200)
+            result['subquestions'].append(clean)
     return result
 
 
@@ -159,6 +216,8 @@ def sanitize_messages(project_id, messages):
         clean = {'kind': message['kind'], 'text': message['text'],
                  'scope': _scope(message['scope']), 'project_id': project_id}
         if message['kind'] == 'assistant':
+            if 'community' in clean['scope'] and isinstance(message.get('community_result'), dict):
+                clean['community_result'] = _community_result(message['community_result'])
             clean.update(_strings(message, ('answer_id', 'retrieval_run_id', 'as_of', 'known_at',
                 'mode', 'answer_purpose', 'answer_label')))
             for key in _EVIDENCE_ARRAYS:

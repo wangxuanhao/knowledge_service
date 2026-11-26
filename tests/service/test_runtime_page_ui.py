@@ -175,12 +175,12 @@ def test_community_controls_keep_scope_and_require_explicit_generation(runtime):
     expect(page.locator('#community-ask-range')).to_have_text('范围 · 京东')
     expect(send).to_be_enabled()
     assert requests[-1][1]['scope'] == {'kind': 'platform', 'platform': '京东'}
-    assert not page.get_by_text('生成的回答', exact=True).count()
+    expect(page.get_by_text('生成的回答', exact=True)).to_be_visible()
     _click_runtime(page, 'communities')
     page.locator('#community-build-preview', has_text='2 个实体').wait_for()
     assert not any(path == '/build' for path, _ in requests)
-    page.get_by_role('button', name='构建社区', exact=True).click()
-    page.locator('#community-build-status', has_text='社区索引可用。').wait_for()
+    page.get_by_role('button', name='构建社区和报告', exact=True).click()
+    page.locator('#community-build-status', has_text='关键词匹配已就绪').wait_for()
     assert [body['scope'] for path, body in requests if path == '/build'] == [{'kind': 'project'}]
     assert _visible_panels(page) == ['tab-community-index']
     page.locator('aside nav [data-tab="search"]').click()

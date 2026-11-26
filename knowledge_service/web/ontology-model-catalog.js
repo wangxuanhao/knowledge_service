@@ -85,7 +85,7 @@
     });
   }
   const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node;};
-  let side=null,cards=null,ctx=null,list=null,search=null,kind=null,active=null,summaryLine=null,drafts=null,work=null,changes=null,draftError=null,initialImport=null;
+  let side=null,cards=null,ctx=null,list=null,search=null,kind=null,active=null,summaryLine=null,drafts=null,work=null,changes=null,draftError=null,importButton=null;
   let projectKey='';
   const project=()=>typeof current==='undefined'?'':current;
   const canEditSource=()=>!!window.Auth?.isAdmin?.();
@@ -142,12 +142,64 @@
     drafts.title=state.draftLoadError||'';
     if(draftError)draftError.textContent=state.draftLoadError||'';
   }
-  async function showSource(startEditing=false) {
-    if(startEditing&&!canEditSource())return;
-    const p=project(),state=ctx.S;
-    const snapshot=()=>({project:project(),draftId:ctx.S.showingDraft?ctx.S.draft?.id:null,
-      revision:ctx.S.showingDraft?ctx.S.draft?.revision:null,ontologyId:ctx.S.ontologyId,preview:!!ctx.S.preview});
-    const opened=snapshot();
+  const sourceSnapshot=()=>({project:project(),draftId:ctx.S.showingDraft?ctx.S.draft?.id:null,
+    revision:ctx.S.showingDraft?ctx.S.draft?.revision:null,ontologyId:ctx.S.ontologyId,preview:!!ctx.S.preview});
+
+  function showImport() {
+    const opened=sourceSnapshot();
+    if(!canEditSource()||!opened.project||opened.preview)return;
+    const dialog=el('dialog','om-source-dialog om-import-dialog');
+    dialog.setAttribute('aria-labelledby','om-import-title');
+    const title=el('h3',null,'导入 Turtle 本体');title.id='om-import-title';
+    const target=opened.draftId?`目标草案 · ${ctx.S.draft.title||'未命名草案'}`:'写入新草案';
+    const file=el('input','om-import-file');file.type='file';file.accept='.ttl,text/turtle';
+    file.setAttribute('aria-label','选择 Turtle 文件');
+    const feedback=el('p','om-import-feedback');feedback.setAttribute('role','status');
+    let pending=null,saving=false;
+    const save=button('加入草案',async()=>{
+      if(!pending||saving)return;
+      if(!canEditSource()||!sourceWriteAllowed(opened,sourceSnapshot())){
+        feedback.textContent='编辑权限或目标草案已变化，请关闭后重新打开导入。';
+        feedback.className='om-import-feedback is-error';
+        return;
+      }
+      saving=true;save.disabled=true;file.disabled=true;close.disabled=true;
+      feedback.className='om-import-feedback';feedback.textContent='正在加入草案…';
+      try{
+        await ctx.sendCommand({action:'import_turtle',turtle:pending.turtle,reason:`导入 Turtle 文件：${pending.name}`},opened);
+        pending=null;
+        feedback.textContent='已加入草案，可前往草案变更核对。';
+      }catch(error){
+        feedback.className='om-import-feedback is-error';feedback.textContent=error.message;
+      }finally{
+        saving=false;close.disabled=false;save.disabled=!pending;file.disabled=!pending;
+      }
+    },'om-import-primary');
+    save.disabled=true;
+    file.onchange=async()=>{
+      pending=null;save.disabled=true;
+      const selected=file.files?.[0];if(!selected)return;
+      file.disabled=true;
+      feedback.className='om-import-feedback';feedback.textContent='正在读取文件…';
+      try{
+        const turtle=await selected.text();
+        if(!turtle.trim())throw new Error('Turtle 文件为空。');
+        pending={name:selected.name,turtle};
+        feedback.textContent='文件已选，等待加入草案。';
+      }catch(error){
+        file.value='';feedback.className='om-import-feedback is-error';feedback.textContent=error.message;
+      }finally{save.disabled=!pending;file.disabled=false;}
+    };
+    const close=button('关闭',()=>{dialog.close();dialog.remove();},'om-import-close');
+    const actions=el('div','om-import-actions');actions.append(close,save);
+    dialog.append(title,el('p','om-import-target',target),
+      el('p','om-import-description','文件中的定义会追加到草案，通过审核并发布后生效。'),file,feedback,actions);
+    dialog.addEventListener('cancel',event=>{if(saving)event.preventDefault();else dialog.remove();});
+    document.body.append(dialog);dialog.showModal();
+  }
+
+  async function showSource() {
+    const p=project(),state=ctx.S,opened=sourceSnapshot();
     try{
       const url=state.preview?`/ontology?ontology_id=${encodeURIComponent(state.preview.id)}`
         :state.showingDraft&&state.draft?`/ontology-drafts/${encodeURIComponent(state.draft.id)}`:'/ontology';
@@ -159,45 +211,33 @@
       const dialog=el('dialog','om-source-dialog');
       const actions=el('div'),source=el('pre',null,data.turtle||'（空本体）');
       const editable=!opened.preview&&canEditSource();
-      const editing=editable&&(startEditing||data.initial);
+      const editing=editable&&data.initial;
       source.hidden=!!editing;
       dialog.append(el('h3',null,'RDF / Turtle 原始定义'),
-        el('p',null,editable?'选择 Turtle 文件或编辑源码，保存到草案。通过审核并发布后生效。':'可查看或导出本体源码。'),actions);
+        el('p',null,editable?'可编辑完整本体源码，差异将保存到草案。通过审核并发布后生效。':'可查看或导出本体源码。'),actions);
       if(editable){
         const editor=el('textarea','om-source-editor');editor.value=data.turtle||'';editor.rows=18;editor.hidden=!editing;
         editor.setAttribute('aria-label','编辑 Turtle 原始定义');
         const feedback=el('p');feedback.setAttribute('role','status');
-        const file=el('input');file.type='file';file.accept='.ttl,text/turtle';file.hidden=!editing;
-        file.setAttribute('aria-label','选择 Turtle 文件');
         const save=button('把源码差异加入草案',async()=>{
-          if(!editor.value.trim()&&data.initial){feedback.textContent='请选择 Turtle 文件或输入本体源码。';return;}
+          if(!editor.value.trim()&&data.initial){feedback.textContent='请输入本体源码。';return;}
           save.disabled=true;
-          file.disabled=true;
           feedback.textContent='正在生成草案差异…';
           try{
             if(!canEditSource())throw new Error('当前账号没有本体编辑权限。');
             const sameSource=opened.draftId
               ? data.id===opened.draftId&&data.revision===opened.revision
               : (data.initial?null:data.id)===(opened.ontologyId??null);
-            if(!sameSource||!sourceWriteAllowed(opened,snapshot()))
+            if(!sameSource||!sourceWriteAllowed(opened,sourceSnapshot()))
               throw new Error('项目、草案或修订已变化，请关闭后重新读取源码。');
             await ctx.sendCommand({action:'diff_turtle',edited_turtle:editor.value,reason:'源码编辑：编译差异进入草案审核'},opened);
             feedback.textContent='源码差异已加入草案，仍需校验、逐项审核和发布。';
-          }catch(error){feedback.textContent=error.message;save.disabled=false;file.disabled=false;}
+          }catch(error){feedback.textContent=error.message;save.disabled=false;}
         });save.hidden=!editing;
-        file.onchange=async()=>{
-          const selected=file.files?.[0];if(!selected||!canEditSource())return;
-          save.disabled=true;file.disabled=true;
-          try{
-            editor.value=await selected.text();
-            feedback.textContent='已读取 '+selected.name+'，可核对后加入草案。';
-          }catch(error){feedback.textContent='读取文件失败：'+error.message;}
-          finally{save.disabled=false;file.disabled=false;}
-        };
-        const edit=button('编辑 Turtle',()=>{file.hidden=false;editor.hidden=false;save.hidden=false;source.hidden=true;edit.hidden=true;editor.focus();});
+        const edit=button('编辑 Turtle',()=>{editor.hidden=false;save.hidden=false;source.hidden=true;edit.hidden=true;editor.focus();});
         edit.hidden=!!editing;
         actions.append(edit,save);
-        dialog.append(file,feedback,editor);
+        dialog.append(feedback,editor);
       }
       const download=button('导出 Turtle',()=>{
         const blob=new Blob([data.turtle||''],{type:'text/turtle;charset=utf-8'}),url=URL.createObjectURL(blob),link=el('a');
@@ -224,10 +264,10 @@
     active=el('input');active.type='checkbox';const activeLabel=el('label','om-catalog-active');activeLabel.append(active,el('span',null,'只看有效术语'));
     summaryLine=el('p','om-catalog-count');list=el('div','om-catalog-list');
     drafts=el('select','om-catalog-drafts');drafts.setAttribute('aria-label','选择草案');drafts.addEventListener('change',()=>{if(drafts.value)void run(()=>ctx.selectDraft(drafts.value));});
-    initialImport=button('导入 Turtle 本体',()=>void showSource(true),'om-btn ghost admin-only');
+    importButton=button('导入 Turtle 本体',showImport,'om-btn ghost admin-only');
     const advanced=el('details','om-catalog-governance');
     advanced.append(el('summary',null,'高级'),button('RDF 源码 / 导出',()=>void showSource()));
-    side.append(search,kind,activeLabel,initialImport,summaryLine,list,advanced);
+    side.append(search,kind,activeLabel,importButton,summaryLine,list,advanced);
     work=document.getElementById?.('om-work-changes-host');
     if(work){
       work.replaceChildren();const management=el('details','om-draft-management');management.append(el('summary',null,'草案管理'));
@@ -244,7 +284,7 @@
   function render(state) {
     if(!side||!ctx)return;
     if(projectKey!==project()){projectKey=project();search.value='';kind.value='';active.checked=false;}
-    initialImport.hidden=!canEditSource()||!project()||state.loading||!!state.ontologyId||!!state.preview;
+    importButton.hidden=!canEditSource()||!project()||state.loading||!!state.preview;
     side.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     work?.querySelectorAll('[data-ontology-write]').forEach(node=>node.disabled=!!state.preview);
     if(changes){changes.replaceChildren();const draft=state.draft?.status==='pending'?state.draft:null;

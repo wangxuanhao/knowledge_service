@@ -7,7 +7,7 @@ const vm=require('node:vm');
 const {frozenSourceDocument,attributeDetailsHtml}=require(path.resolve(
   __dirname,'../../knowledge_service/web/evidence-inspector.js'));
 
-async function renderEntity(attributes,details={},withMounts=false,windowOverrides={}){
+async function renderEntity(attributes,details={},withMounts=false,windowOverrides={},evidence={}){
   const elements=new Map(),mounts=[];
   const make=()=>({dataset:{},children:[],setAttribute(){},appendChild(node){this.children.push(node);},
     after(){},addEventListener(){},querySelector(){return make();},querySelectorAll(){return [];}});
@@ -17,11 +17,11 @@ async function renderEntity(attributes,details={},withMounts=false,windowOverrid
   const window={DisplayTime:require('../../knowledge_service/web/display-time.js'),TemporalScope:fs.existsSync(temporalFile)?require(temporalFile):{},EntityAttributePanel:shared,...windowOverrides},context={window,EntityAttributePanel:shared,current:'p',$:get,scope:()=>({}),endpoint:s=>s,
     document:{createElement:make,body:make()},esc:value=>String(value??'').replaceAll('<','&lt;').replaceAll('>','&gt;'),
     labelOf:value=>value,term:value=>value,RecordVersionContext:{revision:()=>1,summary:()=>''},
-    api:async url=>url==='/ontologies?metadata_only=true'?{versions:[]}:{documents:[],message:'没有来源'}};
+    api:async url=>url==='/ontologies?metadata_only=true'?{versions:[]}:{documents:[],message:'没有来源',...evidence}};
   vm.runInNewContext(fs.readFileSync(path.resolve(__dirname,'../../knowledge_service/web/evidence-inspector.js'),'utf8'),context);
   await window.renderEvidenceInspector({id:'entity',kind:'entity',type:'urn:test:Thing',text:'事物',version:1,
     properties:{age:'raw metadata value'},attributes,...details},[]);
-  return withMounts?{html:get('graph-detail').innerHTML,mounts}:get('graph-detail').innerHTML;
+  return withMounts?{html:get('graph-detail').innerHTML,mounts,timeSource:get('inspector-time-source').textContent}:get('graph-detail').innerHTML;
 }
 
 test('raw properties remain technical while entity properties always mount the scoped reader',async()=>{
@@ -37,11 +37,20 @@ test('inspector separates unknown business boundaries, document publication and 
   const missing=await renderEntity([], {source_id:'source',metadata:{extracted_at:'2020-01-01'}});
   assert.match(missing,/<dt>业务生效<\/dt><dd>未知<\/dd>/);
   assert.match(missing,/<dt>业务失效（不含）<\/dt><dd>未设结束时间<\/dd>/);
-  assert.match(missing,/<dt>时间来源<\/dt><dd>未知<\/dd>/);
+  assert.match(missing,/<dt>时间来源<\/dt><dd id="inspector-time-source">未知<\/dd>/);
   assert.doesNotMatch(missing.split('<details class="evidence-technical">')[0],/来源继承|原文抽取/);
   const published=await renderEntity([], {metadata:{effective_time_source:'published_at',published_at:'2020-01-01'},recorded_at:'2024-01-01'});
-  assert.match(published,/<dt>时间来源<\/dt><dd>发布时间推定<\/dd>/);
+  assert.match(published,/<dt>时间来源<\/dt><dd id="inspector-time-source">发布时间推定<\/dd>/);
   assert.match(published,/<dt>原文发布日期<\/dt>/);assert.match(published,/<dt>系统记录<\/dt>/);
+});
+
+test('inspector shows recovered time provenance only for the revision being displayed',async()=>{
+  const row={version_id:'fact-v1',valid_from:'2024-11-05T16:00:00.000000Z'};
+  const evidence={record_version_id:'fact-v1',effective_time_source:'extracted'};
+  const matching=await renderEntity([],row,true,{},evidence);
+  const stale=await renderEntity([],row,true,{},{...evidence,record_version_id:'fact-v2'});
+  assert.equal(matching.timeSource,'原文抽取');
+  assert.equal(stale.timeSource,undefined);
 });
 
 test('entity inspector delegates paged values to the shared reader in the applied project scope',async()=>{
@@ -75,7 +84,7 @@ test('changed provenance source assets use fresh cache versions',()=>{
   // 这两个文件改过就必须带**新的** ?v=，否则浏览器一直用缓存的旧 JS。
   // 断言"带版本号、且不是那次改动之前的旧版本" —— 换新版本时要在这里同步（别让断言跟着自动走）。
   assert.match(html,/\/assets\/provenance-drawer\.js\?v=[^"']+/);
-  assert.match(html,/\/assets\/evidence-inspector\.js\?v=[^"']+/);
+  assert.match(html,/\/assets\/evidence-inspector\.js\?v=discovery-time-source-20261125-1/);
   assert.ok(!html.includes('/assets/evidence-inspector.js?v=candidate-evidence-1'),
     'evidence-inspector.js 改过文案后必须换新的 ?v=（B1：撤销入口指向「知识台账 → 可撤销的操作」）');
 });

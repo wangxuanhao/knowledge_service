@@ -59,6 +59,13 @@ def test_latest_revision_effective_replaces_first_but_preserves_both():
     assert revised['valid_from'] == '2026-10-28T16:00:00.000000Z'
 
 
+def test_effective_clause_continues_after_the_documents_first_publication():
+    text = '本规则于2024年1月24日首次发布，于2024年1月31日生效。'
+    value = resolve(text)
+    assert value['valid_from'] == '2024-01-30T16:00:00.000000Z'
+    assert [item['raw'] for item in field(value, 'valid_from')['candidates']] == ['2024年1月31日']
+
+
 @pytest.mark.parametrize(('text', 'end'), [
     ('本规则自2025年10月1日起失效。', '2025-09-30T16:00:00.000000Z'),
     ('本规范有效至2025年10月1日。', '2025-10-01T16:00:00.000000Z'),

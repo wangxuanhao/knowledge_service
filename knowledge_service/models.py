@@ -127,11 +127,17 @@ class Search(Scope, RetrievalOptions):
         '只补召回，不放宽可见范围；关闭时行为与不传该字段一致。'))
 
 
+class QuestionContextTurn(Request):
+    question: str = Field(min_length=1, max_length=1000)
+    answer: str = Field(default='', max_length=600)
+
+
 class Question(Search):
     include_references: bool = True
     reference_k: int = Field(default=5, ge=1, le=20)
     generate: bool = False
     hops:int=Field(default=2,ge=0,le=3)
+    conversation_context: list[QuestionContextTurn] = Field(default_factory=list, max_length=3)
 
 
 class ResolutionReviewDecision(Request):

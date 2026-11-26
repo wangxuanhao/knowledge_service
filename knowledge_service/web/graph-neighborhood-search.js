@@ -576,7 +576,9 @@
         const item = element('div', '', 'neighborhood-source');
         item.append(element('span', sourceInfo(source) || '来源文档'));
         if (source.source_version_id || source.quote || source.excerpt) {
-          item.append(button('查看原文', () => openSource(source)));
+          const open = button('查看原文', () => openSource(source));
+          open.classList.add('button-inline-action');
+          item.append(open);
         }
         matchDetail.append(item);
       }

@@ -170,6 +170,7 @@ class PageReads:
                 'valid_from',body->'valid_from',
                 'valid_until',body->'valid_until',
                 'metadata',jsonb_build_object('title',COALESCE(body#>>'{metadata,title}',id),
+                    'effective_time_source',body#>'{metadata,effective_time_source}',
                     'discovery_candidates',body#>'{metadata,discovery_candidates}'))::text AS payload
             FROM documents WHERE jsonb_typeof(body#>'{metadata,discovery_candidates}')='array'
             ORDER BY id''', (project,)).fetchall()

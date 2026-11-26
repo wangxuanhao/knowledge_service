@@ -282,6 +282,50 @@ def test_adding_document_evidence_does_not_revise_an_unchanged_entity(client):
     assert {item['assertion_id'] for item in support} == {item['id'] for item in assertions}
 
 
+def test_manual_dates_record_their_source_without_rewriting_history(client):
+    p = project(client, use_default_ontology=False)
+    turtle = ('@prefix ex: <http://ex/> . @prefix owl: <http://www.w3.org/2002/07/owl#> . '
+              'ex:Person a owl:Class . ex:knows a owl:ObjectProperty .')
+    path = f'/api/projects/{p}/records'
+    seed_project_ontology(client, f'/api/projects/{p}', turtle)
+    start = '2025-01-01T00:00:00Z'
+    relation = {'id': 'link', 'kind': 'relation', 'text': '甲认识乙', 'type': 'knows',
+                'subject_id': 'a', 'object_id': 'b', 'valid_from': start,
+                'metadata': {'effective_time_source': 'extracted', 'valid_from': start,
+                             'temporal_source_text': '自 2025 年 1 月 1 日生效', 'temporal_confidence': 0.9}}
+    created = client.post(path, json={'records': [
+        {'id': 'a', 'kind': 'entity', 'text': '甲', 'type': 'Person'},
+        {'id': 'b', 'kind': 'entity', 'text': '乙', 'type': 'Person'},
+        {'id': 'dated', 'kind': 'entity', 'text': '新记录', 'type': 'Person', 'valid_from': start},
+        relation,
+    ]})
+    assert created.status_code == 201, created.text
+    rows = {row['id']: row for row in created.json()['records']}
+    original = rows['link']
+
+    def revise(row, **changes):
+        body = {key: value for key, value in row.items() if key in RecordWrite.model_fields}
+        result = client.put(path + '/link', json={'record': {**body, **changes},
+                                                 'expected_version': row['version']})
+        assert result.status_code == 200, result.text
+        return result.json()
+
+    unchanged = revise(original, valid_from='2025-01-01T08:00:00+08:00')
+    updated = revise(unchanged, valid_from='2025-02-01T00:00:00Z')
+    cleared = revise(updated, valid_from=None)
+
+    assert rows['dated']['metadata']['effective_time_source'] == 'explicit'
+    assert 'effective_time_source' not in rows['a']['metadata']
+    assert unchanged['version_id'] == original['version_id']
+    assert unchanged['metadata']['effective_time_source'] == 'extracted'
+    assert updated['metadata']['effective_time_source'] == 'explicit'
+    assert 'temporal_source_text' not in updated['metadata']
+    assert cleared['metadata']['effective_time_source'] == 'unknown'
+    history = client.get(path + '/link/history').json()['versions']
+    archived = next(row for row in history if row['version_id'] == original['version_id'])
+    assert archived['metadata']['temporal_source_text'] == relation['metadata']['temporal_source_text']
+
+
 def test_revision_and_half_open_time(client, monkeypatch):
     p = project(client)
     record = {'id':'rule', 'kind':'entity', 'type':'Merchant', 'text':'旧条款',

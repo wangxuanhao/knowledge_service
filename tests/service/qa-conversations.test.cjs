@@ -50,6 +50,19 @@ test('saving snapshots is serial and each queued write uses the preceding server
   const c=controller(s.api);await c.setProject('p');const first=[{kind:'user',text:'one',references:[{quote:'frozen'}]}];const p1=c.save(first);first[0].references[0].quote='mutated';const p2=c.save([{kind:'user',text:'two'}]);await tick();assert.equal(saves,1);gate.resolve();await Promise.all([p1,p2]);
   assert.deepEqual(s.writes.map(w=>w.expected_version),[1,2]);assert.equal(s.writes[0].messages[0].references[0].quote,'frozen');assert.equal(s.rows.get('p/a').messages[0].text,'two');
 });
+test('failed initial sends can restore the previous snapshot before the question is resubmitted',async()=>{
+  const s=server();
+  const old={kind:'user',text:'已保存的问题'}, question={kind:'user',text:'待提交的问题'};
+  s.seed('p','a',[old]);
+  const original=s.api.save;
+  s.api.save=async()=>{throw Object.assign(new Error('暂时无法保存'),{status:503});};
+  const c=controller(s.api);await c.setProject('p');
+  await assert.rejects(c.save([old,question],{rollbackOnFailure:true}),/暂时无法保存/);
+  assert.deepEqual(c.state.conversation.messages,[old]);
+  s.api.save=original;
+  await c.save([...c.state.conversation.messages,question],{rollbackOnFailure:true});
+  assert.deepEqual(s.rows.get('p/a').messages,[old,question]);
+});
 test('409 is reported, preserves local content and prevents queued overwrites until explicit reload',async()=>{
   const s=server();s.seed('p','a',[{kind:'user',text:'server'}]);const errors=[];let activations=0,last;
   const c=controller(s.api,{onError:message=>errors.push(message),onActivate:()=>activations++,onState:state=>{last=state;}});await c.setProject('p');s.rows.get('p/a').version=7;

@@ -61,10 +61,31 @@ def test_turtle_create_is_atomic_and_preserves_the_other_open_draft(workbench):
     assert client.get(path).json()['total'] == 1
 
     imported = create_draft(client, project_id, ontology, initial_command={
-        'action': 'diff_turtle', 'edited_turtle': BASE + '\nex:Extra a owl:Class .'})
+        'action': 'import_turtle',
+        'turtle': '<https://example.test/ns#Extra> a <http://www.w3.org/2002/07/owl#Class> .'})
     assert imported['id'] != other['id']
     assert any(item['id'].endswith('#Extra') for item in imported['ontology']['classes'])
+    assert any(item['id'].endswith('#Root') for item in imported['ontology']['classes'])
     assert client.get(f"{path}/{other['id']}").json()['revision'] == other['revision']
+
+
+def test_turtle_file_adds_terms_to_the_existing_draft_without_replacing_definitions(workbench):
+    client, project_id, ontology = workbench
+    draft = create_draft(client, project_id, ontology)
+    draft = command(client, project_id, draft, {
+        'action': 'create_term', 'target_iri': 'urn:test:DraftOnly', 'kind': 'class'})
+    incoming = '@prefix owl: <http://www.w3.org/2002/07/owl#> . <urn:file:Extra> a owl:Class .'
+    imported = command(client, project_id, draft, {'action': 'import_turtle', 'turtle': incoming})
+    assert imported['id'] == draft['id']
+    original = Ontology(draft['turtle']).graph
+    updated = Ontology(imported['turtle']).graph
+    assert set(updated) == set(original) | set(Ontology(incoming).graph)
+
+    path = f"/api/projects/{project_id}/ontology-drafts/{draft['id']}"
+    retry = client.post(f'{path}/commands', json={'expected_revision': imported['revision'],
+        'command': {'action': 'import_turtle', 'turtle': incoming}})
+    assert retry.status_code == 422
+    assert client.get(path).json()['revision'] == imported['revision']
 
 
 def test_canvas_read_excludes_audit_payload_and_keeps_structure_and_revision(workbench):

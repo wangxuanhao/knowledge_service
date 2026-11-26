@@ -15,6 +15,7 @@ from .ontology_operations import _TurtleOperationReplay
 from .ontology_operations import build_operation
 from .ontology_operations import build_restore_operation
 from .ontology_operations import canonical_turtle_diff
+from .ontology_operations import merge_imported_turtle
 from .ontology_operations import operation_fingerprint
 from .ontology_operations import retirement_dependencies
 from rdflib import BNode, RDF
@@ -27,7 +28,7 @@ from .llm_runtime import llm_operation
 
 
 
-_TURTLE_ACTIONS = {'turtle', 'replace_turtle', 'diff_turtle'}
+_TURTLE_ACTIONS = {'turtle', 'replace_turtle', 'diff_turtle', 'import_turtle'}
 
 
 class _TurtleRecordImpacts:
@@ -505,6 +506,8 @@ class DraftCommandMixin:
             edited = command.get('edited_turtle', command.get('turtle'))
             if not isinstance(edited, str):
                 raise ValueError('Turtle command requires edited_turtle')
+            if action == 'import_turtle':
+                edited = merge_imported_turtle(ontology.graph, edited)
             raw = canonical_turtle_diff(
                 ontology.graph.serialize(format='turtle'), edited,
                 published=draft['base_ontology_id'] is not None,
@@ -515,6 +518,8 @@ class DraftCommandMixin:
                         self.repository, project_id, target_iri,
                         source_ontology_id,
                         selected_fields=command.get('selected_fields') or [])))
+            if action == 'import_turtle' and not raw:
+                raise ValueError('文件中的定义已存在，没有可加入草案的变更。')
             expanded = []
             for operation in raw:
                 expanded.extend(

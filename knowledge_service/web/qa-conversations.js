@@ -168,16 +168,24 @@
       });
       record.queue=promise.catch(()=>{});return promise;
     }
-    function save(messages) {
+    function save(messages,{rollbackOnFailure=false}={}) {
       const snapshot=copy(messages);
       if(!Array.isArray(snapshot))return Promise.reject(failure('会话消息必须是数组'));
       const record=active;
       if(!record||!isActive(record))return Promise.reject(failure('当前会话尚未加载，请重新选择会话'));
       if(record.tombstone)return Promise.reject(failure('该会话正在删除或已删除'));
+      const previous=record.localMessages,previousError=record.error;
       const revision=++record.localRevision;record.localMessages=snapshot;
       return enqueue(record,version=>api.save(record.context.project,record.conversation.id,{expected_version:version,messages:snapshot})).then(conversation=>{
         if(record.localRevision===revision){record.localMessages=null;record.error=null;}
         if(isActive(record))emit();return conversation;
+      }).catch(error=>{
+        if(rollbackOnFailure&&record.localRevision===revision&&!record.conflict){
+          record.localMessages=previous&&JSON.stringify(previous)!==JSON.stringify(record.conversation.messages)?previous:null;
+          record.error=previousError||(error.status===401?error:null);
+          if(isActive(record))emit();
+        }
+        throw error;
       });
     }
     function retrySave(){if(!active||active.localMessages===null)return Promise.resolve(null);return save(copy(active.localMessages));}
@@ -251,7 +259,9 @@
     const byId=id=>document?.getElementById(id);
     const workspace=byId('qa-workspace'),list=byId('qa-session-list');
     if(!workspace||!list)return null;
-    const status=byId('qa-session-status'),toggle=byId('qa-sessions-toggle'),backdrop=byId('qa-sessions-backdrop');
+    const status=byId('qa-session-status'),backdrop=byId('qa-sessions-backdrop');
+    const toggles=['qa-sessions-toggle','qa-community-sessions-toggle'].map(byId).filter(Boolean);
+    const newButtons=['qa-session-new','qa-new-chat','qa-community-new-chat'].map(byId).filter(Boolean);
     const searchInput=byId('qa-session-search'),more=byId('qa-session-more'),importButton=byId('qa-session-import');
     const dialog=byId('qa-session-dialog'),nameInput=byId('qa-session-name'),renameLabel=byId('qa-session-rename-label');
     const dialogTitle=byId('qa-session-dialog-title'),description=byId('qa-session-dialog-description');
@@ -260,7 +270,7 @@
     const view=options.window||root;
     const width=()=>options.viewportWidth??view.innerWidth??1200;
     function closeActions(){list.querySelector?.('.qa-session-actions:popover-open')?.hidePopover();}
-    function historyOpen(open){closeActions();workspace.dataset.historyOpen=String(open);toggle?.setAttribute('aria-expanded',String(open));if(backdrop)backdrop.hidden=!open||width()>1100;}
+    function historyOpen(open){closeActions();workspace.dataset.historyOpen=String(open);for(const button of toggles)button.setAttribute('aria-expanded',String(open));if(backdrop)backdrop.hidden=!open||width()>1100;}
     historyOpen(width()>1100);
     function listen(element,event,callback){element?.addEventListener(event,callback);}
     let wasDesktop=width()>1100;
@@ -309,8 +319,10 @@
       if(result.confirmed)await controller.reloadActive();
     }
     function render(state) {
-      const title=byId('qa-active-session-title');if(title)title.textContent=state.conversation?.title||'新会话';
-      for(const id of ['qa-session-new','qa-new-chat']){const button=byId(id);if(button)button.disabled=state.loading||!state.project;}
+      for(const id of ['qa-active-session-title','qa-community-active-session-title']){
+        const title=byId(id);if(title)title.textContent=state.conversation?.title||'新会话';
+      }
+      for(const button of newButtons)button.disabled=state.loading||!state.project;
       if(more){more.hidden=!state.hasMore;more.disabled=state.loading;}
       if(importButton){importButton.hidden=!state.legacyAvailable;importButton.disabled=state.loading;}
       if(searchInput&&document.activeElement!==searchInput&&searchInput.value!==state.query)searchInput.value=state.query;
@@ -376,10 +388,10 @@
     controller=createController({...options,onState:render,onBeforeChange:()=>{settleDialog?.({confirmed:false});options.onBeforeChange?.();},onError:message=>{if(status&&!controller?.state.conflict&&!controller?.state.canRetry&&!controller?.state.loginRequired)status.textContent=message;options.onError?.(message);}});
     const initialSetProject=controller.setProject;
     controller.setProject=project=>{if(searchTimer!==null){clearTimeout(searchTimer);searchTimer=null;}if(searchInput)searchInput.value='';return initialSetProject(project);};
-    listen(toggle,'click',()=>historyOpen(workspace.dataset.historyOpen!=='true'));
+    for(const button of toggles)listen(button,'click',()=>historyOpen(workspace.dataset.historyOpen!=='true'));
     listen(byId('qa-sessions-close'),'click',()=>historyOpen(false));
     listen(backdrop,'click',()=>historyOpen(false));
-    for(const id of ['qa-session-new','qa-new-chat'])listen(byId(id),'click',()=>run(async()=>{await controller.newConversation();closeNarrow();}));
+    for(const button of newButtons)listen(button,'click',()=>run(async()=>{await controller.newConversation();closeNarrow();}));
     listen(searchInput,'input',()=>{if(searchTimer!==null)clearTimeout(searchTimer);const value=searchInput.value;searchTimer=setTimeout(()=>{searchTimer=null;run(()=>controller.search(value));},180);});
     listen(searchInput,'keydown',event=>{if(event.key==='Enter'){event.preventDefault();if(searchTimer!==null)clearTimeout(searchTimer);searchTimer=null;run(()=>controller.search(searchInput.value));}});
     listen(more,'click',()=>run(()=>controller.loadMore()));

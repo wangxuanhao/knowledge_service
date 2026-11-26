@@ -72,10 +72,10 @@ def test_build_controls_align_and_reflect_selected_scope(redesign_page, width):
     expect(metrics).to_contain_text('60 / 64')
     expect(metrics).to_contain_text('6 / 8')
     expect(metrics).to_contain_text('2 份失败')
-    expect(build).to_have_text('检查并构建')
+    expect(build).to_have_text('构建社区和报告')
     expect(retry).to_have_text('重试失败报告')
     expect(vector).to_be_enabled()
-    expect(vector_status).to_have_text('报告向量尚未构建。构建后可使用语义匹配。')
+    expect(vector_status).to_have_text('未构建 · 点击「构建报告向量」启用语义匹配。')
     controls = [scope, platform, build, refresh, retry, vector]
     boxes = [control.bounding_box() for control in controls]
     assert {box['height'] for box in boxes} == {44}
@@ -98,7 +98,10 @@ def test_build_controls_align_and_reflect_selected_scope(redesign_page, width):
 
     current.update(state='ready', job=None, counts={**current['counts'], 'reports_ready': 8, 'reports_failed': 0})
     refresh.click()
-    expect(status).to_contain_text('社区索引可用。')
+    expect(page.locator('#community-build-state-label')).to_have_text('社区和报告可用')
+    expect(status).to_contain_text('关键词匹配已就绪')
+    expect(page.get_by_role('region', name='报告向量')).to_be_visible()
+    expect(vector_status).to_contain_text('未构建')
     expect(metrics).to_contain_text('8 / 8')
     expect(page.get_by_role('progressbar')).to_be_hidden()
     expect(build).to_be_enabled()
@@ -122,7 +125,7 @@ def test_build_controls_align_and_reflect_selected_scope(redesign_page, width):
         'state': 'ready', 'available': True, 'enabled': True, 'indexed': 8,
     })
     refresh.click()
-    expect(vector_status).to_have_text('报告向量已就绪 · 8 份')
+    expect(vector_status).to_have_text('语义匹配可用 · 已索引 8 份报告')
     expect(update_vector).to_be_enabled()
 
     current.update(state='failed', job={'status': 'failed', 'error': '无法读取图谱快照'})

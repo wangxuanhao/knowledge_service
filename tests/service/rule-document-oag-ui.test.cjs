@@ -182,7 +182,7 @@ test('changed QA assets and accessible temporal controls have current cache vers
   assert.match(html,/<script\b[^>]*\bsrc="\/assets\/workbench\.js\?v=[\w.-]+"/);
   assert.ok(html.includes('/assets/workbench.css?v=split-previews-20261110-1'));
   assert.ok(html.includes('/assets/qa-presentation.js?v=qa-source-and-scope-20261123-1'));
-  assert.ok(html.includes('/assets/provenance-drawer.js?v=retrieval-match-20261123-1'));
+  assert.ok(html.includes('/assets/provenance-drawer.js?v=community-evidence-layout-20261125-2'));
   assert.ok(html.includes('/assets/qa-page.css?v=retrieval-match-20261123-1'));
   assert.match(html,/id="qa-include-references"[^>]*checked/);
   assert.doesNotMatch(html,/id="qa-as-of"/);assert.match(html,/id="scope-valid-at"[^>]*type="datetime-local"/);

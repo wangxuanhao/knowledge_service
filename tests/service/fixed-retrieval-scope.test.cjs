@@ -5,7 +5,7 @@ const vm=require('node:vm');
 const fields=require('../../knowledge_service/web/scope-fields.js');
 const read=name=>fs.readFileSync('knowledge_service/web/'+name,'utf8');
 function declaration(source,name){
-  const match=source.match(new RegExp('  (?:async )?function '+name+'\\([^\\n]*\\)\\{[\\s\\S]*?\\n  \\}'));
+  const match=source.match(new RegExp('  (?:async )?function '+name+'\\([^\\n]*\\) *\\{[\\s\\S]*?\\n  \\}'));
   assert.ok(match,'production function '+name+' exists');return match[0];
 }
 const unsupported={or:[{field:'id',op:'eq',value:'a'},{not:{field:'metadata.region',op:'eq',value:'华东'}}]};
@@ -34,7 +34,8 @@ test('QA stream validates replay bodies before reserving turns or making request
 function submissionFixture(save){
   const controls={generate:{checked:false},'qa-mode':{value:'hybrid'}};
   const environment={busy:false,preparing:false,current:'p',serial:0,input:{value:'问题 A'},send:{disabled:false},summary:{textContent:''},progress:{textContent:''},qaHistory:[],scope:()=>({}),$c:id=>controls[id],window:{ScopeFields:fields},sessionManager:{loading:false,state:{conflict:false},ensureActive:async()=>{},save},addScopeNote(){},addTurn(){return {};},persist(){},stream(){environment.streams++;},streams:0,Date};
-  vm.createContext(environment);vm.runInContext(declaration(read('workbench.js'),'submit')+';this.submit=submit;',environment);return environment;
+  const source=read('workbench.js');
+  vm.createContext(environment);vm.runInContext(['canSubmit','syncSend','conversationContext','submit'].map(name=>declaration(source,name)).join('\n')+';this.submit=submit;',environment);return environment;
 }
 test('an unsaved question remains in history and never starts a stream on authentication failure',async()=>{
   const environment=submissionFixture(async()=>{throw Object.assign(new Error('登录已失效'),{status:401});});

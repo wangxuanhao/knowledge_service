@@ -21,7 +21,7 @@
    浅青底色块 + 青描边；is-shade（关系层带）用淡靛蓝。 */
 #tab-ontology-model.ontology-model .om-canvas-bands{position:absolute;left:0;top:0;width:100%;height:100%;z-index:2;pointer-events:none;overflow:visible}
 #tab-ontology-model.ontology-model .om-canvas-band{fill:rgba(14,124,123,.06);stroke:rgba(14,124,123,.16);stroke-width:1}
-#tab-ontology-model.ontology-model .om-canvas-band.is-shade{fill:rgba(99,102,241,.06);stroke:rgba(99,102,241,.14)}
+#tab-ontology-model.ontology-model .om-canvas-band.is-shade{fill:rgba(70,109,133,.045);stroke:rgba(70,109,133,.17)}
 #tab-ontology-model.ontology-model .om-canvas-band-label{fill:#5f7d7c;font-size:11px;font-family:Inter,"Microsoft YaHei",sans-serif;letter-spacing:.06em;font-weight:600}
 
 /* 图例：右上角。默认【收起】——只显示一个小「图例」按钮（pointer-events 恢复可点）；
@@ -51,6 +51,8 @@
 #tab-ontology-model.ontology-model .om-canvas-zoom button+button{border-left:1px solid #d5e4e4}
 #tab-ontology-model.ontology-model .om-canvas-zoom button:hover{background:#e7f2f1}
 #tab-ontology-model.ontology-model .om-canvas-zoom button:focus-visible{outline-offset:-2px}
+#tab-ontology-model.ontology-model .om-canvas-flat-notice{position:absolute;top:12px;left:94px;right:12px;z-index:3;width:fit-content;max-width:calc(100% - 106px);box-sizing:border-box;margin:0;padding:7px 10px;border:1px solid #d4e2d9;border-radius:6px;background:#f5faf6;color:#3b6254;font-size:12px;line-height:1.45;pointer-events:none}
+#tab-ontology-model.ontology-model .om-canvas-flat-notice[hidden]{display:none}
 #tab-ontology-model.ontology-model .om-canvas-hint:empty{display:none}
 #tab-ontology-model.ontology-model .om-canvas-stats{color:#86978a;font-size:10px;line-height:1.6;flex:1 0 100%}
 #tab-ontology-model.ontology-model .om-canvas-hint{color:#2a776b;font-size:11.5px;flex:1 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}
@@ -59,30 +61,27 @@
 #tab-ontology-model.ontology-model .om-canvas-bar button:hover:not(:disabled){border-color:#2a776b;background:#e7f2f1;color:#2a776b}
 #tab-ontology-model.ontology-model .om-canvas-bar button:focus-visible{outline:2px solid #2a776b;outline-offset:1px}
 #tab-ontology-model.ontology-model .om-canvas-bar button:disabled{opacity:.4;cursor:not-allowed}
-#tab-ontology-model.ontology-model .om-canvas-bar button.om-canvas-cancel[hidden]{display:none}
-#tab-ontology-model.ontology-model .om-canvas-bar button.om-canvas-add-relation{min-height:34px;padding-inline:10px;font-size:13px;font-weight:600}
-#tab-ontology-model.ontology-model .om-canvas-bar button.om-canvas-add-relation[aria-pressed="true"]{border-color:#2a776b;background:#e7f2f1;color:#0f5a57}
+#tab-ontology-model.ontology-model .om-canvas-bar button.om-canvas-link-action{min-height:34px;padding-inline:11px;border-color:#bdd5ce;background:#f4faf7;color:#205d55;font-size:13px;font-weight:600;line-height:1.4;letter-spacing:.02em}
+#tab-ontology-model.ontology-model .om-canvas-bar button.om-canvas-link-action[aria-pressed="true"]{border-color:#2a776b;background:#e0f0eb;color:#124e46}
 
 /* 确认条：两步连线的第二步，浮在工具条上方。白纸卡 + teal 描边。 */
-#tab-ontology-model.ontology-model .om-canvas-confirm{position:absolute;left:12px;right:12px;bottom:62px;z-index:7;display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:11px 13px;border:1px solid rgba(13,148,136,.4);border-radius:11px;background:rgba(255,255,255,.98);box-shadow:0 16px 36px -18px rgba(13,60,58,.45);backdrop-filter:blur(6px)}
+#tab-ontology-model.ontology-model .om-canvas-confirm{position:absolute;left:12px;right:12px;bottom:62px;z-index:7;display:grid;max-width:560px;margin-inline:auto;gap:10px;padding:12px 14px;border:1px solid rgba(13,148,136,.4);border-radius:11px;background:rgba(255,255,255,.98);box-shadow:0 16px 36px -18px rgba(13,60,58,.45);backdrop-filter:blur(6px)}
 #tab-ontology-model.ontology-model .om-canvas-confirm[hidden]{display:none}
-#tab-ontology-model.ontology-model .om-canvas-confirm-copy{color:#0f5a57;font-size:12px;flex:1 1 auto;min-width:0}
-#tab-ontology-model.ontology-model .om-canvas-confirm-input{border:1px solid #c2d6d5;background:#fdfefc;color:#124242;border-radius:8px;padding:6px 10px;font-size:12px;font-family:Inter,"Microsoft YaHei",sans-serif;min-width:170px}
+#tab-ontology-model.ontology-model .om-canvas-confirm-input{border:1px solid #c2d6d5;background:#fdfefc;color:#124242;border-radius:8px;padding:6px 10px;font:inherit}
 #tab-ontology-model.ontology-model .om-canvas-confirm-input:focus{outline:none;border-color:#2a776b;box-shadow:0 0 0 3px rgba(20,184,166,.2)}
-#tab-ontology-model.ontology-model .om-canvas-confirm button{border:1px solid #c2d6d5;background:#ffffff;color:#3d5e5e;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer}
-/* 确认主按钮：teal→青 渐变实心，深青字（浅底上要深色字才有对比）。 */
+#tab-ontology-model.ontology-model .om-canvas-confirm button{border:1px solid #c2d6d5;background:#ffffff;color:#3d5e5e;border-radius:8px;min-height:34px;padding:6px 12px;font-size:13px;font-weight:600;cursor:pointer}
 #tab-ontology-model.ontology-model .om-canvas-confirm button.primary{background:#2a776b;border-color:#2a776b;color:#ffffff;font-weight:600;box-shadow:none}
 #tab-ontology-model.ontology-model .om-canvas-confirm button:hover:not(:disabled){border-color:#2a776b}
 #tab-ontology-model.ontology-model .om-canvas-confirm button:focus-visible{outline:2px solid #2a776b;outline-offset:1px}
+#tab-ontology-model.ontology-model .om-canvas-confirm button:disabled{opacity:.55;cursor:default}
 
-#tab-ontology-model.ontology-model .om-canvas-confirm.is-link-relation{display:grid;max-width:560px;margin-inline:auto;gap:10px;padding:12px 14px}
-#tab-ontology-model.ontology-model .om-canvas-confirm.is-link-relation[hidden]{display:none}
 #tab-ontology-model.ontology-model .om-canvas-link-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
-#tab-ontology-model.ontology-model .om-canvas-link-heading h3{margin:0;font-size:16px;color:#124242}
+#tab-ontology-model.ontology-model .om-canvas-link-heading h3{margin:0;font-size:16px;font-weight:700;line-height:1.4;color:#124242}
 #tab-ontology-model.ontology-model .om-canvas-link-endpoints{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-#tab-ontology-model.ontology-model .om-canvas-link-endpoint{display:grid;gap:4px;padding:8px 10px;border-radius:7px;background:#edf6f3;color:#124242;font-size:14px;overflow-wrap:anywhere}
-#tab-ontology-model.ontology-model .om-canvas-link-endpoint span{color:#42635c;font-size:13px}
-#tab-ontology-model.ontology-model .om-canvas-link-name{display:flex;flex-wrap:wrap;gap:8px}
-#tab-ontology-model.ontology-model .om-canvas-link-name input{flex:1 1 140px;min-width:0;box-sizing:border-box}
-#tab-ontology-model.ontology-model .om-canvas-link-name input,
-#tab-ontology-model.ontology-model .om-canvas-confirm.is-link-relation button{min-height:40px;font-size:14px}
+#tab-ontology-model.ontology-model .om-canvas-link-endpoint{display:grid;align-content:start;gap:4px;padding:8px 10px;border-radius:7px;background:#edf6f3;color:#124242;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+#tab-ontology-model.ontology-model .om-canvas-link-endpoint span{color:#526c65;font-size:13px}
+#tab-ontology-model.ontology-model .om-canvas-link-endpoint span:first-child{color:#315b51;font-size:12px;font-weight:600}
+#tab-ontology-model.ontology-model .om-canvas-link-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px}
+#tab-ontology-model.ontology-model .om-canvas-link-actions input{flex:1 1 140px;min-width:0;box-sizing:border-box}
+#tab-ontology-model.ontology-model .om-canvas-link-actions input,
+#tab-ontology-model.ontology-model .om-canvas-link-actions button{min-height:40px;font-size:14px}

@@ -379,6 +379,69 @@ def _publish(drafts, repo, p, draft, reject_iri=None):
         warnings, 'publish-once', 'publisher', '统一写入验收')
 
 
+def test_discovery_publishes_verified_effective_date_on_the_shanghai_boundary(tmp_path, monkeypatch):
+    from knowledge_service.integrations.semantica_adapter import SemanticaExtractor
+    from knowledge_service.repository.scoped_reads import ScopedReads
+
+    rule = '本规则于2024年1月24日首次发布，于2024年1月31日生效。'
+    effective = '甲关联乙于2024年2月3日生效。'
+    publication = '发布日期：2024-01-24'
+    review_period = '公示期：2024年1月20日-2024年1月21日'
+    tentative = '规则预计于2024年1月29日生效。'
+    alternatives = '生效日期：2024年2月5日或2024年2月6日'
+    text = '\n\n'.join((rule, publication, review_period, tentative, effective, '## 其他', alternatives))
+    document_start = '2024-01-30T16:00:00.000000Z'
+    fact_start = '2024-02-02T16:00:00.000000Z'
+
+    def discover(self, text, include_attributes=False, **guidance):
+        entities = [{'id': key, 'kind': 'entity', 'text': label, 'proposed_type': '参与方',
+                     'evidence': label} for key, label in (('a', '甲'), ('b', '乙'))]
+        relationships = [
+            {'id': f'link-{index}', 'kind': 'relation', 'proposed_type': kind,
+             'subject': '甲', 'object': '乙', 'subject_id': 'a', 'object_id': 'b',
+             'subject_type': '参与方', 'object_type': '参与方', 'evidence': '甲关联乙',
+             'valid_from': date + 'T00:00:00.000000Z', 'metadata': {
+                 'valid_from': date, 'temporal_source_text': quote, 'temporal_confidence': 0.95}}
+            for index, (kind, date, quote) in enumerate([
+                ('关联', '2024-02-03', effective), ('发布', '2024-01-24', publication),
+                ('公示', '2024-01-20', review_period), ('计划', '2024-01-29', '于2024年1月29日生效'),
+                ('培训', '2024-02-01', '于2024年2月1日生效'), ('报备', '2024-02-02', effective),
+                ('公告', '2024-02-05', '生效日期：2024年2月5日'),
+            ])]
+        return [*entities, *relationships]
+
+    monkeypatch.setattr(SemanticaExtractor, 'discover', discover)
+    app, repo, p, path = _setup(tmp_path)
+    with TestClient(app) as client:
+        response = client.post(f'/api/projects/{p}/documents', json={
+            'title': '规则', 'text': text, 'document_time_mode': 'auto',
+            'extraction_mode': 'discovery', 'resolve_entities': False})
+        assert response.status_code == 201, response.text
+        document = response.json()['document']
+        assert document['valid_from'] == document_start
+        candidates = {item['proposed_type']: item for item in document['metadata']['discovery_candidates']
+                      if item['kind'] == 'relation'}
+        verified = candidates['关联']
+        assert verified['valid_from'] == fact_start
+        assert all(item['valid_from'] == document_start for kind, item in candidates.items() if kind != '关联')
+        assert repo.get_assertion(p, verified['id'])['payload']['valid_from'] == fact_start
+
+        selected = [item['id'] for item in document['metadata']['discovery_candidates']
+                    if item['kind'] == 'entity'] + [verified['id']]
+        added, _ = _add(client, path, _request(candidate_ids=selected), 'dated-relation')
+        _publish(app.state.ontology_drafts, repo, p, added['draft'])
+        relations = repo.current_records(p, kinds=['relation'])
+        assert len(relations) == 1
+        relation = relations[0]
+        assert relation['valid_from'] == fact_start
+        assert relation['metadata']['effective_time_source'] == 'extracted'
+        scoped = ScopedReads(app.state.service.repository)
+        assert scoped.by_ids(p, {'valid_at': '2024-02-03T00:00:00+08:00', 'include_unknown': False},
+                             [relation['id']])
+        assert not scoped.by_ids(p, {'valid_at': '2024-02-02T23:59:59+08:00', 'include_unknown': False},
+                                 [relation['id']])
+
+
 def test_composite_publication_applies_only_selected_approved_batches(tmp_path):
     app, repo, p, path = _setup(tmp_path)
     with TestClient(app) as client:

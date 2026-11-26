@@ -596,6 +596,7 @@ def stream_events(service,p,request):
     started = perf_counter()
     def event(name,payload):return 'event: '+name+'\ndata: '+json.dumps(payload,ensure_ascii=False)+'\n\n'
     from .answer_validity import freeze_qa_request
+    from .qa_follow_up import resolve_knowledge_request
     provenance=ProvenanceService(service.repository)
     run_id=answer_id=None
     logger=logging.getLogger('knowledge_service.qa')
@@ -611,7 +612,7 @@ def stream_events(service,p,request):
             logger.exception('knowledge问答溯源终态保存失败')
 
     try:
-        request = freeze_qa_request(service, p, request)
+        request = freeze_qa_request(service, p, resolve_knowledge_request(request))
         run_id=provenance.begin_retrieval(p,request)
         context,evidence,answer_id=prepare_answer(service,p,request,provenance,run_id)
         yield event('evidence',{**context,'evidence':evidence,

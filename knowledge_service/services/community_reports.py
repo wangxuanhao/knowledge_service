@@ -16,19 +16,32 @@ _REPORTS_PER_BATCH = 4
 _MAP_WORKERS = 4
 _GLOBAL_FINDINGS_LIMIT = 12
 _NO_RELEVANT_EVIDENCE = '本次纳入的社区报告没有发现足以回答该问题的证据。'
+_ANSWER_PREFIX = re.compile(
+    r'^\s*(?:```(?:json)?\s*)?\{\s*"answer"\s*:\s*"'
+    r'((?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*)'
+)
+
+
+def _completion_request(messages, config, *, stream):
+    if not config.configured:
+        raise RuntimeError('还未配置社区报告使用的模型')
+    return {'url': validate_base_url(config.base_url) + '/chat/completions',
+            'headers': {'Authorization': 'Bearer ' + config.api_key},
+            'json': {'model': config.model, 'messages': messages, 'stream': stream,
+                     'max_tokens': min(config.max_tokens, 1800)}}
 
 
 def complete(messages, config):
-    if not config.configured:
-        raise RuntimeError('还未配置社区报告使用的模型')
+    request = _completion_request(messages, config, stream=False)
     with external_client(45, proxy=config.proxy) as client:
-        response = client.post(validate_base_url(config.base_url) + '/chat/completions',
-            headers={'Authorization': 'Bearer ' + config.api_key}, json={
-                'model': config.model, 'messages': messages, 'stream': False,
-                'max_tokens': min(config.max_tokens, 1800)})
+        response = client.post(**request)
         if not response.is_success:
             raise RuntimeError(f'模型请求失败（HTTP {response.status_code}）')
         text = response.json()['choices'][0]['message']['content']
+    return _parse_completion(text)
+
+
+def _parse_completion(text):
     if not isinstance(text, str):
         raise ValueError('模型未返回文本')
     text = re.sub(r'^\s*```(?:json)?\s*|\s*```\s*$', '', text.strip())
@@ -36,6 +49,39 @@ def complete(messages, config):
         return json.loads(text)
     except ValueError:
         raise ValueError('模型未返回有效的社区 JSON 结果') from None
+
+
+def _stream_completion(messages, config, emit):
+    request = _completion_request(messages, config, stream=True)
+    text, sent = '', 0
+    with external_client(45, proxy=config.proxy) as client:
+        with client.stream('POST', **request) as response:
+            if not response.is_success:
+                raise RuntimeError(f'模型请求失败（HTTP {response.status_code}）')
+            for line in response.iter_lines():
+                if not line.startswith('data:'):
+                    continue
+                data = line[5:].strip()
+                if data == '[DONE]':
+                    break
+                payload = json.loads(data)
+                if payload.get('error'):
+                    raise RuntimeError('模型返回了流式生成错误')
+                choices = payload.get('choices') or []
+                chunk = (choices[0].get('delta') or {}).get('content') if choices else None
+                if not isinstance(chunk, str) or not chunk:
+                    continue
+                text += chunk
+                match = _ANSWER_PREFIX.match(text)
+                if match:
+                    # A Unicode escape may end a chunk halfway through a surrogate pair.
+                    draft = json.loads('"' + match[1] + '"').lstrip()[:6000]
+                    draft = re.split(r'[\ud800-\udfff]', draft, maxsplit=1)[0]
+                    if len(draft) > sent:
+                        emit('delta', {'text': draft[sent:]})
+                        sent = len(draft)
+    emit('progress', {'stage': 'verifying'})
+    return _parse_completion(text)
 
 
 def _text(value, limit):
@@ -65,6 +111,8 @@ def _evidence_for_model(evidence, *, excerpt=False):
     for item in evidence[:_EVIDENCE_LIMIT]:
         row = {key: item[key] for key in ('id', 'kind', 'title', 'quote')}
         row.update({key: item[key] for key in ('validity_status', 'valid_from', 'valid_until') if key in item})
+        if item.get('source_platforms'):
+            row['source_platforms'] = item['source_platforms']
         if excerpt:
             row['title'] = row['title'][:200]
             row['quote'] = row['quote'][:600]
@@ -153,18 +201,33 @@ def build_report(title, content, config):
             'llm': config.public_identity()}
 
 
-def _synthesize(payload, config, rule_judgment):
+def _synthesize(payload, config, rule_judgment, emit):
     sources = payload['evidence']
-    result = complete(_messages(
+    subquestions = payload.get('subquestions')
+    messages = _messages(
         '综合社区报告中有支撑的结论，回答用户问题。如果证据仅能支持部分回答，请说明。'
+        + ('按子问顺序逐项作答，只引用该子问 evidence_ids 中的依据。没有查到证据的子问必须明确说明。'
+           '无法确认平台时，说明依赖平台的查询未执行。平台归属若来自 source_platforms，注明是项目资料标注。'
+           if subquestions else '')
         + _answer_policy(sources, rule_judgment)
-        + '格式：{"answer":"回答","citations":["证据 id"]}。', payload), config)
+        + '先输出 answer，再输出 citations。格式：{"answer":"回答","citations":["证据 id"]}。', payload)
+    if emit is None:
+        result = complete(messages, config)
+    else:
+        emit('progress', {'stage': 'generating'})
+        result = _stream_completion(messages, config, emit)
     if not isinstance(result, dict):
         raise ValueError('模型结果中的社区回答格式无效')
     return _text(result.get('answer'), 6000), _citations(result.get('citations'), {item['id'] for item in sources})
 
 
-def generate_answer(question, details, evidence, config, *, rule_judgment=False):
+def generate_planned_answer(question, subquestions, evidence, config, *, rule_judgment, emit=None):
+    payload = {'question': question, 'subquestions': subquestions,
+               'evidence': _evidence_for_model(evidence, excerpt=True)}
+    return _synthesize(payload, config, rule_judgment, emit)
+
+
+def generate_answer(question, details, evidence, config, *, rule_judgment=False, emit=None):
     if rule_judgment:
         evidence = [item for item in evidence if item.get('validity_status') == 'effective']
     sources = _evidence_for_model(evidence)
@@ -177,6 +240,8 @@ def generate_answer(question, details, evidence, config, *, rule_judgment=False)
     if len(reports) > _REPORTS_PER_BATCH:
         findings = []
         for start in range(0, len(reports), _REPORTS_PER_BATCH):
+            if emit is not None:
+                emit('progress', {'stage': 'mapping', 'completed': start, 'total': len(reports)})
             findings.extend(_map_batch(question, reports[start:start + _REPORTS_PER_BATCH], sources, config,
                                        rule_judgment=rule_judgment))
         if not findings:
@@ -184,7 +249,7 @@ def generate_answer(question, details, evidence, config, *, rule_judgment=False)
         references = _references(findings)
         sources = [source for source in sources if source['id'] in references]
         payload = {'question': question, 'mapped_findings': findings, 'evidence': sources}
-    return _synthesize(payload, config, rule_judgment)
+    return _synthesize(payload, config, rule_judgment, emit)
 
 
 def _global_batches(reports):
@@ -216,7 +281,7 @@ def _rank_global_findings(findings):
     return selected, references
 
 
-def generate_global_answer(question, details, evidence, config, *, rule_judgment=False):
+def generate_global_answer(question, details, evidence, config, *, rule_judgment=False, emit=None):
     """Map every supported report in the supplied level, then rank before synthesis."""
     if isinstance(evidence, Mapping):
         evidence = evidence.values()
@@ -236,6 +301,8 @@ def generate_global_answer(question, details, evidence, config, *, rule_judgment
 
     findings, used_sources = [], set()
     batches = _global_batches(reports_for_level())
+    if emit is not None:
+        emit('progress', {'stage': 'mapping', 'completed': 0})
     with ThreadPoolExecutor(max_workers=_MAP_WORKERS) as executor:
         while wave := list(islice(batches, _MAP_WORKERS)):
             in_flight = []
@@ -249,6 +316,8 @@ def generate_global_answer(question, details, evidence, config, *, rule_judgment
                 findings.extend(future.result())
                 metrics['reports_mapped'] += report_count
                 used_sources.update(references)
+                if emit is not None:
+                    emit('progress', {'stage': 'mapping', 'completed': metrics['reports_mapped']})
     selected, final_refs = _rank_global_findings(findings)
     metrics.update(source_count=len(used_sources), findings_mapped=len(findings),
                    findings_synthesized=len(selected))
@@ -256,5 +325,5 @@ def generate_global_answer(question, details, evidence, config, *, rule_judgment
         return _NO_RELEVANT_EVIDENCE, [], metrics
     payload = {'question': question, 'mapped_findings': selected,
                'evidence': _evidence_for_model([sources[ref] for ref in sorted(final_refs)], excerpt=True)}
-    answer, citations = _synthesize(payload, config, rule_judgment)
+    answer, citations = _synthesize(payload, config, rule_judgment, emit)
     return answer, citations, metrics

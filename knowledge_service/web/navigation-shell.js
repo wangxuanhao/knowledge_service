@@ -47,6 +47,8 @@
   });
   document.addEventListener('click',event=>{if(!projectLabel?.contains(event.target)&&!projectToggle?.contains(event.target))closeProject();});
   document.addEventListener('keydown',event=>{if(event.key==='Escape')closeProject(true);});
+  const main = document.querySelector('body>main');
+  document.addEventListener('workspace:page-changed',() => { if (main) main.scrollTop = 0; });
   desktop.addEventListener('change',sync);
   // Authentication renders this original button asynchronously; retain its menu handlers.
   const session=document.getElementById('session');

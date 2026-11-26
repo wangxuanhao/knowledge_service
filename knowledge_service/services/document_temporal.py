@@ -27,6 +27,11 @@ _HEADERS = {'发布日期': 'published_at', '发布时间': 'published_at',
 _HEADER = re.compile(r'^[ \t]*(?:[-*]\s+)?(?:\*\*)?('
                      + '|'.join(_HEADERS) + r'|是否生效)(?:\*\*)?\s*[：:]\s*(?:\*\*)?')
 _SUBJECT = r'本(?:规则|表|规范|办法|细则|制度|公告|通知|规定|指引|协议|标准|说明)'
+_DISCOVERY_START = re.compile(
+    rf'生效(?:日期|时间)\s*[：:]\s*(?P<header>{_DATE})(?!\d)'
+    rf'|(?:于|自)\s*(?P<clause>{_DATE})\s*(?:起|开始)?\s*(?:正式)?(?:生效|施行|实施|执行|试行)')
+_SENTENCE_BREAK = re.compile(r'[。；;！!？?\n]')
+_TENTATIVE_START = re.compile(r'预计|计划|原定|暂定|拟(?:于|自|定|将)|征求意见|公示期|尚未|待定|取消|暂缓')
 
 
 def _parse_date(raw, inclusive=False):
@@ -56,6 +61,59 @@ def _eligible_text(text):
                          r'|^[ \t]*>[^\n]*|^(?: {4}|\t)[^\n]*'
                          r'|^[^\n]*(?:例如|示例|举例|样例)[^\n]*', re.MULTILINE)
     return pattern.sub(lambda match: ''.join('\n' if char == '\n' else ' ' for char in match[0]), text)
+
+
+def temporal_evidence_text(text, excluded_ranges=()):
+    """Mask ineligible evidence while retaining the original character offsets."""
+    parts, cursor = [], 0
+    for start, end in sorted(excluded_ranges):
+        start, end = max(cursor, start), min(len(text), end)
+        if start < end:
+            parts.extend((text[cursor:start], ''.join('\n' if char == '\n' else ' ' for char in text[start:end])))
+            cursor = end
+    parts.append(text[cursor:])
+    return _eligible_text(''.join(parts))
+
+
+def discovery_effective_start(metadata, text, start, end):
+    """Accept a candidate date only when an affirmative clause in its source supports it."""
+    quote = metadata.get('temporal_source_text')
+    confidence = metadata.get('temporal_confidence')
+    claimed = metadata.get('valid_from')
+    if (not isinstance(quote, str) or not quote.strip() or type(confidence) not in (int, float)
+            or not 0.5 <= confidence <= 1 or not isinstance(claimed, str)
+            or not _DATES.fullmatch(claimed.strip())):
+        return None
+    quote = quote.strip()
+    offset = text.find(quote, start, end)
+    if offset < 0:
+        return None
+    matches = list(_DISCOVERY_START.finditer(quote))
+    if len(matches) != 1:
+        return None
+    match = matches[0]
+    sentence_start = 1 + max(text.rfind(mark, 0, offset + match.start()) for mark in '。；;！!？?\n')
+    sentence_end = _SENTENCE_BREAK.search(text, offset + match.end())
+    context = text[sentence_start:sentence_end.start() if sentence_end else len(text)]
+    if _TENTATIVE_START.search(context) or (sentence_end and sentence_end[0] in '？?'):
+        return None
+    if match['header'] and len(_DATES.findall(context)) != 1:
+        return None
+    raw = match['header'] or match['clause']
+    try:
+        verified, _ = _parse_date(raw)
+        claimed_at, _ = _parse_date(claimed.strip())
+        if verified == claimed_at:
+            return verified
+        if ':' not in raw and '：' not in raw:
+            zone = ZoneInfo(TIMEZONE)
+            actual_day = datetime.fromisoformat(verified).astimezone(zone).date()
+            claimed_day = datetime.fromisoformat(claimed_at).astimezone(zone).date()
+            if actual_day == claimed_day:
+                return verified
+    except (ValueError, OverflowError):
+        return None
+    return None
 
 
 def source_temporal_exclusions(source,*,chunks=None):
@@ -107,14 +165,7 @@ def source_temporal_exclusions(source,*,chunks=None):
 
 
 def _candidates(text, supplied_title, excluded_ranges):
-    parts, cursor = [], 0
-    for start, end in sorted(excluded_ranges):
-        start, end = max(cursor, start), min(len(text), end)
-        if start < end:
-            parts.extend((text[cursor:start], ''.join('\n' if char == '\n' else ' ' for char in text[start:end])))
-            cursor = end
-    parts.append(text[cursor:])
-    masked = _eligible_text(''.join(parts))
+    masked = temporal_evidence_text(text, excluded_ranges)
     result = {name: [] for name in _FIELDS}
     source_status = None
 
@@ -181,6 +232,10 @@ def _candidates(text, supplied_title, excluded_ranges):
                     name, kind = 'valid_until', 'self_expiry'
                 elif re.match(r'\s*(?:进行)?(?:修订|修正)', suffix):
                     name, kind = 'revised_at', 'self_revision'
+                elif re.match(r'\s*(?:首次)?发布\s*[，,]', suffix):
+                    # Keep looking for an effective clause after the publication date.
+                    previous_end = date.end()
+                    continue
             if name:
                 add(name, date, kind, inclusive, own.end())
             else:

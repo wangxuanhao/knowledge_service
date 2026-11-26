@@ -13,8 +13,266 @@ def postgres_backend():
     """These routes serve isolated API fixtures."""
 
 
+@pytest.fixture
+def qa_history(redesign_page):
+    from knowledge_service.services.qa_conversations import sanitize_messages
+
+    page, _ = redesign_page
+    sessions = {}
+
+    def conversations(route):
+        method = route.request.method
+        path = route.request.url.split('?', 1)[0]
+        if path.endswith('/conversations'):
+            if method == 'GET':
+                return route.fulfill(json={'conversations': list(sessions.values()), 'total': len(sessions)})
+            key = f'conversation-{len(sessions) + 1}'
+            sessions[key] = {'id': key, 'title': '新会话', 'version': 1, 'messages': [], 'message_count': 0}
+            return route.fulfill(status=201, json={'conversation': sessions[key]})
+        session = sessions[path.rsplit('/', 1)[-1]]
+        if method == 'PUT':
+            body = route.request.post_data_json
+            if body['expected_version'] != session['version']:
+                return route.fulfill(status=409, json={'detail': '会话版本冲突'})
+            messages = sanitize_messages('p', body['messages'])
+            session.update(messages=messages, message_count=len(messages), version=session['version'] + 1,
+                           title=next((item['text'] for item in messages if item['kind'] == 'user'), '新会话'))
+        return route.fulfill(json={'conversation': session})
+
+    page.route(re.compile(r'/api/projects/p/qa/conversations(?:/[^?]+)?(?:\?.*)?$'), conversations)
+    return sessions
+
+
+def test_community_question_clears_on_submit_and_preserves_drafts(redesign_page, qa_history):
+    expect = pytest.importorskip('playwright.sync_api').expect
+    page, errors = redesign_page
+    status = {'state': 'ready', 'browseable': True, 'revision': 'r1', 'counts': {'reports_ready': 1}}
+    page.route('**/api/projects/p/communities', lambda route: route.fulfill(json={
+        'status': status, 'communities': [],
+    }))
+    pending = []
+    page.route('**/api/projects/p/communities/ask', lambda route: pending.append(route))
+
+    page.locator('[data-tab="qa"]').click()
+    page.get_by_role('button', name='社区问答', exact=True).click()
+    questions = page.locator('#community-questions')
+    question = questions.get_by_role('textbox', name='社区问答问题')
+    send = questions.get_by_role('button', name='发送社区问题')
+    bubble = questions.locator('.qa-turn-user').last
+    expect(send).to_be_enabled()
+
+    def begin_request(text, *, use_enter=False):
+        question.fill(text)
+        with page.expect_request('**/api/projects/p/communities/ask') as request:
+            if use_enter:
+                question.press('Enter')
+            else:
+                send.click()
+        assert request.value.post_data_json['question'] == text.strip()
+        expect(bubble).to_have_text(text.strip())
+        expect(send).to_be_disabled()
+        expect(question).to_have_value('', timeout=1000)
+        return pending.pop()
+
+    first = begin_request('退款如何处理？', use_enter=True)
+    question.fill('退款如何处理？')
+    first.fulfill(json={'answer': '按退款规则执行。', 'generated': True, 'evidence': []})
+    expect(questions.get_by_text('按退款规则执行。')).to_be_visible()
+    expect(question).to_have_value('退款如何处理？')
+
+    failed = begin_request('  退款需要什么材料？  ')
+    failed.fulfill(status=503, json={'detail': '暂时无法查询社区报告'})
+    expect(questions.locator('#community-ask-status')).to_contain_text('暂时无法查询社区报告')
+    expect(question).to_have_value('  退款需要什么材料？  ')
+
+    failed = begin_request('退款需要什么材料？')
+    question.fill('下一个问题')
+    failed.fulfill(status=503, json={'detail': '暂时无法查询社区报告'})
+    expect(send).to_be_enabled()
+    expect(question).to_have_value('下一个问题')
+    assert not errors
+
+
+def test_community_stream_and_knowledge_share_a_persistent_conversation(redesign_page, qa_history):
+    expect = pytest.importorskip('playwright.sync_api').expect
+    page, errors = redesign_page
+    status = {'state': 'ready', 'browseable': True, 'revision': 'r1', 'counts': {'reports_ready': 1},
+              'question_planning': True}
+    page.route('**/api/projects/p/communities', lambda route: route.fulfill(json={'status': status, 'communities': []}))
+    page.route('**/api/projects/p/qa/stream', lambda route: route.fulfill(content_type='text/event-stream',
+        body='event: done\ndata: {"answer":"知识依据回答","answer_id":"qa-1"}\n\n'))
+    page.evaluate('''() => {
+      const original = window.fetch;
+      window.fetch = (url, options) => {
+        if (!url.endsWith('/communities/ask')) return original(url, options);
+        window.communityAccept = options.headers.Accept;
+        window.communityRequest = JSON.parse(options.body);
+        return Promise.resolve(new Response(new ReadableStream({start(controller) {
+          window.emitCommunity = (name, data) => controller.enqueue(new TextEncoder().encode(
+            'event: ' + name + '\\ndata: ' + JSON.stringify(data) + '\\n\\n'));
+        }}), {headers:{'content-type':'text/event-stream'}}));
+      };
+    }''')
+    page.locator('[data-tab="qa"]').click()
+    page.locator('#qa-query').fill('知识依据问题')
+    page.locator('#qa').click()
+    expect(page.locator('#qa-transcript .qa-answer')).to_contain_text('知识依据回答')
+    page.get_by_role('button', name='社区问答', exact=True).click()
+    expect(page.get_by_role('heading', name='会话记录')).to_be_visible()
+    questions = page.locator('#community-questions')
+    questions.get_by_role('checkbox', name='生成模型答案').check()
+    questions.get_by_role('textbox', name='社区问答问题').fill('社区问题')
+    questions.get_by_role('button', name='发送社区问题').click()
+    page.wait_for_function('() => Boolean(window.emitCommunity)')
+    assert page.evaluate('window.communityAccept') == 'text/event-stream'
+    assert page.evaluate('window.communityRequest.plan') is True
+    assert page.evaluate('window.communityRequest.mode') == 'hybrid'
+    answer = questions.locator('.qa-turn-assistant')
+    expect(answer).to_contain_text('正在查找社区报告')
+    page.evaluate("() => emitCommunity('progress',{stage:'planning'})")
+    expect(answer).to_contain_text('正在分析问题并制定检索计划')
+    page.evaluate('''() => emitCommunity('evidence',{subquestion:{number:1,question:'退款限制',evidence_ids:['E-aa1','E-aa2']},evidence:[
+      {id:'E-aa1',kind:'document',title:'依据',quote:'不可退款条款',source_platforms:['抖音电商']},
+      {id:'E-aa2',kind:'document',title:'参考材料',quote:'检索到的另一条证据'}]})''')
+    expect(answer).to_contain_text('资料标注 · 抖音电商')
+    page.evaluate("""() => emitCommunity('evidence',{subquestion:{number:2,question:'其他限制',
+        state:'platform_unresolved',evidence_ids:[]},evidence:[]})""")
+    expect(answer).to_contain_text('平台归属证据不足')
+    expect(answer.get_by_text('不可退款条款', exact=True)).to_be_visible()
+    expect(answer.get_by_text('检索到的另一条证据', exact=True)).to_be_visible()
+    expect(answer.locator('.qa-answer')).to_be_empty()
+    page.evaluate("() => emitCommunity('progress',{stage:'mapping',completed:4,total:8})")
+    expect(answer).to_contain_text('已处理 4 / 8 份')
+    page.evaluate("() => emitCommunity('delta',{text:'正在生成的第一段'})")
+    expect(answer.locator('.qa-answer')).to_have_text('正在生成的第一段')
+    expect(answer.get_by_text('不可退款条款', exact=True)).to_be_visible()
+    expect(answer).to_have_attribute('data-state', 'streaming')
+    saved = qa_history['conversation-1']['messages']
+    assert [item['text'] for item in saved] == ['知识依据问题', '知识依据回答', '社区问题']
+    with page.expect_response(lambda response: response.request.method == 'PUT' and '/qa/conversations/' in response.url):
+        page.evaluate('''() => emitCommunity('done',{answer:'最终社区回答 [E-aa1]',generated:true,citations:['E-aa1'],
+          subquestions:[{number:1,question:'退款限制',state:'evidence_found',channels:['keyword','original_hybrid'],evidence_ids:['E-aa1','E-aa2']},
+            {number:2,question:'其他限制',state:'platform_unresolved',evidence_ids:[]}],
+          evidence:[{id:'E-aa1',kind:'document',title:'依据',quote:'不可退款条款',source_platforms:['抖音电商']},
+            {id:'E-aa2',kind:'document',title:'参考材料',quote:'检索到的另一条证据'}]})''')
+    expect(answer).to_have_attribute('data-state', 'done')
+    expect(answer.get_by_role('button', name='定位引用 1')).to_be_visible()
+    cited = answer.locator('.community-question-result-body > details').filter(has_text='回答引用')
+    expect(cited.get_by_text('不可退款条款', exact=True)).to_be_visible()
+    expect(answer.get_by_text('检索到的另一条证据', exact=True)).to_be_hidden()
+    assert qa_history['conversation-1']['messages'][-1]['community_result']['evidence'][0]['quote'] == '不可退款条款'
+
+    page.reload()
+    page.wait_for_selector('#project option[value="p"]', state='attached')
+    if page.locator('#project').input_value() != 'p':
+        page.select_option('#project', 'p')
+    page.locator('[data-tab="qa"]').click()
+    expect(page.locator('#qa-transcript .qa-answer')).to_contain_text('知识依据回答')
+    page.get_by_role('button', name='社区问答', exact=True).click()
+    expect(questions.get_by_text('社区问题', exact=True)).to_be_visible()
+    expect(answer.locator('.qa-answer')).to_contain_text('最终社区回答')
+    answer.get_by_role('button', name='定位引用 1').click()
+    expect(cited.get_by_text('不可退款条款', exact=True)).to_be_visible()
+    answer.get_by_text('检索覆盖 · 2 项', exact=True).click()
+    expect(answer.get_by_text('社区关键词 · 原文混合', exact=True)).to_be_visible()
+    answer.get_by_role('button', name='定位子问证据 2').click()
+    expect(answer.get_by_text('检索到的另一条证据', exact=True)).to_be_visible()
+    questions.get_by_role('button', name='新建会话').click()
+    expect(answer).to_have_count(0)
+    page.locator('#qa-session-list').get_by_role('button', name=re.compile('^知识依据问题')).click()
+    expect(answer.locator('.qa-answer')).to_contain_text('最终社区回答')
+    assert not errors
+
+
+def test_qa_follow_ups_send_only_their_own_conversation_history(redesign_page, qa_history):
+    expect = pytest.importorskip('playwright.sync_api').expect
+    page, errors = redesign_page
+    status = {'state': 'ready', 'browseable': True, 'revision': 'r1', 'counts': {'reports_ready': 1}}
+    page.route('**/api/projects/p/communities', lambda route: route.fulfill(json={'status': status, 'communities': []}))
+    page.route('**/api/projects/p/qa/stream', lambda route: route.fulfill(content_type='text/event-stream',
+        body='event: done\ndata: {"answer":"知识依据回答"}\n\n'))
+    page.route('**/api/projects/p/communities/ask', lambda route: route.fulfill(
+        json={'generated': True, 'answer': '社区回答', 'evidence': [], 'communities': []}))
+    page.locator('[data-tab="qa"]').click()
+    knowledge, knowledge_send = page.locator('#qa-query'), page.locator('#qa')
+    knowledge.fill('盗播首次违规怎么处置？')
+    knowledge_send.click()
+    expect(page.locator('#qa-transcript .qa-answer')).to_have_text('知识依据回答')
+    knowledge.fill('那第二次呢？')
+    with page.expect_request('**/api/projects/p/qa/stream') as sent:
+        knowledge_send.click()
+    assert sent.value.post_data_json['conversation_context'] == [
+        {'question': '盗播首次违规怎么处置？', 'answer': '知识依据回答'}]
+    expect(page.locator('#qa-transcript .qa-answer')).to_have_count(2)
+    page.get_by_role('button', name='社区问答', exact=True).click()
+    questions = page.locator('#community-questions')
+    entry = questions.get_by_role('textbox', name='社区问答问题')
+    submit = questions.get_by_role('button', name='发送社区问题')
+    entry.fill('盗播分级社区有哪些处置？')
+    with page.expect_request('**/api/projects/p/communities/ask') as sent:
+        submit.click()
+    assert 'conversation_context' not in sent.value.post_data_json
+    expect(questions.locator('.qa-answer')).to_have_text('社区回答')
+    entry.fill('那第三次呢？')
+    with page.expect_request('**/api/projects/p/communities/ask') as sent:
+        submit.click()
+    assert sent.value.post_data_json['conversation_context'] == [
+        {'question': '盗播分级社区有哪些处置？', 'answer': '社区回答'}]
+    expect(questions.locator('.qa-answer')).to_have_count(2)
+    questions.get_by_role('button', name='新建会话').click()
+    expect(questions.locator('.qa-answer')).to_have_count(0)
+    entry.fill('那第四次呢？')
+    with page.expect_request('**/api/projects/p/communities/ask') as sent:
+        submit.click()
+    assert 'conversation_context' not in sent.value.post_data_json
+    assert not errors
+
+
+def test_long_community_content_scrolls_inside_desktop_workspace(redesign_page):
+    expect = pytest.importorskip('playwright.sync_api').expect
+    page, errors = redesign_page
+    page.set_viewport_size({'width': 1280, 'height': 720})
+    status = {'state': 'ready', 'browseable': True, 'revision': 'r1'}
+    summary = {'id': 'c0', 'report_title': '跨文档主题', 'report_status': 'ready'}
+    evidence = [
+        {'id': f'e{i}', 'kind': 'document', 'document_id': f'd{i % 2}',
+         'source_version_id': f's{i % 2}', 'chunk_version_id': f'chunk{i}',
+         'title': f'资料 {i % 2}', 'quote': f'证据 {i} ' + '社区中的不同规则。' * 18}
+        for i in range(24)
+    ]
+    detail = {**summary, 'status': status, 'evidence_count': len(evidence), 'detail_offset': 0,
+              'evidence': evidence, 'report_evidence': evidence,
+              'report': {'status': 'ready', 'summary': '跨文档报告',
+                         'findings': [{'text': f'发现 {i} ' + '本条规则的说明。' * 16,
+                                       'citations': [f'e{i}']} for i in range(len(evidence))]}}
+    page.route('**/api/projects/p/communities', lambda route: route.fulfill(json={
+        'status': status, 'communities': [{**summary, 'id': f'c{i}'} for i in range(24)], 'total': 24,
+    }))
+    page.route('**/api/projects/p/communities/detail', lambda route: route.fulfill(json=detail))
+    page.get_by_role('button', name='社区', exact=True).click()
+    browser = page.locator('#community-browser')
+    first = browser.get_by_role('button', name='打开社区').first
+    expect(first).to_be_visible()
+    assert page.evaluate('document.documentElement.scrollHeight <= innerHeight + 1')
+    first.click()
+    expect(browser.get_by_role('heading', name='报告摘要')).to_be_visible()
+    expect(browser.get_by_text('2 份来源文档', exact=True)).to_be_visible()
+    expect(browser.get_by_text('报告引用 · 24 条 · 2 份文档', exact=True)).to_be_visible()
+    toolbar = browser.locator('#community-browse-path')
+    before = toolbar.bounding_box()['y']
+    assert page.evaluate('document.documentElement.scrollHeight <= innerHeight + 1')
+    report = browser.get_by_role('region', name='社区报告')
+    rail = browser.get_by_role('region', name='成员与证据')
+    assert report.evaluate('(el) => el.scrollHeight > el.clientHeight')
+    browser.get_by_role('button', name='定位引用 24', exact=True).click()
+    assert rail.evaluate('(el) => el.scrollTop') > 0
+    assert toolbar.bounding_box()['y'] == before
+    assert page.evaluate('window.scrollY') == 0
+    assert not errors
+
+
 @pytest.mark.parametrize('width', [1800, 390])
-def test_community_discovery_fills_workspace_and_connects_report_to_evidence(redesign_page, width):
+def test_community_discovery_fills_workspace_and_connects_report_to_evidence(redesign_page, width, qa_history):
     expect = pytest.importorskip('playwright.sync_api').expect
     page, errors = redesign_page
     page.set_viewport_size({'width': width, 'height': 1050})
@@ -43,7 +301,10 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
         body = route.request.post_data_json
         requests.append(body)
         if route.request.url.endswith('/detail'):
+            if body['community_id'] == 'c1':
+                return route.fulfill(json={**communities[1], 'status': status, 'level': 1, 'parent_id': 'c0'})
             return route.fulfill(json={**communities[0], 'status': status, 'children': [communities[1]],
+                                       'level': 0, 'source_document_count': 2, 'cited_document_count': 2,
                                        'evidence': [first, duplicate, second, historical],
                                        'report_evidence': [first, duplicate, historical],
                                        'report': {'status': 'ready', 'summary': '预约规则按商户履约与用户通知归纳。',
@@ -151,6 +412,12 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     browser.get_by_role('article').filter(has_text='预约履约社区').get_by_role('button', name='打开社区').click()
     expect(browser.get_by_role('heading', name='报告摘要')).to_be_visible()
     expect(browser.get_by_role('heading', name='主要发现')).to_be_visible()
+    expect(browser.get_by_text('2 份来源文档', exact=True)).to_be_visible()
+    expect(browser.get_by_text('报告引用 · 2 条 · 2 份文档', exact=True)).to_be_visible()
+    children = browser.get_by_text('子社区 · 1', exact=True)
+    children.click()
+    expect(browser.get_by_text('由本社区内关系更紧密的实体组成。', exact=True)).to_be_visible()
+    children.click()
     toolbar = browser.locator('#community-browse-path')
     back = toolbar.get_by_role('button', name='返回社区列表')
     ask = toolbar.get_by_role('button', name='就此社区提问')
@@ -167,7 +434,10 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     refs.first.click()
     expect(browser.get_by_text(first['quote'], exact=True)).to_be_visible()
     page.evaluate('window.SourceReader.open = options => { window.communityOpened = options; }')
-    browser.get_by_role('button', name='查看原文', exact=True).first.click()
+    open_source = browser.get_by_role('button', name='查看原文', exact=True).first
+    assert 24 <= open_source.bounding_box()['height'] <= 32
+    assert open_source.bounding_box()['width'] <= 75
+    open_source.click()
     assert page.evaluate('window.communityOpened.versionId') == 's1'
     browser.get_by_role('button', name='定位引用 2').click()
     browser.get_by_role('button', name='查看引用片段').click()
@@ -182,6 +452,12 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
     page.screenshot(path=str(output / f'detail-{width}.png'), full_page=True,
                     style='.ks-notice { visibility: hidden; }')
+    children.click()
+    browser.get_by_role('button', name='退款处理社区', exact=True).click()
+    expect(browser.get_by_role('heading', name='退款处理社区', exact=True)).to_be_visible()
+    expect(browser.get_by_text('第 2 层', exact=True)).to_be_visible()
+    toolbar.get_by_role('button', name='返回上一级').click()
+    expect(browser.get_by_role('heading', name='预约履约社区', exact=True)).to_be_visible()
     browser.get_by_role('button', name='就此社区提问').click()
     questions = page.locator('#community-questions')
     expect(questions).to_be_visible()
@@ -192,19 +468,21 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     generate = questions.get_by_role('checkbox', name='生成模型答案')
     filters = questions.get_by_text('筛选社区', exact=True)
     strategy = questions.get_by_text('匹配方式', exact=True)
+    reply = questions.locator('.qa-turn-assistant').last
+    expect(send).to_be_enabled()
     expect(questions.get_by_label('添加社区')).to_be_hidden()
     question.fill('预约未履约怎么处理？')
     question.press('Enter')
-    expect(questions.get_by_text(first['quote'], exact=True)).to_be_visible()
-    coverage = questions.locator('.community-coverage-line')
+    expect(reply.get_by_text(first['quote'], exact=True)).to_be_visible()
+    coverage = reply.locator('.community-coverage-line')
     expect(coverage).to_contain_text('展示社区 1/2')
     shown_evidence = coverage.get_by_text('展示证据 2/73', exact=True)
     expect(shown_evidence).to_have_attribute('title', '接口返回 4 条，页面选取并去重后展示 2 条，本次候选 73 条。')
-    expect(questions.get_by_text('证据摘录 · 2 条 · 1 个来源', exact=True)).to_be_visible()
-    expect(questions.locator('.community-source-excerpt')).to_have_count(2)
+    expect(reply.get_by_text('证据摘录 · 2 条 · 1 个来源', exact=True)).to_be_visible()
+    expect(reply.locator('.community-source-excerpt')).to_have_count(2)
     badges = coverage.locator('span').all()
     assert abs(badges[0].bounding_box()['y'] - badges[1].bounding_box()['y']) <= 1
-    matches = questions.locator('details').filter(has=page.get_by_text('社区列表 · 1 个', exact=True))
+    matches = reply.locator('details').filter(has=page.get_by_text('社区列表 · 1 个', exact=True))
     expect(matches).not_to_have_attribute('open', '')
     matches.locator('summary').click()
     report = matches.get_by_role('article')
@@ -216,19 +494,19 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     matches.locator('summary').click()
     assert requests[-1]['community_ids'] == ['c0']
     assert requests[-1]['generate'] is False
-    expect(questions.locator('#community-answer')).not_to_contain_text(first['id'])
+    expect(reply).not_to_contain_text(first['id'])
     generate.check()
     question.fill('预约未履约怎么处理？')
     send.click()
-    expect(questions.get_by_role('heading', name='社区回答')).to_be_visible()
-    expect(questions.get_by_role('button', name='定位引用 1')).to_be_visible()
+    expect(reply.get_by_role('heading', name='社区回答')).to_be_visible()
+    expect(reply.get_by_role('button', name='定位引用 1')).to_be_visible()
     assert requests[-1]['generate'] is True
 
     questions.get_by_role('button', name='预约履约社区 ×').click()
     generate.uncheck()
     question.fill('不履行预约有什么后果？')
     send.click()
-    expect(questions.get_by_text(first['quote'], exact=True)).to_be_visible()
+    expect(reply.get_by_text(first['quote'], exact=True)).to_be_visible()
     assert requests[-1]['community_ids'] == []
     assert requests[-1]['mode'] == 'semantic'
     assert requests[-1]['question'] == '不履行预约有什么后果？'
@@ -248,7 +526,7 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     page.locator('[data-community-view="questions"]').click()
     question.fill('如何处理履约问题？')
     send.click()
-    expect(questions.get_by_text(first['quote'], exact=True)).to_be_visible()
+    expect(reply.get_by_text(first['quote'], exact=True)).to_be_visible()
     assert requests[-1]['mode'] == 'keyword'
     assert requests[-1]['community_ids'] == [] and requests[-1]['match_only'] is True
     matches.locator('summary').click()
@@ -260,12 +538,12 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     question.fill('没有对应主题的问题')
     send.click()
     expect(questions.get_by_text('当前范围没有与问题匹配的社区报告。', exact=True)).to_be_visible()
-    expect(questions.get_by_text(first['quote'], exact=True)).to_have_count(0)
+    expect(reply.get_by_text(first['quote'], exact=True)).to_have_count(0)
     assert requests[-2]['match_only'] is True and requests[-2]['generate'] is True
     assert 'match_only' not in requests[-1] and requests[-1]['generate'] is False
     question.fill('预约规则怎样处理？')
     send.click()
-    expect(questions.get_by_role('heading', name='社区回答')).to_be_visible()
+    expect(reply.get_by_role('heading', name='社区回答')).to_be_visible()
     assert requests[-2]['generate'] is False and requests[-2]['community_ids'] == []
     assert requests[-1]['generate'] is True and requests[-1]['community_ids'] == ['c0']
     status['vector_index']['state'] = 'ready'
@@ -280,8 +558,8 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     generate.check()
     question.fill('全局有什么共性？')
     send.click()
-    expect(questions.get_by_text('全局归纳', exact=True)).to_be_visible()
-    expect(questions.get_by_text('归纳 1/3', exact=True)).to_be_visible()
+    expect(reply.get_by_text('全局归纳', exact=True)).to_be_visible()
+    expect(reply.get_by_text('归纳 1/3', exact=True)).to_be_visible()
     assert requests[-1]['community_ids'] == []
     assert requests[-1]['mode'] == 'global' and requests[-1]['level'] == 0
     filters.click()
@@ -290,7 +568,7 @@ def test_community_discovery_fills_workspace_and_connects_report_to_evidence(red
     generate.uncheck()
     question.fill('如何处理履约问题？')
     send.click()
-    expect(questions.get_by_text(first['quote'], exact=True)).to_be_visible()
+    expect(reply.get_by_text(first['quote'], exact=True)).to_be_visible()
     assert requests[-1]['mode'] == 'semantic' and 'level' not in requests[-1]
     assert not errors
 

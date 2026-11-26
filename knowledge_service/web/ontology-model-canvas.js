@@ -40,9 +40,11 @@
   // 工具条按钮的说明文案（集中一处：锁定态要能**换回**原文案，而不是越改越乱）
   const BAR_TITLES = {
     create: '做什么：新建实体类（也可以切到关系类型 / 实体属性）。不做什么：不直接改生效本体——先写进草案，审核发布后才生效。',
-    parent: '做什么：把当前选中的类连到另一个类，作为它的父类（写入草案）。不做什么：不改名字/说明，不删除已有父类。',
-    relation: '做什么：先点起点、再点终点，建一个新的关系类型（写入草案）。不做什么：不改已有关系，不做拖拽橡皮筋。',
     locked: '正在查看历史版本（只读）：编辑入口先锁住。要改就先点顶栏「回到最新」，或用「版本管理」里的「回到这一版」开一份新草案。',
+  };
+  const LINKS = {
+    parent: { title: '新增继承关系', from: '子类', to: '父类', submit: '确认新增继承', write: confirmParent },
+    relation: { title: '新增关联关系', from: '起点', to: '终点', submit: '确认建关系', write: confirmRelation },
   };
 
   // 浅青（teal）语义色：与整站 theme.css 同一套（白纸面 + 深青/靛蓝/橄榄黄）。
@@ -56,8 +58,8 @@
   const M = {
     ready: false, host: null, ctx: null, cy: null, stage: null, svg: null, ro: null,
     onResize: null, view: 'graph', sig: '', graph: null, selected: null,
-    mode: '', linkFrom: null, pending: null, bands: [], els: {}, didFit: false,
-    layoutView: null, dragged: false, display: 'cards', suspended: false,
+    mode: '', linkFrom: null, pending: null, saving: null, bands: [], els: {}, didFit: false,
+    layoutView: null, layoutFlat: false, dragged: false, display: 'cards', suspended: false,
     pendingFit: false, pendingLayout: false, fitFrame: null,
     bandLayer: null, bandByNode: new Map(), dirtyBands: new Set(), bandFrame: null,
     bandTransform: '', bandZoom: null,
@@ -243,7 +245,7 @@
         const data = {
           id: n.id, label: n.label || shortIri(n.id), state: n.state || 'published',
           kind: n.kind || 'class', dtype: n.dtype || '', iri: n.iri || n.id,
-          display:M.display,cardImage:card.image,nodeWidth:M.display==='compact'?62:NODE_W,
+          display:M.display,cardImage:card.image,cardHeight:card.height,nodeWidth:M.display==='compact'?62:NODE_W,
           nodeHeight:M.display==='compact'?62:card.height,
         };
         const el = cy.getElementById(n.id);
@@ -387,6 +389,34 @@
     return depth;
   }
 
+  function isFlatHierarchy() {
+    return M.view === 'hierarchy' && !!M.graph?.nodes.length && !M.graph.edges.some(edge => edge.kind === 'inherit');
+  }
+
+  function layoutFlatHierarchy() {
+    const cy = M.cy, width = M.stage.clientWidth;
+    const gap = 20, padding = 20;
+    const availableWidth = Math.max(1, width - padding * 2);
+    const zoom = Math.min(1, availableWidth / NODE_W);
+    const columns = Math.max(1, Math.floor((availableWidth / zoom + gap) / (NODE_W + gap)));
+    const nodes = [...M.graph.nodes].sort((a,b) => String(a.label || a.id).localeCompare(String(b.label || b.id), 'zh-CN'));
+    const positions = Object.create(null);
+    let top = 0;
+    for (let start = 0; start < nodes.length; start += columns) {
+      const row = nodes.slice(start, start + columns);
+      const heights = row.map(node => Math.max(74, cy.getElementById(node.id).data('cardHeight')));
+      row.forEach((node, column) => {
+        positions[node.id] = { x: NODE_W / 2 + column * (NODE_W + gap), y: top + heights[column] / 2 };
+      });
+      top += Math.max(...heights) + gap;
+    }
+    clearBands();
+    cy.layout({ name: 'preset', positions, fit: false, animate: false }).run();
+    setFitZoom(zoom);
+    const gridWidth = (Math.min(columns, nodes.length) * (NODE_W + gap) - gap) * zoom;
+    cy.pan({ x: (width - gridWidth) / 2, y: 67 });
+  }
+
   // 分层带布局：同深度同一横带；带内按父类所在列排序（子类跟在父类下方）；
   // 每带最多 MAX_PER_ROW 张，超了换下一带（同层，位置在下，标「（续）」）。
   function layoutHierarchy() {
@@ -452,12 +482,15 @@
     M.cy.stop(true, false);
     traceSelection(null);
     M.layoutView = M.view;
-    if (M.view === 'hierarchy') layoutHierarchy();
+    M.layoutFlat = isFlatHierarchy();
+    if (M.layoutFlat) layoutFlatHierarchy();
+    else if (M.view === 'hierarchy') layoutHierarchy();
     else layoutGraph();
   }
 
   // 结构刷新只更新层级归属；每条带的实际范围由成员节点当前位置决定。
   function refreshHierarchyBands() {
+    if (M.layoutFlat) return;
     const depth = computeDepths(M.graph);
     const rows = new Map();
     for (const n of M.graph.nodes) {
@@ -612,7 +645,7 @@
     if (!M.pendingFit || !M.cy || M.suspended || !M.stage.clientWidth || !M.stage.clientHeight) return;
     M.cy.resize();
     updateBar();
-    if(M.pendingLayout||M.layoutView!==M.view)runLayout();
+    if(M.pendingLayout||M.layoutView!==M.view||M.layoutFlat)runLayout();
     else fitAll();
     M.pendingFit = false;
     M.didFit = true;
@@ -652,29 +685,17 @@
     const iri = node.data('iri') || node.id();
     if (!iri) return;
 
-    // 改父类模式：当前点到的卡片 = 父类（被选中的那份是子类）。
-    if (M.mode === 'parent') {
-      const child = M.linkFrom;
-      if (!child) { cancelLink(); return; }
-      if (child === iri) { status('父类和子类不能是同一个类。', true); return; }
-      M.pending = { type: 'parent', child, parent: iri };
-      renderConfirm();
-      updateBar();
-      return;
-    }
-
-    // 连关系模式：第一次点＝起点(domain)，第二次点＝终点(range)。
-    if (M.mode === 'relation') {
+    if (M.mode) {
+      if (M.saving) return;
+      const { from, to } = LINKS[M.mode];
       if (!M.linkFrom) {
         M.linkFrom = iri;
-        status(`已选起点「${labelOf(iri)}」：请点终点（range）卡片。`);
-        traceSelection(M.selected);
-        renderConfirm();
-        updateBar();
-        return;
+        status(`已选${from}「${labelOf(iri)}」，请点选${to}。`);
+      } else {
+        if (M.linkFrom === iri) { status(`${from}和${to}不能是同一个类。`, true); return; }
+        if (M.pending?.to === iri) return;
+        M.pending = { from: M.linkFrom, to: iri };
       }
-      if (M.linkFrom === iri) { status('起点和终点不能是同一个类。', true); return; }
-      M.pending = { type: 'relation', domain: M.linkFrom, range: iri };
       traceSelection(M.selected);
       renderConfirm();
       updateBar();
@@ -687,7 +708,8 @@
 
   function onBackgroundTap() {
     // 点空白 = 退出连线/未确认状态（用户不用记 Esc）。没有挂起操作时什么都不做。
-    if (M.mode || M.pending) {
+    if (M.saving) return;
+    if (M.mode) {
       cancelLink();
       status('已退出连线模式，没有改动草案。');
     } else if (M.ctx && typeof M.ctx.select === 'function') {
@@ -706,29 +728,21 @@
     status('右栏已打开「新建术语」：填中文名即可新建类，归属（父类）可以留空。');
   }
 
-  function startParentLink() {
-    if (!M.selected) { status('先在画布上点选一个类，再点「改父类（连线）」。', true); return; }
-    M.mode = 'parent';
-    M.linkFrom = M.selected;
-    M.pending = null;
-    renderConfirm();
-    updateBar();
-    status(`连线中：点另一个类，把它设为「${labelOf(M.selected)}」的父类。点空白处或「取消」退出。`);
-  }
-
-  function startRelationLink() {
-    M.mode = 'relation';
+  function startLink(mode) {
+    if (M.saving || M.ctx?.S?.preview) return;
+    M.mode = mode;
     M.linkFrom = null;
     M.pending = null;
     M.cy?.stop(true, false);
     traceSelection(M.selected);
     renderConfirm();
     updateBar();
-    status('连线中：先点「起点（domain）」的类，再点「终点（range）」的类。');
+    const { from, to } = LINKS[mode];
+    status(`请在画布上依次点选${from}和${to}。`);
   }
 
   function cancelLink() {
-    if (!M.mode && !M.pending) return;
+    if (!M.mode) return;
     M.mode = '';
     M.linkFrom = null;
     M.pending = null;
@@ -737,81 +751,77 @@
     updateBar();
   }
 
-  // 确认条：把"待写入的变更"摆出来再让用户确认（对应两步点击的第二步）。
+  // 连线面板从第一次点选前就展示两个端点，点齐后才显示确认操作。
   function renderConfirm() {
     const host = M.els.confirm;
     if (!host) return;
     host.replaceChildren();
-    const linkingRelation = M.mode === 'relation';
-    host.classList.toggle('is-link-relation', linkingRelation);
-    if (!M.pending && !linkingRelation) { host.hidden = true; return; }
-    host.hidden = false;
+    host.hidden = !M.mode;
+    if (host.hidden) return;
 
-    if (M.pending?.type === 'parent') {
-      host.appendChild(mkEl('span', 'om-canvas-confirm-copy',
-        `建立父子关系：${labelOf(M.pending.parent)}（父类） ⊑ ${labelOf(M.pending.child)}（子类）`));
-      host.appendChild(mkButton('确认建立父级', confirmParent, 'primary'));
-      host.appendChild(mkButton('取消', cancelLink));
-      return;
-    }
+    const link = LINKS[M.mode];
     const heading = mkEl('div', 'om-canvas-link-heading');
-    heading.append(mkEl('h3', null, '新增关联关系'), mkButton('取消', cancelLink));
+    const cancel = mkButton('取消', cancelLink);
+    heading.append(mkEl('h3', null, link.title), cancel);
     const endpoints = mkEl('div', 'om-canvas-link-endpoints');
-    for (const [label, iri] of [['起点', M.linkFrom], ['终点', M.pending?.range]]) {
+    for (const [label, iri] of [[link.from, M.linkFrom], [link.to, M.pending?.to]]) {
       const endpoint = mkEl('div', 'om-canvas-link-endpoint');
       endpoint.append(mkEl('span', null, label),
-        mkEl('strong', null, iri ? labelOf(iri) : '在画布点选' + label));
+        iri ? mkEl('strong', null, labelOf(iri)) : mkEl('span', null, '在画布点选' + label));
       endpoints.appendChild(endpoint);
     }
     host.append(heading, endpoints);
     if (!M.pending) return;
 
     const pending = M.pending;
-    const form = mkEl('div', 'om-canvas-link-name');
-    const input = mkEl('input', 'om-canvas-confirm-input');
-    input.type = 'text';
-    input.placeholder = '关系名（如：属于）';
-    input.setAttribute('aria-label', '关系名');
-    const save = mkButton('确认建关系', async () => {
-      save.disabled = true;
-      try { await confirmRelation(input.value); }
-      finally { save.disabled = false; }
+    const actions = mkEl('div', 'om-canvas-link-actions');
+    const input = M.mode === 'relation' ? mkEl('input', 'om-canvas-confirm-input') : null;
+    if (input) {
+      input.type = 'text';
+      input.placeholder = '关系名（如：属于）';
+      input.setAttribute('aria-label', '关系名');
+      actions.appendChild(input);
+      setTimeout(() => { if (M.pending === pending) input.focus?.({preventScroll:true}); }, 0);
+    }
+    const save = mkButton(link.submit, async () => {
+      if (M.saving || M.pending !== pending || M.ctx?.S?.preview) return;
+      const name = (input?.value || '').trim();
+      if (input && !name) { status('请先填写关系名。', true); input.focus?.(); return; }
+
+      M.saving = pending;
+      save.disabled = cancel.disabled = true;
+      updateBar();
+      try {
+        const message = await link.write(pending, name);
+        if (M.pending === pending) {
+          status(message);
+          cancelLink();
+        }
+      } catch (error) {
+        if (M.pending === pending) status(`${link.title}失败：${error?.message || error}`, true);
+      } finally {
+        if (M.saving === pending) {
+          M.saving = null;
+          save.disabled = cancel.disabled = false;
+          updateBar();
+        }
+      }
     }, 'primary');
-    form.append(input, save);
-    host.appendChild(form);
-    setTimeout(() => { if (M.pending === pending) input.focus?.({preventScroll:true}); }, 0);
+    actions.appendChild(save);
+    host.appendChild(actions);
   }
 
-  async function confirmParent() {
-    const p = M.pending;
-    if (!p) return;
-    try {
-      // target_iri = 子类（要改的那个），parent_iri / value = 父类；形状见契约 §3.3。
-      await M.ctx.sendCommand({
-        action: 'add_parent', target_iri: p.child, parent_iri: p.parent,
-        value: p.parent, reason: '画布连线：建立父级',
-      });
-      status(`已把「${labelOf(p.parent)}」加为「${labelOf(p.child)}」的父类（写入草案，待审核）。`);
-    } catch (e) {
-      status(`建立父级失败：${e && e.message ? e.message : e}`, true);
-    }
-    M.pending = null; M.mode = ''; M.linkFrom = null;
-    renderConfirm(); updateBar();
+  async function confirmParent({ from: child, to: parent }) {
+    await M.ctx.sendCommand({
+      action: 'add_parent', target_iri: child, parent_iri: parent,
+      value: parent, reason: '画布连线：建立父级',
+    });
+    return `已把「${labelOf(parent)}」加为「${labelOf(child)}」的父类，已写入草案待审核。`;
   }
 
-  async function confirmRelation(name) {
-    const p = M.pending;
-    if (!p) return;
-    const label = String(name || '').trim();
-    if (!label) { status('请先填写关系名。', true); return; }
-    try {
-      await createRelation(label, p.domain, p.range);
-      status(`已新增关系类型「${label}」：${labelOf(p.domain)} → ${labelOf(p.range)}（写入草案，待审核）。`);
-    } catch (e) {
-      status(`建立关系失败：${e && e.message ? e.message : e}`, true);
-      return;
-    }
-    if (M.pending === p) cancelLink();
+  async function confirmRelation({ from, to }, label) {
+    await createRelation(label, from, to);
+    return `已新增关系类型「${label}」，${labelOf(from)} → ${labelOf(to)}，已写入草案待审核。`;
   }
 
   async function createRelation(labelZh, domainIri, rangeIri) {
@@ -829,19 +839,13 @@
     const stats = mkEl('span', 'om-canvas-stats');
     const hint = mkEl('span', 'om-canvas-hint', '');
 
-    // 「新建类」是 P1 重写时漏掉的入口：以前整页只有「改父类（连线）」，而它要求先选中
-    // 一个**已存在**的类 —— 于是空本体上"想加个父类"根本无从下手（用户原话："现在父类也加不了"）。
-    const btnParent = mkButton('编辑继承（连线）', startParentLink, '', BAR_TITLES.parent);
-    const btnRelation = mkButton('新增关联关系', startRelationLink, 'om-canvas-add-relation', BAR_TITLES.relation);
+    const linkButtons = Object.entries(LINKS).map(([mode, link]) => [mode,
+      mkButton(link.title, () => startLink(mode), 'om-canvas-link-action')]);
     const btnFit = mkButton('适应画布', fitAll, '',
       '缩放和平移以显示全部节点，保留手动摆放的位置。');
     const btnLayout = mkButton('重新布局', runLayout, '',
       '按当前视图重新排列全部节点，替换手动摆放的位置；仅改变视图。');
-    const btnCancel = mkButton('取消', cancelLink, 'om-canvas-cancel',
-      '做什么：退出连线模式，不写任何改动。');
-    btnCancel.hidden = true;
-
-    bar.append(stats, hint, btnParent, btnRelation, btnFit, btnLayout, btnCancel);
+    bar.append(stats, hint, ...linkButtons.map(([, button]) => button), btnFit, btnLayout);
     const zoom=mkEl('div','om-canvas-zoom');
     zoom.setAttribute('role','group');zoom.setAttribute('aria-label','画布缩放');
     for(const [symbol,name,factor] of [['−','缩小画布',.8],['+','放大画布',1.25]]){
@@ -854,8 +858,11 @@
       control.setAttribute('aria-label',name);zoom.appendChild(control);
     }
     stage.appendChild(zoom);
+    const flatNotice = mkEl('p', 'om-canvas-flat-notice', '当前本体尚未定义继承关系 · 可拖动画布浏览');
+    flatNotice.hidden = true;
+    stage.appendChild(flatNotice);
     stage.appendChild(bar);
-    Object.assign(M.els, { bar, stats, hint, btnParent, btnRelation, btnCancel });
+    Object.assign(M.els, { bar, stats, hint, flatNotice, linkButtons });
   }
 
   function buildLegend(stage) {
@@ -929,6 +936,7 @@
     const rel = edges.filter(x => x.kind === 'relation').length;
     const pend = nodes.filter(x => x.state === 'pending').length;
     const classes = nodes.filter(x => x.kind === 'class').length;
+    e.flatNotice.hidden = !isFlatHierarchy();
     // 两个"关系"数必须分开说：左栏数的是本体里**有几条关系类型**，这里数的是**画得出几条线**
     // （只有两端 domain/range 都知道才画得出来）。以前两边都写"关系 N"，同一屏出现
     // "关系类型 9"和"关系 0"，用户第一反应就是"关系怎么没了"——这正是这轮反馈的起因。
@@ -937,20 +945,15 @@
     e.stats.textContent = `实体类 ${classes} · 继承线 ${inh}`
       + (relTotal === null ? ` · 关系线 ${rel}` : ` · 关系类型 ${relTotal} · 关系线 ${rel}`)
       + (pend ? ` · 待收下 ${pend}` : '');
-    let hint = '';
     // 历史版本是只读预览：编辑入口一律锁住，并把"去哪才能改"写在工具条上
-    //（灰按钮不解释原因，用户只会以为页面坏了）。
     const locked = !!(M.ctx && M.ctx.S && M.ctx.S.preview);
-    if (locked) hint = '历史版本（只读）：要点顶栏「回到最新」，或用「版本管理」→「回到这一版」开一份新草案才能改。';
-    else if (M.pending?.type === 'parent') hint = '确认后才写进草案（待审核）。';
-    else if (M.mode === 'parent') hint = `连线中：点目标卡片设为「${labelOf(M.linkFrom)}」的父类`;
-    e.hint.textContent = hint;
-    e.btnParent.disabled = locked || !M.selected;
-    e.btnRelation.disabled = locked || !nodes.length;
-    e.btnRelation.setAttribute('aria-pressed', String(M.mode === 'relation'));
-    e.btnParent.title = locked ? BAR_TITLES.locked : BAR_TITLES.parent;
-    e.btnRelation.title = locked ? BAR_TITLES.locked : BAR_TITLES.relation;
-    e.btnCancel.hidden = M.mode === 'relation' || !(M.mode || M.pending);
+    e.hint.textContent = locked ? '历史版本（只读）：要点顶栏「回到最新」，或用「版本管理」→「回到这一版」开一份新草案才能改。' : '';
+    for (const [mode, button] of e.linkButtons) {
+      const { from, to } = LINKS[mode];
+      button.disabled = locked || !nodes.length || !!M.saving;
+      button.setAttribute('aria-pressed', String(M.mode === mode));
+      button.title = locked ? BAR_TITLES.locked : `依次点选${from}和${to}，确认后写入草案。`;
+    }
     // 窄栏时工具条会换行，确认条始终放在实际工具条上方。
     if (e.confirm) e.confirm.style.bottom = ((e.bar.offsetHeight || 40) + 22) + 'px';
   }
@@ -961,7 +964,7 @@
     cy.on('tapstart', 'node', () => { M.dragged = false; });
     cy.on('drag', 'node', () => { M.dragged = true; });
     cy.on('tap', 'node', onNodeTap);
-    cy.on('tap', 'edge', evt => {const iri=evt.target.data('termIri');if(M.mode!=='relation'&&iri&&M.ctx&&typeof M.ctx.select==='function')M.ctx.select(iri);});
+    cy.on('tap', 'edge', evt => {const iri=evt.target.data('termIri');if(!M.mode&&iri&&M.ctx&&typeof M.ctx.select==='function')M.ctx.select(iri);});
     cy.on('tap', evt => { if (evt.target === cy) onBackgroundTap(); });
     // 双击空白 = 适应画布（双击节点不触发，避免误操作）。
     cy.on('dblclick', evt => { if (evt.target === cy) fitAll(); });
@@ -1045,6 +1048,7 @@
     const S = state || (M.ctx && M.ctx.S) || {};
     M.graph = S.graph || { nodes: [], edges: [] };
     M.selected = S.selected || null;
+    if (M.ctx?.S?.preview) cancelLink();
     if (S.view && S.view!=='cards') M.view = S.view==='hierarchy'?'hierarchy':'graph';
     if(S.nodeDisplay)M.display=S.nodeDisplay==='compact'?'compact':'cards';
 
@@ -1071,7 +1075,8 @@
     }
 
     const sig = signature(M.graph, M.view);
-    let need = M.pendingLayout || M.layoutView !== M.view || firstNodes;
+    const flat = isFlatHierarchy();
+    let need = M.pendingLayout || M.layoutView !== M.view || firstNodes || flat !== M.layoutFlat || (flat && sig !== M.sig);
     if (!M.didFit && M.stage && M.stage.clientWidth > 0) { M.didFit = true; need = true; }
     if (need) runLayout();
     else if (M.view === 'hierarchy' && sig !== M.sig) refreshHierarchyBands();
@@ -1107,11 +1112,11 @@
   function traceSelection(iri) {
     const cy = M.cy;
     if (!cy) return null;
-    if (M.mode === 'relation') {
+    if (M.mode) {
       cy.batch(() => {
         cy.elements().removeClass('is-focus is-neighbor is-traced is-muted');
         if (M.linkFrom) cy.getElementById(M.linkFrom).addClass('is-focus');
-        if (M.pending?.range) cy.getElementById(M.pending.range).addClass('is-focus');
+        if (M.pending) cy.getElementById(M.pending.to).addClass('is-focus');
       });
       return null;
     }
@@ -1137,7 +1142,7 @@
 
   function focus(iri) {
     const cy = M.cy;
-    if (!cy || !iri || M.suspended || M.mode === 'relation') return;
+    if (!cy || !iri || M.suspended || M.mode) return;
     const anchors = traceSelection(iri);
     if (!anchors?.length) return;
     cy.stop(true, false);
@@ -1169,8 +1174,8 @@
     if (M.host) { try { M.host.replaceChildren(); } catch (e) { /* 忽略 */ } }
     M.ready = false; M.host = null; M.stage = null; M.svg = null;
     M.bands = []; M.els = {}; M.sig = ''; M.didFit = false;
-    M.layoutView = null; M.dragged = false; M.graph = null; M.selected = null; M.view = 'graph';
-    M.mode = ''; M.linkFrom = null; M.pending = null;
+    M.layoutView = null; M.layoutFlat = false; M.dragged = false; M.graph = null; M.selected = null; M.view = 'graph';
+    M.mode = ''; M.linkFrom = null; M.pending = null; M.saving = null;
     M.display='cards';
   }
 

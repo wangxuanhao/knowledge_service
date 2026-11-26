@@ -6,6 +6,83 @@ import pytest
 from knowledge_service.services import community_reports
 
 
+@pytest.fixture
+def postgres_backend():
+    """These tests exercise synthesis with model fixtures."""
+
+
+def test_synthesis_streams_answer_text_before_validating_citations(monkeypatch):
+    from types import SimpleNamespace
+
+    import httpx
+
+    progress = []
+    chunks = ['```json\n{"answer":"第一段', '\\n\\uD83D', '\\uDE00\\"后续\\"',
+              '","citations":["e0"]}\n```']
+
+    class ModelStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for index, chunk in enumerate(chunks):
+                if index == 1:
+                    assert ('delta', {'text': '第一段'}) in progress
+                if index == 3:
+                    assert ''.join(data['text'] for event, data in progress if event == 'delta') == '第一段\n😀"后续"'
+                yield ('data: ' + json.dumps({'choices': [{'delta': {'content': chunk}}]}) + '\n\n').encode()
+            yield b'data: [DONE]\n\n'
+
+    def model(request):
+        assert json.loads(request.content)['stream'] is True
+        return httpx.Response(200, stream=ModelStream())
+
+    monkeypatch.setattr(community_reports, 'external_client', lambda *a, **kw:
+                        httpx.Client(transport=httpx.MockTransport(model)))
+    config = SimpleNamespace(configured=True, base_url='https://example.com/v1', api_key='test',
+                             proxy=None, model='model', max_tokens=1800)
+    result = community_reports.generate_answer('问题？', [_report(0, ['e0'])], [_evidence('e0')], config,
+        emit=lambda event, data: progress.append((event, data)))
+    assert result == ('第一段\n😀"后续"', ['e0'])
+    assert progress[0] == ('progress', {'stage': 'generating'})
+    assert progress[-1] == ('progress', {'stage': 'verifying'})
+
+
+def test_community_ask_negotiates_streaming_and_reports_stale_snapshots():
+    from types import SimpleNamespace
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from knowledge_service.api.communities import router
+    from knowledge_service.services.communities import CommunitySnapshotStale
+
+    def ask(project, scope, community_ids, question, *, emit=None, **kwargs):
+        if question == '过期的问题':
+            raise CommunitySnapshotStale('快照已更新')
+        if emit:
+            emit('delta', {'text': '草稿'})
+        return {'answer': '已核对答案', 'generated': True}
+
+    app = FastAPI()
+    app.state.communities = SimpleNamespace(ask=ask)
+    app.include_router(router)
+    url = '/api/projects/project/communities/ask'
+    headers = {'Accept': 'text/event-stream'}
+
+    def events(response):
+        return [(event.removeprefix('event: '), json.loads(data.removeprefix('data: ')))
+                for block in response.text.strip().split('\n\n') for event, data in [block.splitlines()]]
+
+    with TestClient(app) as client:
+        regular = client.post(url, json={'question': '问题'})
+        assert regular.json()['answer'] == '已核对答案'
+        streamed = client.post(url, json={'question': '问题'}, headers=headers)
+        assert streamed.headers['content-type'].startswith('text/event-stream')
+        assert events(streamed) == [('progress', {'stage': 'retrieving'}), ('delta', {'text': '草稿'}),
+                                    ('done', regular.json())]
+        stale = client.post(url, json={'question': '过期的问题'}, headers=headers)
+        assert events(stale)[-1] == ('error', {'status': 409, 'detail': '快照已更新'})
+        assert client.post(url, json={'question': '过期的问题'}).status_code == 409
+
+
 def test_cross_community_answer_extracts_in_batches_then_synthesizes(monkeypatch):
     evidence = [{'id': f'e{i}', 'kind': 'document', 'title': f'规则 {i}', 'quote': f'条款 {i}'}
                 for i in range(5)]

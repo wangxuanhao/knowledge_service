@@ -11,6 +11,37 @@ class Sources:
         assert version_id == 'frozen'
         return {'id': 'doc', 'version_id': 'frozen', 'kind': 'document', 'metadata': {'applicability': SCOPE}}
 
+
+@pytest.mark.parametrize('source', ['extracted', 'published_at', 'explicit'])
+def test_materialization_carries_the_frozen_document_effective_time_source(source):
+    date = '2024-11-05T16:00:00.000000Z'
+
+    class DatedSource(Sources):
+        def get_record_version(self, project_id, version_id):
+            document = super().get_record_version(project_id, version_id)
+            return {**document, 'valid_from': date,
+                    'metadata': {**document['metadata'], 'effective_time_source': source}}
+
+    candidates = [
+        {'id': 'a', 'kind': 'entity', 'text': 'A', 'proposed_type': 'Thing'},
+        {'id': 'b', 'kind': 'entity', 'text': 'B', 'proposed_type': 'Thing'},
+        {'id': 'r', 'kind': 'relation', 'subject_id': 'a', 'object_id': 'b', 'proposed_type': 'link'},
+        {'id': 'v', 'kind': 'attribute', 'entity_id': 'a', 'value': 12, 'proposed_type': 'price'},
+    ]
+    for candidate in candidates:
+        candidate.update(document_id='doc', document_version_id='frozen', valid_from=date)
+    candidates[1]['valid_from'] = '2024-11-07T00:00:00+08:00'
+    draft = {'candidate_snapshot': candidates, 'mappings': {
+        'entity_types': {'Thing': 'urn:Thing'}, 'relation_types': {'link': 'urn:link'},
+        'attributes': {'price': 'urn:price'}}}
+
+    records, skipped = _materialize_candidates('p', draft, 'ont', repository=DatedSource())
+
+    assert not skipped
+    assert {row['metadata']['discovery_candidate_id']: row['metadata'].get('effective_time_source')
+            for row in records} == {'a': source, 'b': None, 'r': source, 'v': source}
+
+
 def test_materialization_inherits_frozen_scope_without_changing_candidates_or_dates():
     candidates = [
         {'id': 'a', 'kind': 'entity', 'text': 'A', 'proposed_type': 'Thing'},

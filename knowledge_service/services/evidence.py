@@ -2,7 +2,9 @@
 
 import hashlib
 
+from ..core.time import normalize_time
 from ..repository.scoped_reads import ScopedReads
+from .source_scope import document_effective_time_source
 
 
 _WARNING_MESSAGES = {
@@ -371,6 +373,40 @@ def _resolution_score(resolution):
     )
 
 
+def _legacy_effective_time_source(repository, project_id, record, known_at):
+    metadata = record.get('metadata') or {}
+    if ('effective_time_source' in metadata or not record.get('valid_from')
+            or not (metadata.get('discovery_candidate_id') or metadata.get('discovery_candidate_ids'))):
+        return None
+    cutoff = normalize_time(known_at)
+    mappings = repository.list_record_version_assertions(project_id, record_version_id=record['version_id'])
+    assertion_ids = {item['assertion_id'] for item in mappings
+                     if cutoff is None or normalize_time(item['created_at']) <= cutoff}
+    if not assertion_ids:
+        return None
+    assertions = repository.get_assertions(project_id, assertion_ids)
+    if assertions.keys() != assertion_ids:
+        return None
+    documents, sources = {}, set()
+    for assertion in assertions.values():
+        version_id = assertion.get('document_version_id')
+        if not version_id:
+            return None
+        if version_id not in documents:
+            try:
+                documents[version_id] = repository.get_record_version(project_id, version_id)
+            except KeyError:
+                return None
+        document = documents[version_id]
+        if document['kind'] != 'document' or document['id'] != assertion.get('document_id'):
+            return None
+        source = document_effective_time_source(record, document)
+        if source is None:
+            return None
+        sources.add(source)
+    return sources.pop() if len(sources) == 1 else None
+
+
 def evidence(service, project_id, record_id, scope):
     repo = service.repository
     rows = ScopedReads(repo).by_ids(project_id, scope, [record_id])
@@ -405,6 +441,8 @@ def evidence(service, project_id, record_id, scope):
         for status in ('accepted', 'pending', 'contradicting', 'rejected', 'superseded')}
     return {
         'record_id': record_id, 'record_version': row['version'],
+        'record_version_id': row['version_id'],
+        'effective_time_source': _legacy_effective_time_source(repo, project_id, row, scope.get('known_at')),
         'documents': documents,
         'assertions': [
             {key: value for key, value in item.items() if key != 'payload'}

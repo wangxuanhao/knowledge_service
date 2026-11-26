@@ -83,8 +83,37 @@ test('two-click relation creation delegates both endpoints to the canonical atom
 test('canvas retains contextual connections with one generic creation menu elsewhere',t=>{
   const f=fixture();t.after(()=>f.canvas.destroy());
   assert.equal(f.button('＋ 新建类'),undefined);
-  assert.ok(f.button('编辑继承（连线）'));
+  assert.ok(f.button('新增继承关系'));
   assert.ok(f.button('新增关联关系'));
+});
+
+test('inheritance uses two explicit canvas picks and writes only after confirmation', async t => {
+  const f = fixture(); t.after(() => f.canvas.destroy());
+  f.canvas.render({ graph: f.graph, view: 'graph', selected: null });
+  const parent = f.button('新增继承关系');
+  const relation = f.button('新增关联关系');
+  assert.ok(parent, 'the inheritance entry uses an explicit creation label');
+  assert.equal(parent.className, relation.className);
+  assert.equal(parent.disabled, false);
+  parent.listeners.click();
+  const confirm = f.host.children[0].children.find(x => x.className === 'om-canvas-confirm');
+  assert.equal(confirm.hidden, false);
+  assert.equal(parent.attributes['aria-pressed'], 'true');
+  assert.equal(relation.attributes['aria-pressed'], 'false');
+  f.cy.$id('b').emit('tapstart').emit('tap');
+  f.cy.$id('b').emit('tapstart').emit('tap');
+  assert.equal(f.button('确认新增继承'), undefined, 'the same class cannot be both endpoints');
+  assert.deepEqual(f.cy.nodes('.is-focus').map(n => n.id()), ['b']);
+  f.cy.$id('a').emit('tapstart').emit('tap');
+  assert.deepEqual(f.cy.nodes('.is-focus').map(n => n.id()), ['a', 'b']);
+  assert.deepEqual(f.commands, []);
+  assert.deepEqual(f.selected, []);
+  await f.button('确认新增继承').listeners.click();
+  assert.deepEqual(f.commands.map(command => ({ ...command })), [{
+    action: 'add_parent', target_iri: 'b', parent_iri: 'a', value: 'a', reason: '画布连线：建立父级',
+  }]);
+  assert.equal(confirm.hidden, true);
+  assert.equal(parent.attributes['aria-pressed'], 'false');
 });
 
 test('focus traces only direct connections and clears when the selection is removed',t=>{
@@ -144,6 +173,16 @@ test('one inheritance edge cannot collapse many independent classes into an unre
   const f=fixture('graph',graph,{styleEnabled:true,measuredViewport:true});t.after(()=>f.canvas.destroy());
   assert.ok(f.cy.zoom()>.35,'a partially modeled ontology retains readable card sizes');
   assert.ok(new Set(f.cy.nodes().map(node=>node.position('y'))).size>2,'independent roots wrap into rows');
+});
+
+test('a flat ontology starts with readable classes spread across the hierarchy canvas', t => {
+  const graph = {nodes: Array.from({length: 87}, (_, i) => ({id: `n${i}`, label: `类型 ${i}`})), edges: []};
+  const f = fixture('hierarchy', graph, {styleEnabled: true, measuredViewport: true});
+  t.after(() => f.canvas.destroy());
+  assert.ok(f.cy.zoom() >= .8);
+  assert.ok(new Set(f.cy.nodes().map(node => node.position('x'))).size >= 4);
+  assert.equal(f.bands().length, 0);
+  assert.ok(f.cy.nodes().some(node => node.renderedPosition('y') < 130 && node.renderedPosition('y') > 0));
 });
 
 test('an inspector covering almost the entire graph keeps focus centered for when it closes',async t=>{
@@ -337,7 +376,8 @@ test('hierarchy bands track node motion and incremental nodes', t => {
 });
 
 test('hierarchy gesture bursts update only the moved band once per frame', t => {
-  const graph = { nodes: Array.from({ length: 160 }, (_, i) => ({ id: `n${i}`, label: `N${i}` })), edges: [] };
+  const graph = { nodes: Array.from({ length: 160 }, (_, i) => ({ id: `n${i}`, label: `N${i}` })),
+    edges: [{id: 'inherit', kind: 'inherit', source: 'n0', target: 'n159'}] };
   const f = fixture('hierarchy', graph); t.after(() => f.canvas.destroy());
   let writes = 0, lookups = 0;
   const all = node => [node, ...node.children.flatMap(all)];

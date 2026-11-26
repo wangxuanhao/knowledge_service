@@ -174,6 +174,9 @@ def test_reader_uses_each_assertion_verified_range_with_the_same_quote(browser):
                       assertionId=assertion_id, focusText=quote))
         assert marks.all_inner_texts() == [quote]
         assert marks.evaluate('(mark)=>mark.parentElement.dataset.blockId') == block_id
+    page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='v',
+                  assertionId='second', chunkVersionId='chunk-v', focusText=quote))
+    assert marks.evaluate('(mark)=>mark.parentElement.dataset.blockId') == 'block-2'
     for assertion_id, message in [('unverified', '未核验精确引文位置'), ('mismatched', '未找到证据位置')]:
         page.evaluate('(options)=>SourceReader.open(options)', dict(projectId='p', versionId='v',
                       assertionId=assertion_id, focusText=quote))

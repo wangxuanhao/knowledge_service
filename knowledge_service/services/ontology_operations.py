@@ -1250,6 +1250,25 @@ def _shape_roots(graph: Graph) -> set[URIRef]:
     }
 
 
+def merge_imported_turtle(base: Graph, source: str) -> str:
+    """Overlay file triples while retaining existing definitions and IRI identity."""
+    incoming = _graph(source)
+    _validate_supported_bnodes(incoming)
+    for root in sorted(_shape_roots(base) & _shape_roots(incoming), key=str):
+        fragment = _shape_subgraph(incoming, root)
+        if not any(isinstance(value, BNode) for triple in fragment for value in triple):
+            continue
+        if not isomorphic(_shape_subgraph(base, root), fragment):
+            raise ValueError(f'文件中的 SHACL 约束与现有定义冲突：{root}。请在源码编辑中处理。')
+        root_triples = list(fragment.triples((root, None, None)))
+        for triple in root_triples:
+            incoming.remove(triple)
+        for _, _, value in root_triples:
+            if isinstance(value, BNode) and not any(incoming.triples((None, None, value))):
+                _remove_bnode_tree(incoming, value)
+    return _canonicalize_supported_unions(base + incoming).serialize(format='turtle')
+
+
 def canonical_turtle_diff(base_turtle: str, edited_turtle: str, *,
                           published: bool = True,
                           base_ontology_id: str | None = None,

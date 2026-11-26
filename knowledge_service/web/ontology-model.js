@@ -424,7 +424,8 @@
     // An unbound editor must not adopt a newly discovered pending draft.
     const updated = newSourceDraft
       ? await draftApi(endpoint('/ontology-drafts'), {
-          base_ontology_id: source.ontologyId ?? null, title: 'Turtle 源码编辑', initial_command: command,
+          base_ontology_id: source.ontologyId ?? null,
+          title: command.action === 'import_turtle' ? 'Turtle 文件导入' : 'Turtle 源码编辑', initial_command: command,
         }, 'POST')
       : await draftApi(endpoint(`/ontology-drafts/${draft.id}/commands`), {
           expected_revision: draft.revision, command,

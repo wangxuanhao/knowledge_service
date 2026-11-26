@@ -319,7 +319,21 @@ class KnowledgeService:
                     row[key] = normalize_time(row.get(key))
                 if row['valid_from'] and row['valid_until'] and row['valid_from'] >= row['valid_until']:
                     raise ValueError('业务时间区间必须具有正时长')
-                is_new = row['id'] not in current
+                saved = current.get(row['id'])
+                is_new = saved is None
+                if (operation == 'manual_write' and row['kind'] in {'entity', 'relation', 'attribute'}
+                        and not row['metadata'].get('_deleted')):
+                    metadata = row['metadata']
+                    start = row['valid_from']
+                    if is_new:
+                        if start is not None:
+                            metadata.setdefault('effective_time_source', 'explicit')
+                    elif start != normalize_time(saved.get('valid_from')):
+                        metadata['effective_time_source'] = 'explicit' if start is not None else 'unknown'
+                        metadata.pop('temporal_source_text', None)
+                        metadata.pop('temporal_confidence', None)
+                    elif (source := (saved.get('metadata') or {}).get('effective_time_source')) is not None:
+                        metadata.setdefault('effective_time_source', source)
                 if ((row.get('metadata') or {}).get('_quarantined') or
                         (current.get(row['id'],{}).get('metadata') or {}).get('_quarantined')):
                     created_members={member for action in (conflict_actions or []) if action.get('kind')=='conflict_set_create'
@@ -962,7 +976,7 @@ class KnowledgeService:
         settings = IngestSettings.model_validate(public_settings).model_dump()
         if settings['document_time_mode'] == 'manual' and previous_source in {'explicit', 'published_at', 'unknown'}:
             settings['metadata']['effective_time_source'] = previous_source
-        from .document_temporal import resolve_document_temporal
+        from .document_temporal import discovery_effective_start, resolve_document_temporal, temporal_evidence_text
         settings = resolve_document_temporal(request['text'], {**settings, 'title': request['title']},
             excluded_ranges=request.get('_document_temporal_exclusions', ()))
         request.update(settings)
@@ -1199,6 +1213,7 @@ class KnowledgeService:
                         if str(name).strip())
                 event('开放本体发现已启用 · 候选不会直接进入正式图谱',15)
                 discovery_source_hash = hashlib.sha256(request['text'].encode('utf-8')).hexdigest()
+                time_evidence = temporal_evidence_text(request['text'], request.get('_document_temporal_exclusions', ()))
                 for index,chunk in enumerate(chunk_records):
                     with stage(f"开放发现片段 {index+1}/{len(chunks)} · 位置 {chunk['metadata']['start_char']}–{chunk['metadata']['end_char']}",15+int(60*index/len(chunks))):
                         detailed_iris = set()
@@ -1215,6 +1230,14 @@ class KnowledgeService:
                     processed_chunks += 1
                     id_map={item['id']:f"{chunk['id']}:discovery:{item['id']}" for item in candidates}
                     for item in candidates:
+                        item_metadata = dict(item.get('metadata') or {})
+                        item_metadata.pop('effective_time_source', None)
+                        fact_start = discovery_effective_start(item_metadata, time_evidence,
+                            chunk['metadata']['start_char'], chunk['metadata']['end_char'])
+                        if fact_start and request['valid_until'] and fact_start >= request['valid_until']:
+                            fact_start = None
+                        if fact_start:
+                            item_metadata.update(valid_from=fact_start, effective_time_source='extracted')
                         item_evidence=(item.get('attribute_evidence') or item.get('evidence') or
                             chunk['text'])
                         local_offset=chunk['text'].find(item_evidence)
@@ -1228,9 +1251,11 @@ class KnowledgeService:
                             'evidence':item_evidence,'status':'pending','created_at':utc_now(),
                             'applicability':metadata['applicability'],
                             'published_at':metadata.get('published_at'),
-                            'effective_time_source':metadata['effective_time_source'],
-                            'valid_from':request.get('valid_from'),
+                            'effective_time_source':'extracted' if fact_start else metadata['effective_time_source'],
+                            'valid_from':fact_start or request.get('valid_from'),
                             'valid_until':request.get('valid_until')}
+                        if item_metadata or 'metadata' in item:
+                            item['metadata'] = item_metadata
                         for key in ('subject_id','object_id','entity_id'):
                             if item.get(key) in id_map:item[key]=id_map[item[key]]
                         discovery_candidates.append(item)
@@ -1441,10 +1466,11 @@ class KnowledgeService:
         from time import perf_counter
         from .answers import prepare_answer, final_answer, answer_messages, finish_timings, generation_state
         from .answer_validity import freeze_qa_request
+        from .qa_follow_up import resolve_knowledge_request
         from .provenance import ProvenanceService
         from .qa_policy import model_evidence
         started = perf_counter()
-        request = freeze_qa_request(self, project_id, request)
+        request = freeze_qa_request(self, project_id, resolve_knowledge_request(request))
         provenance = ProvenanceService(self.repository)
         run_id = provenance.begin_retrieval(project_id, request)
         answer_id = None

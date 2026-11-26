@@ -206,10 +206,12 @@
   }
   function frozenSourceButton(details){
     const excerpt=Object.fromEntries(detailFields.source_occurrence.map(key=>[key,details[key]]).filter(([,value])=>scalar(value)!==''));
-    return button('查看历史原文',()=>{
+    const open = button('查看历史原文',()=>{
       if(typeof window.openFrozenSourceEvidence==='function')window.openFrozenSourceEvidence(excerpt);
       else status.textContent='原文查看器尚未就绪，请稍后重试。';
     });
+    open.className += ' button-inline-action';
+    return open;
   }
   function sourceCard(details){
     const card=element('article',undefined,'provenance-source-card');

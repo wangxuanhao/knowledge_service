@@ -113,6 +113,7 @@ def check_relations(page, width):
 
 def check_canvas_link(page, width):
     button = page.get_by_role('button', name='新增关联关系', exact=True)
+    parent_button = page.get_by_role('button', name='新增继承关系', exact=True)
     button.scroll_into_view_if_needed()
     stage = page.locator('.om-canvas-stage')
     page.evaluate('''() => {
@@ -131,6 +132,12 @@ def check_canvas_link(page, width):
     }''')
     camera = "(() => {const cy=OntologyCanvas.__cy();return {pan:cy.pan(),zoom:cy.zoom()};})()"
     before = page.evaluate(camera)
+    style = """e => {
+        const css = getComputedStyle(e);
+        return [css.fontSize, css.fontWeight, css.color, css.backgroundColor, e.getBoundingClientRect().height];
+    }"""
+    assert parent_button.evaluate(style) == button.evaluate(style)
+    assert parent_button.is_enabled()
     button.click()
     assert page.evaluate('linkTaps') == [], 'using the toolbar must not tap the class under the button'
     assert page.evaluate('OntologyModel.S.selected') is None, 'launching relation creation must not select a class'
@@ -169,7 +176,40 @@ def check_canvas_link(page, width):
         'domains':['urn:person'], 'ranges':['urn:org']}], writes
     assert not confirm.is_visible()
     assert page.evaluate(camera) == before
-    return {'width':width, 'checks':'toolbar isolation, explicit endpoints, readable form, stationary camera'}
+
+    page.evaluate('writes.length=0')
+    parent_button.click()
+    assert parent_button.get_attribute('aria-pressed') == 'true'
+    assert '点选子类' in confirm.inner_text() and '点选父类' in confirm.inner_text()
+    tap('urn:person')
+    assert '人员' in confirm.inner_text() and '点选父类' in confirm.inner_text()
+    tap('urn:org')
+    assert '组织' in confirm.inner_text()
+    assert confirm.get_by_role('textbox').count() == 0
+    assert page.evaluate('writes.length') == 0
+    assert page.evaluate('OntologyModel.S.selected') is None
+    assert page.evaluate(camera) == before
+    assert confirm.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
+    page.screenshot(path=str(OUTPUT / f'new-inheritance-{width}.png'))
+    save_parent = confirm.get_by_role('button', name='确认新增继承', exact=True)
+    page.evaluate('failWrite=true')
+    save_parent.click()
+    assert save_parent.is_enabled() and '组织' in confirm.inner_text()
+    assert page.evaluate('writes.length') == 0
+    page.evaluate('failWrite=false')
+    save_parent.click()
+    assert page.evaluate('writes') == [{
+        'action': 'add_parent', 'target_iri': 'urn:person', 'parent_iri': 'urn:org',
+        'value': 'urn:org', 'reason': '画布连线：建立父级',
+    }]
+    assert not confirm.is_visible()
+    assert parent_button.get_attribute('aria-pressed') == 'false'
+    parent_button.click()
+    tap('urn:person')
+    confirm.get_by_role('button', name='取消', exact=True).click()
+    assert not confirm.is_visible() and page.evaluate('writes.length') == 1
+    assert page.evaluate(camera) == before
+    return {'width':width, 'checks':'matching toolbar styles, two explicit picks, draft writes, retry, cancel, stationary camera'}
 
 
 def check_attributes(page, width):
@@ -210,7 +250,56 @@ def check_attributes(page, width):
     return {'width':width, 'checks':'unassigned attributes, association command, inherited attributes, identity guidance'}
 
 
-def check(width=1600, inheritance_only=False, relations_only=False, link_only=False, attributes_only=False):
+def check_dense_views(page, width):
+    page.evaluate('''() => {
+      const term = (kind, i) => ({id:`urn:${kind}:${i}`, label_zh:`${kind}定义 ${i}`,
+        description:'较长的术语说明，用于验证卡片内容在窄列和多行布局下仍处于边框内。'});
+      OntologyModel.S.summary = {classes:Array.from({length:87}, (_,i)=>term('实体类型',i)),
+        relations:Array.from({length:77}, (_,i)=>term('关系类型',i)),attributes:[]};
+      OntologyModel.select(null);
+    }''')
+    page.get_by_role('button', name='术语卡片', exact=True).click()
+    cards = page.locator('.om-cards-host')
+    assert cards.locator('.om-type-card').count() == 164
+    assert cards.evaluate('''host => [...host.children].every(card => {
+      const box = card.getBoundingClientRect();
+      const last = card.lastElementChild.getBoundingClientRect();
+      return last.bottom <= box.bottom - 4;
+    })'''), 'all card contents fit inside their own grid row'
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    cards.screenshot(path=str(OUTPUT / f'term-cards-{width}.png'))
+    page.get_by_role('button', name='继承层级', exact=True).click()
+    page.wait_for_function('OntologyCanvas.__cy().zoom() >= .8')
+    assert page.locator('.om-canvas-band').count() == 0
+    page.get_by_text('当前本体尚未定义继承关系', exact=False).wait_for()
+    page.locator('.om-canvas-stage').screenshot(path=str(OUTPUT / f'flat-hierarchy-{width}.png'))
+    page.evaluate("window.Auth={isAdmin:()=>true};OntologyModel.select(null)")
+    if width <= 650:
+        page.get_by_role('button', name='术语目录', exact=True).click()
+    page.get_by_role('button', name='导入 Turtle 本体', exact=True).click()
+    dialog = page.get_by_role('dialog', name='导入 Turtle 本体')
+    save = dialog.get_by_role('button', name='加入草案', exact=True)
+    assert save.is_disabled()
+    assert dialog.locator('pre,textarea').count() == 0
+    dialog.locator('input[type=file]').set_input_files({
+        'name': 'rules.ttl', 'mimeType': 'text/turtle', 'buffer': b'<urn:New> a <urn:Type> .',
+    })
+    dialog.get_by_text('文件已选，等待加入草案。').wait_for()
+    assert page.evaluate('writes.length') == 0
+    assert dialog.locator('pre,textarea').count() == 0
+    dialog.screenshot(path=str(OUTPUT / f'turtle-import-{width}.png'))
+    page.evaluate('failWrite=true')
+    save.click()
+    dialog.get_by_text('模拟提交失败', exact=True).wait_for()
+    page.evaluate('failWrite=false')
+    save.click()
+    dialog.get_by_text('已加入草案，可前往草案变更核对。').wait_for()
+    assert page.evaluate("writes.length===1 && writes[0].action==='import_turtle'")
+    return {'width': width, 'checks': 'term cards, readable hierarchy, Turtle selection and submission'}
+
+
+def check(width=1600, inheritance_only=False, relations_only=False, link_only=False,
+          attributes_only=False, dense_only=False):
     html = re.sub(r'<script\b[^>]*>[\s\S]*?</script>', '',
                   (WEB / 'index.html').read_text(encoding='utf-8'), flags=re.I)
 
@@ -288,6 +377,11 @@ def check(width=1600, inheritance_only=False, relations_only=False, link_only=Fa
             if width <= 650:
                 directory.click()
             result = check_attributes(page, width)
+            assert not errors, errors
+            browser.close()
+            return result
+        if dense_only:
+            result = check_dense_views(page, width)
             assert not errors, errors
             browser.close()
             return result
@@ -394,7 +488,9 @@ if __name__ == '__main__':
     relation_mode = '--relations' in sys.argv
     link_mode = '--link' in sys.argv
     attribute_mode = '--attributes' in sys.argv
-    sizes = [int(arg) for arg in sys.argv[1:] if arg not in ('--parents', '--relations', '--link', '--attributes')] or [1600, 1280, 390]
+    dense_mode = '--dense-views' in sys.argv
+    sizes = [int(arg) for arg in sys.argv[1:] if not arg.startswith('--')] or [1600, 1280, 390]
     for viewport in sizes:
         print(json.dumps(check(viewport, inheritance_only=parent_mode, relations_only=relation_mode,
-                               link_only=link_mode, attributes_only=attribute_mode), ensure_ascii=False), flush=True)
+                               link_only=link_mode, attributes_only=attribute_mode,
+                               dense_only=dense_mode), ensure_ascii=False), flush=True)

@@ -14,6 +14,14 @@ from ..utils.diagnostics import timed
 NORMAL_CANDIDATE_KINDS={'entity','relation','attribute'}
 
 
+def _verified_discovery_start(candidate):
+    metadata = candidate.get('metadata') or {}
+    start = candidate.get('valid_from')
+    if (isinstance(start, str) and start and metadata.get('effective_time_source') == 'extracted'
+            and metadata.get('valid_from') == start):
+        return start
+    return None
+
 
 
 def _literal_language(value):
@@ -108,6 +116,8 @@ def _materialize_candidates(project_id,draft,ontology_id,candidate_outcomes=(), 
         candidate = sources[record['metadata']['discovery_candidate_id']]
         if (candidate.get('metadata') or {}).get('applicability') is not None:
             record['metadata']['applicability'] = deepcopy(candidate['metadata']['applicability'])
+        if _verified_discovery_start(candidate):
+            record['metadata']['effective_time_source'] = 'extracted'
         inherit_source_scope(record, candidate, repository, project_id, cache)
     return records,skipped
 
@@ -191,10 +201,25 @@ def _candidates(documents, assertions):
         for document in documents:
             if document['kind']!='document' or document.get('metadata',{}).get('_deleted'):continue
             for item in document.get('metadata',{}).get('discovery_candidates',[]):
+                assertion=assertions.get(item.get('id')) if item.get('kind') in NORMAL_CANDIDATE_KINDS else None
+                fact_start = None
+                if assertion and assertion.get('document_id') == document['id']:
+                    fact_start = _verified_discovery_start(assertion.get('payload') or {})
+                end = document.get('valid_until')
+                if fact_start and end and fact_start >= end:
+                    fact_start = None
                 candidate={**item,'document_id':document['id'],'document_version_id':document['version_id'],
                     'document_title':document['metadata'].get('title',document['id']),
-                    'valid_from':document.get('valid_from'),'valid_until':document.get('valid_until')}
-                assertion=assertions.get(item.get('id')) if item.get('kind') in NORMAL_CANDIDATE_KINDS else None
+                    'valid_from':fact_start or document.get('valid_from'),'valid_until':end}
+                metadata = item.get('metadata') or {}
+                if fact_start:
+                    candidate['metadata'] = {**metadata, 'valid_from': fact_start,
+                                             'effective_time_source': 'extracted'}
+                    candidate['effective_time_source'] = 'extracted'
+                elif 'effective_time_source' in metadata:
+                    candidate['metadata'] = {key: value for key, value in metadata.items()
+                                             if key != 'effective_time_source'}
+                    candidate['effective_time_source'] = document['metadata'].get('effective_time_source') or 'unknown'
                 candidate.update({
                     'assertion_id':assertion.get('id') if assertion else None,
                     'assertion_document_id':assertion.get('document_id') if assertion else None,

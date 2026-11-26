@@ -124,9 +124,12 @@
 #tab-ontology-model.ontology-model .om-catalog-item{display:flex;align-items:baseline;justify-content:space-between;gap:6px;padding:6px;min-height:32px}
 #tab-ontology-model.ontology-model .om-catalog-item small{flex:none;max-width:48%;margin:0;text-align:end;color:var(--om-muted)}
 #tab-ontology-model.ontology-model .om-candidate-tasks{margin:0 0 10px;padding:7px 9px}
-#tab-ontology-model.ontology-model .om-type-card{min-height:0;gap:5px;padding:12px 14px}
+#tab-ontology-model.ontology-model .om-type-card{gap:6px;padding:13px 14px}
 #tab-ontology-model.ontology-model .om-type-heading{margin:0}
-#tab-ontology-model.ontology-model .om-type-card-title{color:var(--om-teal);text-decoration:underline;text-decoration-color:#bbd1c8;text-underline-offset:3px}
+#tab-ontology-model.ontology-model .om-type-card-title{color:var(--om-ink);font-size:15px;text-decoration:none}
+#tab-ontology-model.ontology-model .om-type-card-title:hover{color:var(--om-teal);text-decoration:underline}
+#tab-ontology-model.ontology-model .om-type-description{margin:0}
+#tab-ontology-model.ontology-model .om-type-members{margin-top:4px;padding-top:7px;gap:2px}
 #tab-ontology-model.ontology-model .om-type-counts{margin-top:auto}
 @media(min-width:651px){
   #tab-ontology-model.ontology-model .om-directory-content{display:flex;flex-direction:column;height:100%}

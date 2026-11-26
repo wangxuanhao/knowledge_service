@@ -60,7 +60,7 @@ def _assertion_comparable(item):
 
 
 def _published_identity_policy(ontology, class_iri):
-    if ontology is None:
+    if ontology is None or not class_iri:
         return IdentityPolicy()
     try:
         return ontology.identity_policy(class_iri)
@@ -944,7 +944,7 @@ class FormalFactWriter:
         identity_pool = {row['id']: row for row in snapshot['records']
                          if row.get('kind') == 'entity' and not row.get('metadata', {}).get('_deleted')}
         for record_id,row in list(identity_pool.items()):
-            if _published_identity_policy(ontology,row['type']).declared:
+            if _published_identity_policy(ontology,row.get('type')).declared:
                 identity_pool[record_id]={**row,'type':str(ontology.resolve(row['type'],ontology.classes))}
         for record in frozen_policy.get('records', []):
             vocabulary = ontology
@@ -954,7 +954,7 @@ class FormalFactWriter:
                 vocabulary = publication_ontology
             self._reject_deprecated_write_term(record, vocabulary, operation)
             if record.get('kind') == 'entity':
-                identity = _published_identity_policy(vocabulary,record['type'])
+                identity = _published_identity_policy(vocabulary,record.get('type'))
                 if identity.declared:
                     record['type'] = str(vocabulary.resolve(record['type'], vocabulary.classes))
                     record.setdefault('metadata', {}).update({
@@ -995,7 +995,7 @@ class FormalFactWriter:
             source, target = rows.get(source_id), rows.get(target_id)
             if not source or not target or source.get('kind') != 'entity':
                 continue
-            identity = _published_identity_policy(ontology,source['type'])
+            identity = _published_identity_policy(ontology,source.get('type'))
             if not compatible_identity(source, target, identity):
                 raise ValueError('实体融合身份策略或唯一键冲突')
             if source_boundary(source) != source_boundary(target):

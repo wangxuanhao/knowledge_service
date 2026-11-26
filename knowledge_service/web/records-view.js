@@ -659,7 +659,7 @@
           target.textContent=(document?.source_content==='full_version'&&document.title)||fallback||'该记录的原始出处不可用。';
           const location=result.source_location;
           if(location?.document_version_id&&window.SourceReader){
-            const open=node('button','secondary','查看原文');open.type='button';
+            const open=node('button','secondary button-inline-action','查看原文');open.type='button';
             open.onclick=()=>{if(accepts())void window.SourceReader.open({projectId,versionId:location.document_version_id,location,assertionId});};
             target.after(open);
           }

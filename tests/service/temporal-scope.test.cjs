@@ -13,7 +13,7 @@ const read=name=>fs.readFileSync(path.join(web,name),'utf8');
 const plain=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
 const settle=()=>new Promise(setImmediate);
 function declaration(source,name){
-  const match=source.match(new RegExp('  (?:async )?function '+name+'\\([^\\n]*\\)\\{[\\s\\S]*?\\n  \\}'));
+  const match=source.match(new RegExp('  (?:async )?function '+name+'\\([^\\n]*\\) *\\{[\\s\\S]*?\\n  \\}'));
   assert.ok(match,'production function '+name+' exists');return match[0];
 }
 
@@ -134,7 +134,8 @@ function submissionFixture(stage){
     reads:0,scope:()=>{env.reads++;return applied;},$c:id=>controls[id],window:{ScopeFields:fields,TemporalScope:temporal},
     sessionManager:{loading:false,state:{conflict:false},ensureActive:async()=>{if(stage==='ensure')await gate;},save:async value=>{saved.push(plain(value));if(stage==='save')await gate;}},
     addScopeNote:(_turn,value)=>notes.push(plain(value)),addTurn:()=>({}),persist(){},stream:(body,_turn,_index,scope)=>bodies.push({body:plain(body),scope:plain(scope)}),Date,JSON};
-  vm.createContext(env);vm.runInContext(declaration(read('workbench.js'),'submit')+';this.submit=submit;',env);
+  const source=read('workbench.js');
+  vm.createContext(env);vm.runInContext(['canSubmit','syncSend','conversationContext','submit'].map(name=>declaration(source,name)).join('\n')+';this.submit=submit;',env);
   return {env,resolve,bodies,notes,saved,initial:plain(applied),mutate(){applied.valid_at='2030-01-01T00:00:00.000Z';applied.include_unknown=true;applied.filters.value='华南';applied.applicability.platforms.values.push('平台乙');controls['qa-mode'].value='hybrid';}};
 }
 
@@ -161,14 +162,15 @@ test('failed QA stream retry reuses its captured body and full scope after filte
     window:{ScopeFields:fields,RequestDeadline:require(path.join(web,'request-deadline.js'))},provenance:{close(){}},AbortController,
     document:{createElement:()=>({dataset:{}})},$c:()=>null,markDraft(){},persist(){},addFailure:(_target,_message,callback)=>{replay=callback;},endpoint:x=>x,
     fetch:async(_url,init)=>{sent.push(JSON.parse(init.body));throw Error('offline');},Error};
-  vm.createContext(env);vm.runInContext(declaration(read('workbench.js'),'stream')+';this.stream=stream;',env);
+  const source=read('workbench.js');
+  vm.createContext(env);vm.runInContext(['canSubmit','syncSend','stream'].map(name=>declaration(source,name)).join('\n')+';this.stream=stream;',env);
   await env.stream(body,turn,0,scope);assert.deepEqual(plain(records[0].scope),scope);await replay();
   assert.deepEqual(sent,[body,body]);assert.deepEqual(plain(records[0].scope),scope);
 });
 
 test('loaded old user turns keep their original business/system time and unknown choice',()=>{
   const original={valid_at:'2020-01-01T00:00:00.000Z',known_at:'2021-01-01T00:00:00.000Z',include_unknown:false},messages=[{kind:'user',text:'旧问题',scope:original}],notes=[];
-  const env={qaHistory:[],sessionManager:{},transcript:{replaceChildren(){}},hero:{},addTurn:()=>({}),addScopeNote:(_turn,value)=>notes.push(plain(value)),atEnd(){},scope:()=>{throw Error('must not reread current controls');}};
+  const env={qaHistory:[],sessionManager:{},transcript:{replaceChildren(){}},hero:{},window:{},addTurn:()=>({}),addScopeNote:(_turn,value)=>notes.push(plain(value)),atEnd(){},scope:()=>{throw Error('must not reread current controls');}};
   vm.createContext(env);vm.runInContext(declaration(read('workbench.js'),'loadHistory')+';this.load=loadHistory;',env);env.load(messages);
   assert.deepEqual(notes,[original]);assert.deepEqual(messages[0].scope,original);
 });

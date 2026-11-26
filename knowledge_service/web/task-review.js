@@ -79,7 +79,7 @@
                     const frozen=make('article');frozen.append(make('b',source.document_title||source.document_id||'人工声明'),
                       make('small',`文档版本 ${source.document_version_id||'无'} · 断言 ${source.assertion_id} · 决策 ${source.decision_version}`),make('pre',source.quote||'未提供原文引文'));
                     if(source.quote_truncated)frozen.append(make('small','引文仅显示前2000字；可定位冻结原文查看完整证据。'));
-                    if(source.document_version_id&&window.SourceReader){const open=make('button','定位冻结原文');open.type='button';open.className='secondary';open.onclick=()=>window.SourceReader.open({projectId:p,versionId:source.document_version_id,location:source,focusText:source.quote,assertionId:source.assertion_id});frozen.append(open);}
+                    if(source.document_version_id&&window.SourceReader){const open=make('button','定位冻结原文');open.type='button';open.className='secondary button-inline-action';open.onclick=()=>window.SourceReader.open({projectId:p,versionId:source.document_version_id,location:source,focusText:source.quote,assertionId:source.assertion_id});frozen.append(open);}
                     evidence.append(frozen);
                   }
                   cursor=page.next_cursor||null;more.hidden=!cursor;more.textContent='更多来源';

@@ -52,3 +52,23 @@ def test_json_and_stream_explain_skip_without_calling_provider(qa, monkeypatch):
         assert not item['generation']['called']
         assert item['mode'] == 'evidence_only'
         assert '已找到相关材料' in item['answer']
+
+
+def test_json_and_stream_retrieve_the_contextualized_query(qa, monkeypatch):
+    service, repo, project = qa
+    source(repo, project, 'undated')
+    queries = []
+    original = answers.prepare_answer
+
+    def record_query(owner, project_id, body, *args):
+        queries.append(body['query'])
+        assert 'conversation_context' not in body
+        return original(owner, project_id, body, *args)
+
+    monkeypatch.setattr(answers, 'prepare_answer', record_query)
+    body = {**request(generate=False), 'query': '那第二次呢？',
+            'conversation_context': [{'question': '团购价首次违规有哪些处置措施？'}]}
+    service.answer(project, body)
+    assert any(block.startswith('event: done') for block in answers.stream_events(service, project, body))
+    assert len(queries) == 2 and queries[0] == queries[1]
+    assert '团购价' in queries[0] and '第二次' in queries[0] and '首次' not in queries[0]

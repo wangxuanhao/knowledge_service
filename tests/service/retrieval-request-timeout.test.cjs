@@ -81,7 +81,8 @@ function streamFixture(fetch){
     live:{textContent:''},send:{disabled:false},input:{focus(){}},provenance:{close(){}},document:{createElement:node},
     endpoint:s=>'/api/projects/p'+s,$c:()=>null,addTurn:()=>turn,markDraft(){},persist(){},
     addFailure:(_turn,message)=>failures.push(message),TextDecoder,chat:{splitSseBuffer:()=>({events:[],rest:''})}});
-  vm.runInContext(declaration(read('workbench.js'),'stream')+';this.stream=stream;',f.context);
+  const source=read('workbench.js');
+  vm.runInContext(['canSubmit','syncSend','stream'].map(name=>declaration(source,name)).join('\n')+';this.stream=stream;',f.context);
   return {...f,turn,failures};
 }
 

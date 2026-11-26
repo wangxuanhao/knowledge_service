@@ -11,10 +11,14 @@ from ..domain.applicability import normalize_dimension
 from ..repository.community_store import ACTIVE_JOB_STATES, CommunityStore
 from ..utils.diagnostics import redact
 from . import community_reports
+from .answer_validity import freeze_qa_request, freeze_request
 from .community_partition import ALGORITHM
-from .community_search import qualify_sources, report_manifest, vector_reports
+from .community_question_plan import Subquestion, plan_question, platform_evidence, retrieve_subquestions
+from .community_search import original_evidence, qualify_question_sources, qualify_sources, report_manifest, vector_reports
 from .community_snapshot import assemble, capture_evidence, digest
-from .retrieval import cached_query_vector
+from .qa_follow_up import resolve_question
+from .qa_policy import RULE
+from .retrieval import cached_query_vector, rrf_fuse
 
 
 LOG = logging.getLogger(__name__)
@@ -129,6 +133,7 @@ class Communities:
             'algorithm': ALGORITHM, 'revision': None, 'live_revision': None, 'built_at': None,
             'stale': False, 'change_pending': False, 'browseable': False,
             'counts': counts, 'job': _public_job(job),
+            'question_planning': True,
             'levels': [], 'vector_index': self._vector_status(row, 0),
         }
         if row is None:
@@ -210,8 +215,21 @@ class Communities:
             row[field] = content[field][offset:offset + limit]
         # Report citations remain usable even when the full evidence table is paginated.
         cited = {ref for finding in row['report'].get('findings', []) for ref in finding['citations']}
+        report_evidence, source_documents, cited_documents = [], set(), set()
+        for item in content['evidence']:
+            is_cited = item['id'] in cited
+            if is_cited:
+                report_evidence.append(item)
+            if item['kind'] != 'document':
+                continue
+            document = item.get('document_id') or item.get('document_version_id') or item.get('source_version_id')
+            if document:
+                source_documents.add(document)
+                if is_cited:
+                    cited_documents.add(document)
         return {**row, 'status': status, 'revision': status['revision'],
-                'report_evidence': [item for item in content['evidence'] if item['id'] in cited],
+                'report_evidence': report_evidence, 'source_document_count': len(source_documents),
+                'cited_document_count': len(cited_documents),
                 'detail_offset': offset, 'detail_limit': limit}
 
     def _schedule(self, project, key, scope, *, retry_failed, automatic):
@@ -386,7 +404,8 @@ class Communities:
             outcomes[report['status']] += 1
         return {'revision': live, 'reports_ready': outcomes['ready'], 'reports_failed': outcomes['failed']}
 
-    def _semantic_matches(self, project, key, revision_id, snapshot, manifest, question, *, candidates=None):
+    def _semantic_matches(self, project, key, revision_id, snapshot, manifest, question, *, candidates=None,
+                          limit=_QUESTION_COMMUNITY_LIMIT):
         encoder, vectors = self._vectors()
         if vectors is None or snapshot.get('model') != encoder.identity:
             raise CommunitySnapshotStale('社区向量索引与当前编码模型不一致，请更新报告向量。')
@@ -398,7 +417,7 @@ class Communities:
             return {}
         try:
             hits = vectors.search(project, key, revision_id, encoder.identity,
-                                  cached_query_vector(encoder, question), _QUESTION_COMMUNITY_LIMIT,
+                                  cached_query_vector(encoder, question), limit,
                                   expected=expected)
         except Exception as exc:
             raise CommunitySnapshotStale('社区语义检索失败：' + redact(exc)[:300]) from exc
@@ -407,7 +426,7 @@ class Communities:
         return {hit['id']: hit['score'] for hit in hits
                 if expected.get(hit['id']) == hit['fingerprint'] and hit['score'] >= .35}
 
-    def _advanced_ask(self, project, scope, question, *, mode, level, generate, expected_revision):
+    def _advanced_ask(self, project, scope, question, *, mode, level, generate, expected_revision, emit):
         key = scope_key(scope)
         with self.repo.independent_read_view() as reader:
             store = CommunityStore(reader)
@@ -456,10 +475,12 @@ class Communities:
                                     **({'semantic_score': scores[detail['id']]} if mode == 'semantic' else {})}
                                    for detail in details[:24]], evidence=list(qualified.values())[:_EXCERPT_EVIDENCE_LIMIT])
         if generate and eligible_count:
+            if emit is not None and result['evidence']:
+                emit('evidence', {'evidence': result['evidence'], 'retrieval': mode})
             try:
                 config = self.llm_models.resolve()
                 answer, citations, metrics = community_reports.generate_global_answer(
-                    question, details, qualified, config, rule_judgment=rule)
+                    question, details, qualified, config, rule_judgment=rule, emit=emit)
                 result.update(answer=answer, citations=citations, generated=True,
                               llm=config.public_identity(), evidence=[qualified[ref] for ref in citations])
                 coverage.update(metrics, reports_included=metrics['reports_mapped'],
@@ -472,11 +493,185 @@ class Communities:
             raise CommunitySnapshotStale('回答期间社区快照已更新，请重新提问。')
         return result
 
+    def _planned_reports(self, project, scope, community_ids, mode, revision_id, query, request, *,
+                         narrow_platform=False):
+        key, terms = scope_key(scope), _question_terms(query)
+        limit = _QUESTION_COMMUNITY_LIMIT * 4 if narrow_platform else _QUESTION_COMMUNITY_LIMIT
+        channels, warnings, rankings = [], [], {}
+        scores, fingerprints = {}, {}
+        with self.repo.independent_read_view() as reader:
+            store = CommunityStore(reader)
+            status = self._status(store, project, scope)
+            _require_revision(status, revision_id)
+            if not status['browseable']:
+                raise CommunitySnapshotStale('社区快照已变化，请重新提问。')
+            if community_ids:
+                channels.append('selected')
+                rankings['keyword'] = [{'id': ident} for ident in dict.fromkeys(community_ids)]
+            elif mode != 'semantic':
+                channels.append('keyword')
+                keyword_ids, _ = store.candidates(project, key, terms, limit=limit)
+                rankings['keyword'] = [{'id': ident} for ident in keyword_ids]
+            if mode in ('semantic', 'hybrid'):
+                if status['vector_index']['state'] == 'ready':
+                    snapshot = json.loads(store.scope(project, key)['vector_snapshot'])
+                    fingerprints = report_manifest(vector_reports(store.ready_reports(project, key)))
+                elif mode == 'semantic':
+                    raise CommunitySnapshotStale('当前范围的报告向量未就绪，请在社区构建中更新。')
+                else:
+                    warnings.append('社区报告向量未就绪，使用关键词检索。')
+        if fingerprints:
+            try:
+                scores = self._semantic_matches(project, key, revision_id, snapshot, fingerprints, query, limit=limit)
+                channels.append('semantic')
+                rankings['semantic'] = [{'id': ident} for ident in sorted(scores, key=scores.get, reverse=True)]
+            except CommunitySnapshotStale:
+                if mode == 'semantic':
+                    raise
+                warnings.append('社区报告向量暂不可用，使用关键词检索。')
+        if len(rankings) == 2:
+            ids = [row['id'] for row in rrf_fuse(rankings, limit)]
+        else:
+            ids = [row['id'] for row in next(iter(rankings.values()), ())]
+        with self.repo.independent_read_view() as reader:
+            store = CommunityStore(reader)
+            status = self._status(store, project, scope)
+            _require_revision(status, revision_id)
+            if not status['browseable']:
+                raise CommunitySnapshotStale('社区快照已变化，请重新提问。')
+            details = store.answer_details(project, key, ids, cited_only=True,
+                                           keyword_terms=terms if 'keyword' in channels else ())
+            if scores:
+                current = report_manifest(vector_reports(row for row in details if row['id'] in scores))
+                if current != {ident: fingerprints[ident] for ident in ids if ident in scores}:
+                    raise CommunitySnapshotStale('社区报告已变化，请重新提问。')
+            refs = {item['id']: item for row in details for item in row['evidence']}
+            qualified = qualify_question_sources(reader, project, request, refs.values(), include_platforms=True)
+        hidden_fields = {'report', 'evidence'}
+        if narrow_platform:
+            details = [row for row in details if any(item['id'] in qualified for item in row['evidence'])][:_QUESTION_COMMUNITY_LIMIT]
+            retained = {item['id'] for row in details for item in row['evidence']}
+            qualified = {ident: item for ident, item in qualified.items() if ident in retained}
+            hidden_fields.update(('summary', 'keyword_match'))
+        communities = [{**{k: v for k, v in row.items() if k not in hidden_fields},
+                        **({'semantic_score': scores[row['id']]} if row['id'] in scores else {})}
+                       for row in details]
+        return list(qualified.values()), communities, channels, warnings
+
+    def _retrieve_planned_question(self, project, scope, community_ids, mode, revision_id, frozen, query, platform):
+        request = {**frozen, **read_scope(scope), 'query': query}
+        if platform is not None:
+            if scope['kind'] == 'platform' and platform != scope['platform']:
+                return {'warnings': ['查到的平台与当前问答范围不同。']}
+            request.update(read_scope({'kind': 'platform', 'platform': platform}))
+        community, reports, channels, warnings = self._planned_reports(
+            project, scope, community_ids, mode, revision_id, query, request,
+            narrow_platform=platform is not None and scope['kind'] == 'project')
+        original = []
+        if self.search_service is not None and not community_ids:
+            search = {**request, 'kinds': ['chunk'], 'k': 8, 'k_chunks': 8, 'k_per_platform': 8}
+            if not search['_explicit_valid_at']:
+                search.pop('valid_at', None)
+            raw = None
+            if search.get('_qa_index_snapshot'):
+                try:
+                    raw = self.search_service.search(project, {**search, 'retrieval_mode': 'hybrid'})
+                    channels.append('original_' + raw.get('active_mode', 'hybrid'))
+                except RuntimeError:
+                    pass
+            if raw is None:
+                search.pop('_qa_index_snapshot', None)
+                try:
+                    raw = self.search_service.search(project, {**search, 'retrieval_mode': 'keyword'})
+                    channels.append('original_keyword')
+                    warnings.append('原文混合检索暂不可用，使用关键词检索原文。')
+                except RuntimeError:
+                    raw = {}
+                    warnings.append('原文检索暂不可用，当前仅展示社区证据。')
+            if raw.get('hits'):
+                with self.repo.independent_read_view() as reader:
+                    original = original_evidence(reader, project, request, raw['hits'])
+        terms = _question_terms(query)
+        community.sort(key=lambda row: sum(term in (row['title'] + ' ' + row['quote']).casefold()
+                                               for term in terms), reverse=True)
+        evidence = {}
+        for row in [*original[:3], *community[:3], *original[3:], *community[3:]]:
+            key = row.get('document_version_id'), row.get('chunk_version_id') or row['id']
+            evidence.setdefault(key, row)
+        return dict(evidence=list(evidence.values()), communities=reports, channels=channels, warnings=warnings,
+                    platform_evidence_ids=[row['id'] for row in platform_evidence(evidence.values(), terms)])
+
+    def _planned_ask(self, project, scope, community_ids, question, original_question, *, mode,
+                     generate, expected_revision, planning, conversation_context, emit):
+        status = self.status(project, scope)
+        _require_revision(status, expected_revision)
+        if not status['browseable']:
+            raise CommunitySnapshotStale('当前社区快照不可用，请等待构建或刷新。')
+        request = {**read_scope(scope), 'query': original_question}
+        frozen = freeze_request(request)
+        if self.search_service is not None and not community_ids:
+            try:
+                frozen = freeze_qa_request(self.search_service, project, request)
+            except RuntimeError:
+                # The community snapshot remains usable without an original-text index.
+                pass
+        steps = (Subquestion(question),)
+        config = None
+        fallback = False
+        if generate:
+            try:
+                config = self.llm_models.resolve()
+                if planning:
+                    if emit is not None:
+                        emit('progress', {'stage': 'planning'})
+                    steps = plan_question(question, config, conversation_context=conversation_context)
+            except Exception as exc:
+                fallback = True
+                LOG.warning('社区问答检索计划不可用：%s', redact(exc)[:250])
+        groups = retrieve_subquestions(steps, lambda query, platform: self._retrieve_planned_question(
+            project, scope, community_ids, mode, status['revision'], frozen, query, platform), emit)
+        evidence = {row['id']: row for group in groups for row in group['evidence']}
+        communities = {row['id']: row for group in groups for row in group['communities']}
+        summaries = [{k: v for k, v in group.items() if k not in ('evidence', 'communities')} for group in groups]
+        answer = '\n\n'.join(group['question'] + '\n' + (
+            '\n'.join(f"• {row['quote'][:260]} [{row['id']}]" for row in group['evidence'][:2])
+            if group['evidence'] else '平台归属证据不足，未执行该项检索。' if group['state'] == 'platform_unresolved'
+            else '当前范围内未找到可核验的证据。') for group in groups)
+        result = _empty_answer(status, len(community_ids), answer)
+        result.update(evidence=list(evidence.values()), communities=list(communities.values()),
+                      as_of=frozen['valid_at'], answer_purpose=frozen['answer_purpose'], subquestions=summaries,
+                      planning_fallback=fallback)
+        result['coverage'].update(mode='planned', retrieval=mode, included_communities=len(communities),
+                                  evidence_available=len(evidence), evidence_returned=len(evidence))
+        if generate and evidence:
+            try:
+                if config is None:
+                    raise RuntimeError('社区问答模型不可用。')
+                text, citations = community_reports.generate_planned_answer(
+                    question, summaries, list(evidence.values()), config,
+                    rule_judgment=frozen['answer_purpose'] == RULE, emit=emit)
+                result.update(answer=text, citations=citations, generated=True, llm=config.public_identity())
+            except Exception as exc:
+                result['generation_error'] = redact(exc)[:600]
+        latest = self.status(project, scope)
+        if not latest['browseable'] or latest['revision'] != status['revision']:
+            raise CommunitySnapshotStale('回答期间社区快照已更新，请重新提问。')
+        return result
+
     def ask(self, project, scope, community_ids, question, *, generate, expected_revision=None,
-            mode='keyword', level=None, match_only=False):
+            mode='keyword', level=None, match_only=False, emit=None, conversation_context=(), plan=False):
+        original_question = question
+        planning = plan and generate and mode != 'global'
+        if conversation_context:
+            question = resolve_question(question, conversation_context,
+                                        model=self.llm_models.resolve if generate and not planning else None)
+        if mode == 'hybrid' or planning:
+            return self._planned_ask(project, scope, community_ids, question, original_question, mode=mode,
+                                     generate=generate, expected_revision=expected_revision, planning=planning,
+                                     conversation_context=conversation_context, emit=emit)
         if mode != 'keyword':
             return self._advanced_ask(project, scope, question, mode=mode, level=level,
-                                      generate=generate, expected_revision=expected_revision)
+                                      generate=generate, expected_revision=expected_revision, emit=emit)
         key = scope_key(scope)
         terms = _question_terms(question)
         selected = list(dict.fromkeys(community_ids))
@@ -529,6 +724,8 @@ class Communities:
                         complete=(len(ids) == (len(selected) or coverage['scope_communities'])
                                   and len(ranked) == len(evidence)))
         if generate and evidence and included_reports:
+            if emit is not None:
+                emit('evidence', {'evidence': evidence[:_EXCERPT_EVIDENCE_LIMIT], 'retrieval': retrieval})
             evidence_ids = {item['id'] for item in evidence}
             included_reports = [row for row in included_reports
                                 if any(ref in evidence_ids for finding in row['report']['findings']
@@ -537,7 +734,8 @@ class Communities:
             coverage['complete'] &= len(included_reports) == len(communities)
             try:
                 config = self.llm_models.resolve()
-                answer, citations = community_reports.generate_answer(question, included_reports, evidence, config)
+                answer, citations = community_reports.generate_answer(
+                    question, included_reports, evidence, config, emit=emit)
                 result.update(answer=answer, citations=citations, generated=True, llm=config.public_identity())
             except Exception as exc:
                 result['generation_error'] = redact(exc)[:600]

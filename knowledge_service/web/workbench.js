@@ -792,7 +792,15 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
   const transcript=$c('qa-transcript'),hero=$c('qa-hero'),input=$c('qa-query'),send=$c('qa');
   const progress=$c('qa-progress'),summary=$c('qa-summary'),live=$c('qa-live');
   let serial=0,busy=false,composing=false,controller=null,evidenceSerial=0;
-  let sessionManager=null,preparing=false;
+  let sessionManager=null,preparing=false,communitySubmitting=false;
+  function canSubmit(state=sessionManager?.state){
+    return !busy&&!preparing&&!state?.loading&&!state?.conflict;
+  }
+  function syncSend(state=sessionManager?.state){
+    send.disabled=!canSubmit(state);
+    window.CommunityWorkspace?.setChatAvailable?.(!send.disabled);
+  }
+  chat.canSubmit=canSubmit;
   // Server conversations own production history; isolated legacy fixtures use local storage.
   const historyKey=()=>'kg_qa_v1_'+current;
   let qaHistory=(()=>{try{const v=JSON.parse(localStorage.getItem(historyKey()));return Array.isArray(v)?v:[];}catch{return [];}})();
@@ -800,6 +808,56 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const project=current,ticket=serial;
     if(sessionManager){sessionManager.save(qaHistory).catch(error=>{if(project===current&&ticket===serial)summary.textContent='会话尚未保存：'+error.message;});return;}
     try{localStorage.setItem(historyKey(),JSON.stringify(qaHistory));}catch{}
+  };
+  chat.communityHistory=()=>qaHistory.filter(item=>item.scope?.community);
+  function conversationContext(community){
+    const turns=[];
+    const clip=(value,limit)=>Array.from(String(value||'').trim()).slice(0,limit).join('');
+    let answer='';
+    for(let index=qaHistory.length-1;index>=0&&turns.length<3;index--){
+      const item=qaHistory[index];
+      if(item.project_id!==current||Boolean(item.scope?.community)!==community)continue;
+      if(item.kind==='assistant')answer=item.error?'':clip(item.text,600);
+      if(item.kind==='user'){
+        const question=clip(item.text,1000);
+        if(question)turns.unshift({question,answer});
+        answer='';
+      }
+    }
+    return turns;
+  }
+  chat.runCommunity=async(body,run)=>{
+    if(!chat.canSubmit())return;
+    const project=current,mine=++serial,submission=new AbortController();
+    const owns=()=>mine===serial&&project===current;
+    preparing=true;communitySubmitting=true;controller=submission;syncSend();
+    const {scope:range,mode,level,community_ids,generate}=body;
+    const submittedScope={community:{...range,mode,level,community_ids,generate}};
+    try{
+      if(sessionManager)await sessionManager.ensureActive();
+      if(!owns())return;
+      const context=conversationContext(true);
+      const request=context.length?{...body,conversation_context:context}:body;
+      qaHistory.push({kind:'user',text:body.question,scope:submittedScope,project_id:project});
+      try{
+        if(sessionManager)await sessionManager.save(qaHistory,{rollbackOnFailure:true});else persist();
+      }catch(error){
+        if(owns()){
+          if(!sessionManager?.state.conflict)qaHistory.pop();
+          window.CommunityWorkspace?.renderHistory?.(chat.communityHistory());
+        }
+        throw error;
+      }
+      if(!owns())return;
+      const result=await run(request,submission.signal);
+      if(!owns()||!result)return;
+      qaHistory.push({kind:'assistant',...result,scope:submittedScope,project_id:project});
+      persist();
+    }catch(error){
+      if(owns())throw error;
+    }finally{
+      if(owns()){preparing=false;communitySubmitting=false;controller=null;syncSend();}
+    }
   };
   const evidenceSummary=rows=>(Array.isArray(rows)?rows:[]).map(row=>
     provenance.sanitizeEvidenceSummary({...row,text_preview:row?.text_preview??row?.text}));
@@ -946,7 +1004,8 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     if(Array.isArray(messages))qaHistory=messages;
     else if(!sessionManager){try{const v=JSON.parse(localStorage.getItem(historyKey()));qaHistory=Array.isArray(v)?v:[];}catch{qaHistory=[];}}
     transcript.replaceChildren();
-    qaHistory.forEach(item=>{
+    const knowledgeHistory=qaHistory.filter(item=>!item.scope?.community);
+    knowledgeHistory.forEach(item=>{
       const turn=addTurn(item.kind,item.kind==='user'?item.text:'');if(item.kind==='user'&&item.scope)addScopeNote(turn,item.scope);
       if(item.kind==='assistant'){
         const answer=turn.querySelector('.qa-answer');
@@ -969,8 +1028,9 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
         }
       }
     });
-    hero.hidden=qaHistory.length>0;
-    if(qaHistory.length)atEnd();
+    hero.hidden=knowledgeHistory.length>0;
+    if(knowledgeHistory.length)atEnd();
+    window.CommunityWorkspace?.renderHistory?.(chat.communityHistory());
   }
   function addEvidence(turn,payload){
     let rows=Array.isArray(payload?.evidence)?payload.evidence:[];
@@ -1259,7 +1319,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const capture=payload=>{
       for(const key of ['answer_id','retrieval_run_id'])if(typeof payload?.[key]==='string'&&payload[key])record[key]=payload[key];
     };
-    busy=true;send.disabled=true;controller=new AbortController();
+    busy=true;syncSend();controller=new AbortController();
     progress.textContent='正在检索证据…';summary.textContent='';
     // 开启 LLM 组织答案时，检索完证据后还要等模型生成，明确提示避免误以为卡住
     if(body.generate)progress.textContent='正在检索，找到有效依据后调用模型…';
@@ -1378,7 +1438,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       if(frame!==null)window.cancelAnimationFrame(frame);
       request?.close();
       try{reader?.cancel()?.catch(()=>{});}catch{}
-      if(mine===serial){busy=false;controller=null;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);if(!failed&&project===current)input.focus({preventScroll:true});}
+      if(mine===serial){busy=false;controller=null;syncSend();if(!failed&&project===current)input.focus({preventScroll:true});}
     }
   }
   async function submit(){
@@ -1390,23 +1450,25 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
       ontology_expansion:$c('qa-ontology-expansion')?.checked??false,k_entities:5,k_chunks:5};
     try{window.ScopeFields.requireRetrievalScope(body);}
     catch(error){summary.textContent=error.message;progress.textContent='';return;}
-    const project=current,ticket=serial;preparing=true;send.disabled=true;
+    const project=current,ticket=serial;preparing=true;syncSend();
     try{
       if(sessionManager)await sessionManager.ensureActive();
       if(project!==current||ticket!==serial)return;
+      const context=conversationContext(false);
+      if(context.length)body.conversation_context=context;
       addScopeNote(addTurn('user',query),submittedScope);qaHistory.push({kind:'user',text:query,scope:submittedScope,project_id:current});input.value='';
       // A failed save must not race a stream401 that would navigate away from a draft.
       if(sessionManager)await sessionManager.save(qaHistory);else persist();
       if(project!==current||ticket!==serial)return;
     }catch(error){if(project===current&&ticket===serial)summary.textContent='会话尚未保存：'+error.message;return;}
-    finally{if(project===current&&ticket===serial){preparing=false;send.disabled=busy||!!(sessionManager?.loading||sessionManager?.state.conflict);}}
+    finally{if(project===current&&ticket===serial){preparing=false;syncSend();}}
     stream(body,undefined,qaHistory.length,submittedScope);
   }
   window.clearKnowledgeChat=({notify=false,clearPersist=false}={})=>{
     if(sessionManager&&clearPersist){sessionManager.requestClear().catch(()=>{});return;} // The controller reports errors in the active conversation.
     const had=transcript.childElementCount>0;
     provenance.onProjectChange(current);
-    serial++;busy=false;preparing=false;controller?.abort();controller=null;
+    serial++;busy=false;preparing=false;communitySubmitting=false;controller?.abort();controller=null;
     transcript.replaceChildren();live.textContent='';progress.textContent='';summary.textContent='';
     if(sessionManager){
       sessionManager.setProject(current).catch(error=>{summary.textContent=error.message;});
@@ -1414,12 +1476,13 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     }
     if(clearPersist){try{localStorage.removeItem(historyKey());}catch{}}
     loadHistory();
-    send.disabled=false;
+    syncSend();
     if(notify&&had)summary.textContent='范围已变化，已清空当前会话。';
   };
-  document.addEventListener('workspace:scope-changed',event=>{if(!['search','qa'].includes(event.detail.page))return;serial++;controller?.abort();controller=null;busy=false;preparing=false;send.disabled=!!(sessionManager?.loading||sessionManager?.state.conflict);progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
+  document.addEventListener('workspace:scope-changed',event=>{if(!['search','qa'].includes(event.detail.page)||communitySubmitting)return;serial++;controller?.abort();controller=null;busy=false;preparing=false;syncSend();progress.textContent='';summary.textContent='筛选已更新，仅影响下一次提问；已有回答保留提交时范围。';});
   $c('qa-composer').addEventListener('submit',event=>{event.preventDefault();submit();});
   $c('qa-clear')?.addEventListener('click',()=>window.clearKnowledgeChat({clearPersist:true,notify:true}));
+  $c('qa-community-clear')?.addEventListener('click',()=>window.clearKnowledgeChat({clearPersist:true,notify:true}));
   // Milvus failure is explicit; keyword remains a user-selected independent mode.
   function showRetrievalNotice(payload){
     const notice=$c('qa-notice'),text=$c('qa-notice-text');
@@ -1451,11 +1514,12 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     sessionManager=window.QaConversations.mount({
       getProject:()=>current,getActor:()=>window.Auth?.user()?.id||'auth-disabled',getMessages:()=>qaHistory,
       onBeforeChange:()=>{
-        serial++;busy=false;controller?.abort();controller=null;preparing=false;provenance.close(false);
+        serial++;busy=false;controller?.abort();controller=null;preparing=false;communitySubmitting=false;provenance.close(false);
         transcript.replaceChildren();live.textContent='';progress.textContent='';summary.textContent='';
+        window.CommunityWorkspace?.renderHistory?.([]);
       },
       onActivate:messages=>loadHistory(messages),
-      onState:state=>{send.disabled=busy||preparing||state.loading||state.conflict;},
+      onState:syncSend,
       onError:message=>{summary.textContent=message;}
     });
     if(sessionManager)sessionManager.setProject(current).catch(error=>{summary.textContent=error.message;});
@@ -1541,7 +1605,7 @@ function renderEvalResult(r){function metricCard(title,data){const p=typeof data
     const viewport=window.visualViewport,height=viewport?viewport.height:window.innerHeight,offsetTop=viewport?viewport.offsetTop:0;
     const main=document.querySelector('body>main'),bottomPadding=main?parseFloat(getComputedStyle(main).paddingBottom)||0:0;
     page.style.setProperty('--qa-fit',Math.max(0,Math.floor(height+offsetTop-page.getBoundingClientRect().top-Math.max(10,bottomPadding)))+'px');
-    if(page!==community)$c('qa-workspace')?.style.setProperty('--qa-fit',page.style.getPropertyValue('--qa-fit'));
+    $c('qa-workspace')?.style.setProperty('--qa-fit',page.style.getPropertyValue('--qa-fit'));
     page.style.setProperty('--qa-keyboard-inset',Math.max(0,Math.round(window.innerHeight-height-offsetTop))+'px');
   }
   window.addEventListener('resize',fit);

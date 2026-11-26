@@ -1,6 +1,22 @@
 """Inherit only verifiable scope from immutable source document versions."""
 from copy import deepcopy
+from ..core.time import normalize_time
 from ..domain.applicability import normalize_applicability
+
+
+def document_effective_time_source(record, document):
+    """Return the document's time basis when it supports the stored interval."""
+    metadata = document.get('metadata') or {}
+    source = metadata.get('effective_time_source')
+    if (metadata.get('_deleted') or not record.get('valid_from')
+            or source not in ('explicit', 'published_at', 'extracted', 'source_inherited')):
+        return None
+    try:
+        matches = all(normalize_time(record.get(field)) == normalize_time(document.get(field))
+                      for field in ('valid_from', 'valid_until'))
+    except ValueError:
+        return None
+    return source if matches else None
 
 
 def inherit_source_scope(record, candidate, repository, project_id, cache=None):
@@ -31,6 +47,10 @@ def inherit_source_scope(record, candidate, repository, project_id, cache=None):
         for field in ('valid_from', 'valid_until'):
             if field not in candidate:
                 record[field] = document.get(field)
+        if 'effective_time_source' not in metadata:
+            source = document_effective_time_source(record, document)
+            if source is not None:
+                metadata['effective_time_source'] = source
     return record
 
 

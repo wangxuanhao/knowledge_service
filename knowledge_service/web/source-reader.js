@@ -215,19 +215,24 @@
       let doc=await get(sourceUrl(projectId,versionId),signal);if(token!==serial)return;
       title.textContent=window.SourceContent.isPdfSource(doc)?window.SourceContent.sourceInfo(doc).filename:doc.original_name||doc.title||'固定版本原文';const versionNote='固定版本 '+(doc.version||versionId)+' · '+(doc.sha256||doc.source_object?.sha256||'');note.textContent=versionNote;
       let locationMissing=false;
-      const lookupAssertion=!location&&assertionId&&!chunkVersionId;
+      const lookupAssertion=!location&&assertionId;
       if(!location&&(assertionId||chunkVersionId)){
         try{
           if(lookupAssertion){
-            const url='/api/projects/'+encodeURIComponent(projectId)+'/assertions/'+encodeURIComponent(assertionId)+'/evidence';
-            const evidence=await get(url,signal),source=evidence.source_location,mode=evidence.location?.mode;
-            if(source?.document_version_id===versionId&&source.status==='available'&&(mode==='exact'||mode==='chunk')){
-              location={...source,precision:mode==='exact'&&source.precision==='evidence'?'evidence':'chunk'};
-            }else locationMissing=true;
-          }else{
+            try{
+              const url='/api/projects/'+encodeURIComponent(projectId)+'/assertions/'+encodeURIComponent(assertionId)+'/evidence';
+              const evidence=await get(url,signal),source=evidence.source_location,mode=evidence.location?.mode;
+              const matchesChunk=!chunkVersionId||(source?.spans?.length&&source.spans.every(span=>span.chunk_version_id===chunkVersionId));
+              if(source?.document_version_id===versionId&&matchesChunk&&source.status==='available'&&(mode==='exact'||mode==='chunk')){
+                location={...source,precision:mode==='exact'&&source.precision==='evidence'?'evidence':'chunk'};
+              }
+            }catch(error){if(error.status!==404&&!chunkVersionId)throw error;}
+          }
+          if(!location&&chunkVersionId){
             const query=new URLSearchParams({chunk_version_id:chunkVersionId});
             location=await get(sourceUrl(projectId,versionId,'locate')+'?'+query,signal);
           }
+          locationMissing=!location;
         }
         catch(error){if(error.status!==404)throw error;locationMissing=true;}
       }

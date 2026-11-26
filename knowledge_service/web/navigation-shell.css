@@ -22,6 +22,7 @@ body>aside button[data-tab]:focus-visible,body>aside .workspace-rail-control:foc
   body>aside.qa-nav-open button[data-tab]{white-space:normal;overflow-wrap:anywhere}
 }
 @media(min-width:741px){
+  body>main{height:100dvh;min-height:0;overflow:auto;overscroll-behavior:contain}
   body>aside{overflow:visible}
   body>aside #workspace-nav-collapse{display:grid;place-items:center;position:absolute;top:21px;right:9px;width:28px;height:28px;padding:5px;border:1px solid #ffffff26;background:#164643;color:#d5e8e4;border-radius:7px;z-index:2}
   body>aside>.brand{padding-right:24px}
