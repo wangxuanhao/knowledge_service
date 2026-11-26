@@ -2,7 +2,7 @@
 from typing import Annotated, Literal
 from pydantic import Field, field_validator
 from fastapi import APIRouter, File, Form, Header, Query, UploadFile, Request as HttpRequest
-from .audit_identity import audit_actor
+from .audit_identity import audit_actor, audit_identity
 from fastapi.responses import StreamingResponse, FileResponse
 from ..domain.entity_identity import DuplicateReviewRequired
 from ..models import Request, Scope, Ingest, Question, RetrievalOptions
@@ -59,15 +59,23 @@ class Merge(Request):
     preview_fingerprint:str|None=Field(default=None,min_length=64,max_length=64)
     confirmed_identity:bool=False
 
-class DuplicateScan(Request):
-    limit:int=Field(default=20,ge=1,le=50)
-    cursor:str|None=Field(default=None,max_length=10000)
+class DuplicateScope(Request):
     document_id: str | None = Field(default=None, min_length=1, max_length=200)
     document_version_id: str | None = Field(default=None, min_length=1, max_length=200)
     document_mode: Literal['within', 'related'] | None = None
 
+class DuplicateScan(DuplicateScope):
+    limit:int=Field(default=20,ge=1,le=50)
+    cursor:str|None=Field(default=None,max_length=10000)
+
 class DuplicateGroup(Request):
     key:str=Field(min_length=1,max_length=10000)
+
+class DuplicateDeferral(DuplicateGroup):
+    membership: str = Field(pattern='^[a-f0-9]{64}$')
+
+class DuplicateRestore(DuplicateScope):
+    id: str = Field(pattern='^duplicate-deferred:[a-f0-9]{64}:[a-f0-9]{64}$')
 
 class DuplicatePreviewBatch(Request):
     keys: list[Annotated[str, Field(min_length=1, max_length=10000)]] = Field(min_length=1, max_length=20)
@@ -394,7 +402,25 @@ def install(app,service):
         p,request.keep_id,request.drop_id,request.expected_versions)
 
     @router.post('/projects/{p}/duplicates/scan')
-    def duplicate_scan(p:str,request:DuplicateScan):return governance.scan_duplicates(p,**request.model_dump())
+    def duplicate_scan(p: str, request: DuplicateScan, http_request: HttpRequest):
+        return governance.scan_duplicates(p, reviewer=audit_identity(http_request)['id'], **request.model_dump())
+
+    @router.get('/projects/{p}/duplicates/deferred')
+    def duplicate_deferred(p: str, http_request: HttpRequest,
+                           limit: int = Query(20, ge=1, le=50),
+                           before: int | None = Query(None, ge=1, le=2**63 - 1)):
+        return governance.deferred_duplicate_groups(p, reviewer=audit_identity(http_request)['id'],
+                                                    limit=limit, before=before)
+
+    @router.post('/projects/{p}/duplicates/deferred/defer')
+    def duplicate_defer(p: str, request: DuplicateDeferral, http_request: HttpRequest):
+        return governance.defer_duplicate_group(p, request.key, request.membership,
+                                               reviewer=audit_identity(http_request)['id'])
+
+    @router.post('/projects/{p}/duplicates/deferred/restore')
+    def duplicate_restore(p: str, request: DuplicateRestore, http_request: HttpRequest):
+        return governance.restore_duplicate_group(p, request.id, reviewer=audit_identity(http_request)['id'],
+                                                  **request.model_dump(exclude={'id'}))
 
     @router.post('/projects/{p}/duplicates/preview')
     def duplicate_preview(p:str,request:DuplicateGroup):

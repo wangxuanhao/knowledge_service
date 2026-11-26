@@ -912,6 +912,14 @@
     const mergeGuide=el('p','duplicate-muted','复核可保留多条。批量合并每组仅保留一条。');
     const list=el('div','duplicate-candidates');
     const deferredSection=el('details','duplicate-deferred');
+    const deferredSummary=el('summary',null,'暂不合并清单');
+    const deferredStatus=el('p','duplicate-muted');deferredStatus.setAttribute('role','status');
+    const deferredList=el('div');
+    const deferredMore=button('加载更多暂不合并项');
+    const deferredRetry=button('重新读取暂不合并清单');
+    deferredMore.hidden=deferredRetry.hidden=true;
+    deferredSection.append(deferredSummary,el('p','duplicate-muted','按当前账号保存。恢复后可重新预览。'),
+      deferredStatus,deferredList,deferredMore,deferredRetry);
     const confirm=button('确认合并所选组','primary');confirm.id='duplicate-confirm';
     const ack=checkbox(null,'duplicate-merge-ack');
     const ackLabel=el('label','entity-governance-choice');
@@ -920,8 +928,9 @@
     const planTitle=el('h5',null,'待确认的合并影响');
     const mergeStatus=el('div','duplicate-merge-status');mergeStatus.setAttribute('role','status');
     plan.append(planTitle,planDetails,ackLabel,confirm,mergeStatus);
-    const selected=new Set(), previewKeys=new Set(), deferred=new Set(), expanded=new Set();
-    let scopeState, queuedScope, groups=[], controls=[], deferredSummary, cursor=null, busy=false, writing=false, generation=0;
+    const selected=new Set(), previewKeys=new Set(), expanded=new Set(), deferredRows=new Map();
+    let scopeState, queuedScope, groups=[], controls=[], cursor=null, busy=false, writing=false, generation=0;
+    let deferredCursor=null, deferredLoading=false, deferredButtons=[];
     let searchRequest=0, searching=false, documentButtons=[];
     let mergeReceipt=false,mergeAttempt=0;
     const mounted=()=>project()===projectId && mountId===serial;
@@ -931,7 +940,7 @@
       generation++;
       dismissStalePartition?.();
       groups=[];cursor=null;busy=false;ack.checked=false;
-      selected.clear();previewKeys.clear();deferred.clear();expanded.clear();
+      selected.clear();previewKeys.clear();expanded.clear();
       if (!preserveFeedback) {
         report('');mergeReceipt=false;mergeStatus.replaceChildren();
       }
@@ -1014,7 +1023,7 @@
     });
 
     function sync() {
-      const active=groups.filter(group=>!deferred.has(group.key) && !group.review_receipt && !group.rescanRequired);
+      const active=groups.filter(group=>!group.deferred_id && !group.review_receipt && !group.rescanRequired);
       const chosen=active.filter(group=>selected.has(group.key));
       const occupied=new Set(chosen.flatMap(group=>(group.members || []).map(row=>row.id)));
       const unpreviewed=active.some(group=>!needsMemberReview(group) && !isPreviewed(group));
@@ -1030,13 +1039,15 @@
       selectPreview.disabled=busy;
       batch.disabled=busy || !previewKeys.size;
       batch.textContent=`批量预览（${previewKeys.size}/20）`;
+      deferredMore.disabled=deferredRetry.disabled=busy || deferredLoading;
+      for (const restore of deferredButtons) restore.disabled=busy || deferredLoading;
       differenceLabel.hidden=!active.some(isPreviewed);
       for (const {group,previewChoice,mergeChoice,mergeHint,previewButton,reviewButton,deferButton} of controls) {
         previewChoice.disabled=busy || needsMemberReview(group) || isPreviewed(group) || (!previewKeys.has(group.key) && previewKeys.size>=20);
         previewChoice.checked=previewKeys.has(group.key);
         previewButton.disabled=busy || needsMemberReview(group);
         reviewButton.disabled=busy;
-        deferButton.disabled=busy;
+        deferButton.disabled=busy || deferredLoading || !group.membership;
         const checked=selected.has(group.key);
         const overlap=!checked && overlaps(group,occupied);
         mergeChoice.checked=checked;
@@ -1064,6 +1075,91 @@
         }
         planDetails.append(el('p',null,`${chosen.length} 组 · ${totals.relations} 条关系 · ${totals.attributes} 条属性 · ${totals.conflicts} 组冲突 · ${totals.facts} 组重复事实`),
           el('small','duplicate-muted','按逐组统计相加，跨组关联的记录可能重复计入。'),rows);
+      }
+    }
+
+    function scopePayload() {
+      const doc=scopeState.document;
+      return scopeState.mode!=='all' && doc ? {document_id:doc.id,
+        document_version_id:doc.version_id,document_mode:scopeState.mode} : {};
+    }
+
+    function renderDeferred() {
+      deferredList.replaceChildren();deferredButtons=[];
+      for (const item of deferredRows.values()) {
+        const row=el('div','duplicate-deferred-row'),restore=button('恢复复核');
+        restore.addEventListener('click',()=>restoreGroup(item));
+        const label=el('span',null,`${item.name} · ${duplicateType(item.type)} · ${item.member_count} 个实体`);
+        if (item.deferred_at) label.append(el('small','duplicate-muted',' · '+window.DisplayTime.format(item.deferred_at)));
+        row.append(label,restore);
+        deferredList.append(row);deferredButtons.push(restore);
+      }
+      deferredMore.hidden=!deferredCursor;
+      sync();
+    }
+
+    async function readDeferred(reset) {
+      if (!mounted() || writing || deferredLoading) return;
+      deferredLoading=true;deferredRetry.hidden=true;sync();
+      deferredStatus.textContent='正在读取暂不合并清单…';
+      try {
+        const before=!reset && deferredCursor ? '&before='+encodeURIComponent(deferredCursor) : '';
+        const page=await api(endpoint('/duplicates/deferred?limit=20'+before),undefined,'GET');
+        if (!mounted()) return;
+        if (reset) deferredRows.clear();
+        for (const item of page.groups) deferredRows.set(item.id,item);
+        deferredCursor=page.next_cursor;
+        deferredStatus.textContent=deferredRows.size?'':'还没有标记暂不合并的候选组。';
+      } catch(error) {
+        if (mounted()) {deferredStatus.textContent='暂不合并清单读取失败：'+error.message;deferredRetry.hidden=false;}
+      } finally {
+        if (mounted()) {deferredLoading=false;renderDeferred();}
+      }
+    }
+
+    async function deferGroup(group) {
+      if (!mounted() || busy || deferredLoading || !group.membership) return;
+      writing=busy=true;sync();
+      let saved=false;
+      try {
+        const item=await api(endpoint('/duplicates/deferred/defer'),{key:group.key,membership:group.membership});
+        if (!mounted()) return;
+        for (const candidate of groups.filter(row=>row.membership===group.membership)) {
+          discardSelection(candidate);candidate.deferred_id=item.id;
+        }
+        deferredRows.set(item.id,item);deferredStatus.textContent='';renderDeferred();
+        report(`「${group.name}」已移入暂不合并清单。`);saved=true;
+      } catch(error) {
+        if (mounted()) report('暂不合并保存失败：'+error.message);
+      } finally {
+        if (mounted()) {settleWriting();if (saved) deferredSummary.focus?.();}
+      }
+    }
+
+    async function restoreGroup(item) {
+      if (!mounted() || busy || deferredLoading) return;
+      writing=busy=true;sync();
+      let focus;
+      try {
+        const result=await api(endpoint('/duplicates/deferred/restore'),{id:item.id,...scopePayload()});
+        if (!mounted()) return;
+        deferredRows.delete(item.id);
+        for (const group of groups.filter(row=>row.deferred_id===item.id)) delete group.deferred_id;
+        const candidate=result.group;
+        if (candidate && (scopeState.mode==='all' || scopeState.document)) {
+          const index=groups.findIndex(group=>group.key===candidate.key);
+          if (index<0) groups.unshift(candidate);
+          else groups[index]=candidate;
+          if (!candidate.deferred_id) focus=candidate.key;
+        }
+        deferredStatus.textContent=deferredRows.size?'':'还没有标记暂不合并的候选组。';
+        renderDeferred();
+        report(focus?`「${item.name}」已恢复复核，请重新预览。`:
+          `「${item.name}」已移出暂不合并清单，可重新扫描查看当前候选。`);
+      } catch(error) {
+        if (mounted()) deferredStatus.textContent='恢复复核失败：'+error.message;
+      } finally {
+        if (mounted()) {settleWriting();if (focus) focusCandidate(focus);else deferredSummary.focus?.();}
       }
     }
 
@@ -1097,7 +1193,6 @@
         if (candidate!==group && !overlaps(candidate,reviewed)) continue;
         discardSelection(candidate);
         delete candidate.partitionDraft;
-        deferred.delete(candidate.key);
         if (candidate!==group) candidate.rescanRequired=true;
       }
       render();
@@ -1156,7 +1251,7 @@
           candidate.member_count=count-1;
           candidate.blocked=candidate.member_count>20;
           if (!candidate.blocked) candidate.blocked_reason=null;
-          if (candidate.member_count<2) deferred.delete(candidate.key);
+          delete candidate.membership;delete candidate.deferred_id;
         }
       }
       groups=groups.filter(candidate=>candidate.member_count==null || candidate.member_count>=2);
@@ -1178,7 +1273,7 @@
       const focusField=focused && focusFields.find(field=>focused[field]===active);
       list.replaceChildren();controls=[];
       for (const group of groups) {
-        if (deferred.has(group.key)) continue;
+        if (group.deferred_id) continue;
         const ready=isPreviewed(group), requiresReview=needsMemberReview(group), card=el('article','entity-review-card duplicate-candidate');
         const header=el('div','duplicate-candidate-header');
         const heading=el('h5',null,group.name || '未命名实体');
@@ -1235,13 +1330,8 @@
         previewButton.addEventListener('click',()=>loadPreviews([group.key],false,previewButton));
         const reviewButton=button('复核组内成员',requiresReview || groupSize(group)>2?'primary':'secondary');
         reviewButton.addEventListener('click',()=>{if (!busy && mounted()) openReview(group);});
-        const deferButton=button('本轮暂缓');
-        deferButton.addEventListener('click',()=>{
-          deferred.add(group.key);previewKeys.delete(group.key);selected.delete(group.key);ack.checked=false;
-          deferredSection.open=true;
-          render();
-          deferredSummary.focus?.();
-        });
+        const deferButton=button('暂不合并');
+        deferButton.addEventListener('click',()=>deferGroup(group));
         const control={group,previewChoice,mergeChoice,mergeHint,previewButton,reviewButton,deferButton};
         controls.push(control);
         actions.append(reviewButton,previewLabel,mergeLabel,previewButton,deferButton,mergeHint);
@@ -1254,7 +1344,7 @@
             if (loaded) return;
             loaded=true;
             comparison.append(duplicateComparison(group,onlyDifferences.checked,projectId,()=>currentRound(ticket)&&
-              group.preview_fingerprint===fingerprint&&!deferred.has(group.key)&&comparison.isConnected!==false,report),duplicateImpact(group));
+              group.preview_fingerprint===fingerprint&&!group.deferred_id&&comparison.isConnected!==false,report),duplicateImpact(group));
           };
           comparison.open=expanded.has(group.key);
           control.summary=el('summary',null,'核对身份、来源和合并影响');
@@ -1270,16 +1360,6 @@
         list.append(card);
       }
       if (mergeReceipt && !groups.length) list.append(el('p','duplicate-muted','本轮列出的候选组已处理。'));
-      deferredSection.hidden=!deferred.size;
-      deferredSummary=el('summary',null,`本轮暂缓 · ${deferred.size} 组`);
-      deferredSection.replaceChildren(deferredSummary,el('p','duplicate-muted','暂缓的组可在这里随时恢复。本轮结束后，重新扫描仍会检查这些实体。'));
-      for (const group of groups.filter(group=>deferred.has(group.key))) {
-        const row=el('div','duplicate-deferred-row'),restore=button('恢复本轮复核');
-        restore.disabled=busy;
-        restore.addEventListener('click',()=>{deferred.delete(group.key);render();focusCandidate(group.key);});
-        row.append(el('span',null,`${group.name} · ${duplicateType(group.type)}`),restore);
-        deferredSection.append(row);
-      }
       sync();
       const replacement=focused && controls.find(item=>item.group.key===focused.group.key)?.[focusField];
       if (replacement && !replacement.disabled && !replacement.hidden) replacement.focus?.();
@@ -1289,9 +1369,7 @@
       if (busy || !mounted() || scan.disabled) return;
       if (reset) clearRound();
       const ticket=generation;
-      const payload={cursor,limit:20};
-      if (scopeState.mode!=='all') Object.assign(payload,{document_id:scopeState.document.id,
-        document_version_id:scopeState.document.version_id,document_mode:scopeState.mode});
+      const payload={cursor,limit:20,...scopePayload()};
       busy=true;sync();report('正在扫描重复实体…');
       try {
         const page=await api(endpoint('/duplicates/scan'),payload);
@@ -1300,8 +1378,9 @@
         groups.push(...(page.groups || []).filter(group=>!seen.has(group.key)).map(group=>({...group})));
         protectReviewedMembers();
         cursor=page.next_cursor || null;
-        const count=`已找到 ${groups.length} 组疑似重复实体`;
-        report(cursor ? `${count}，可继续扫描。` : groups.length ? `扫描完成，${count}。` : '当前范围未发现重复实体组。');
+        const hidden=groups.filter(group=>group.deferred_id).length;
+        const count=`已找到 ${groups.length-hidden} 组疑似重复实体${hidden?`，已跳过 ${hidden} 组暂不合并项`:''}`;
+        report(cursor ? `${count}，可继续扫描。` : groups.length ? `扫描完成，${count}。` : '当前范围没有待复核的疑似重复实体。');
       } catch(error) {
         if (currentRound(ticket)) report('扫描失败：'+error.message);
       } finally {
@@ -1428,7 +1507,7 @@
     ack.addEventListener('change',sync);
     onlyDifferences.addEventListener('change',render);
     selectPreview.addEventListener('click',()=>{
-      const eligible=groups.filter(group=>!needsMemberReview(group) && !isPreviewed(group) && !deferred.has(group.key));
+      const eligible=groups.filter(group=>!needsMemberReview(group) && !isPreviewed(group) && !group.deferred_id);
       for (const group of eligible.slice(0,20)) {
         if (previewKeys.size>=20) break;
         previewKeys.add(group.key);
@@ -1436,7 +1515,10 @@
       sync();
     });
     batch.addEventListener('click',()=>loadPreviews(groups.filter(group=>previewKeys.has(group.key)).map(group=>group.key),true));
-    section.append(el('h4',null,'扫描已有重复实体'),scanToolbar,feedback,candidateActions,mergeGuide,list,deferredSection,plan);
+    deferredSection.addEventListener('toggle',()=>{if (deferredSection.open) return readDeferred(true);});
+    deferredMore.addEventListener('click',()=>readDeferred(false));
+    deferredRetry.addEventListener('click',()=>readDeferred(true));
+    section.append(el('h4',null,'扫描已有重复实体'),scanToolbar,feedback,deferredSection,candidateActions,mergeGuide,list,plan);
     if (scannerScope.projectId!==projectId) scannerScope={projectId,mode:'all',document:null};
     applyScannerScope=changeScope;
     changeScope(scannerScope,true);

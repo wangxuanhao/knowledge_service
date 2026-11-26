@@ -121,7 +121,7 @@ python scripts/migrate_source_objects.py --source-root data/sources --apply --ou
 - [verify_redesign_live_ui.py](verify_redesign_live_ui.py)：现行页面观察。
 - [verify_redesign_workflows.py](verify_redesign_workflows.py)：改造操作故事。
 
-当前手册用 [build_knowledge_service_manual.py](build_knowledge_service_manual.py) 构建，通用渲染器是 [build_standalone_manual.py](build_standalone_manual.py)。[verify_redesign_manual.py](verify_redesign_manual.py) 和 [verify_redesign_manual_browser.py](verify_redesign_manual_browser.py) 只适配历史 29 章技术手册；前者 `--build` 生成「知识平台历史技术手册.html」，不会覆盖当前指南。旧浏览器工具需要既有 Playwright 和可用浏览器。[ontology_validation_helpers.py](ontology_validation_helpers.py) 是共用 helper。
+当前操作手册用 [build_knowledge_service_manual.py](build_knowledge_service_manual.py) 构建，通用渲染器和运维手册构建入口见 [build_standalone_manual.py](build_standalone_manual.py)。[ontology_validation_helpers.py](ontology_validation_helpers.py) 是共用 helper。
 
 ## 保留但需适配的专项：17 个
 

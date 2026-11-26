@@ -32,6 +32,60 @@ def relation(id, subject, object):
     return dict(id=id, kind='relation', type='knows', text=id, subject_id=subject, object_id=object)
 
 
+def test_deferred_duplicate_groups_are_private_recoverable_and_tied_to_members(tmp_path):
+    repo, service, project, gov, key = setup_group(tmp_path, [dict(id='a'), dict(id='b')])
+    candidate = gov.scan_duplicates(project, reviewer='alice')['groups'][0]
+    saved = gov.defer_duplicate_group(project, key, candidate['membership'], reviewer='alice')
+    assert gov.defer_duplicate_group(project, key, candidate['membership'], reviewer='alice') == saved
+    reopened = Governance(KnowledgeService(Repository(tmp_path / 'partitions'), HashingEncoder()))
+    assert reopened.scan_duplicates(project, reviewer='alice')['groups'] == []
+    assert reopened.scan_duplicates(project, reviewer='bob')['groups'][0]['key'] == key
+    service.write(project, [dict(id=id, kind='entity', type='Person', text='另一组') for id in ('x', 'y')])
+    page = reopened.scan_duplicates(project, reviewer='alice', limit=1)
+    assert [group['name'] for group in page['groups']] == ['另一组'] and page['next_cursor'] is None
+    assert reopened.deferred_duplicate_groups(project, reviewer='alice')['groups'] == [saved]
+    assert reopened.deferred_duplicate_groups(project, reviewer='bob')['groups'] == []
+    assert not reopened.restore_duplicate_group(project, saved['id'], reviewer='bob')['restored']
+
+    restored = reopened.restore_duplicate_group(project, saved['id'], reviewer='alice')
+    assert restored['restored'] and restored['group']['key'] == key
+    assert 'deferred_id' not in restored['group']
+    assert reopened.deferred_duplicate_groups(project, reviewer='alice')['groups'] == []
+    assert not reopened.restore_duplicate_group(project, saved['id'], reviewer='alice')['restored']
+    assert all(len(repo.history(project, id)) == 1 for id in ('a', 'b'))
+
+    reopened.defer_duplicate_group(project, key, candidate['membership'], reviewer='alice')
+    service.write(project, [dict(id='c', kind='entity', type='Person', text='同名')])
+    changed = next(group for group in reopened.scan_duplicates(project, reviewer='alice')['groups'] if group['key'] == key)
+    assert changed['member_count'] == 3
+    with pytest.raises(ValueError, match='成员已变化'):
+        reopened.defer_duplicate_group(project, key, candidate['membership'], reviewer='alice')
+
+
+def test_duplicate_deferral_routes_use_authenticated_owner_without_granting_merge(tmp_path):
+    from test_auth_rbac import _client, _h, _login, _make_user, _super
+
+    with _client(tmp_path) as client:
+        _, _, project, _, key = setup_group(tmp_path, [dict(id='a'), dict(id='b')], service=client.app.state.service)
+        path = f'/api/projects/{project}/duplicates'
+        admin = _super(client)
+        assert _make_user(client, admin, 'reviewer').status_code == 201
+        viewer = _h(_login(client, 'reviewer', 'pass123').json()['access_token'])
+        assert client.get(path + '/deferred').status_code == 401
+        candidate = client.post(path + '/scan', json={}, headers=viewer).json()['groups'][0]
+        body = {'key': key, 'membership': candidate['membership']}
+        response = client.post(path + '/deferred/defer', json=body, headers=viewer)
+        assert response.status_code == 200, response.text
+        saved = response.json()
+        assert client.post(path + '/scan', json={}, headers=viewer).json()['groups'] == []
+        assert client.get(path + '/deferred', headers=viewer).json()['groups'] == [saved]
+        assert client.get(path + '/deferred', headers=_h(admin)).json()['groups'] == []
+        assert not client.post(path + '/deferred/restore', json={'id': saved['id']}, headers=_h(admin)).json()['restored']
+        assert client.post(path + '/confirm', json={'groups': []}, headers=viewer).status_code == 403
+        result = client.post(path + '/deferred/restore', json={'id': saved['id']}, headers=viewer)
+        assert result.status_code == 200 and result.json()['group']['key'] == key
+
+
 def test_seven_to_two_is_one_commit_with_cross_target_facts_evidence_and_two_conflict_sets(tmp_path):
     members = [dict(id=letter) for letter in 'abcdefg']
     facts = [dict(id='count-' + letter, kind='attribute', type='count', text=str(n), subject_id=letter, value=n,

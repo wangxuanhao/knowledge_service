@@ -44,6 +44,9 @@ async function fixture(width=1440){
         source_contexts:[{...source,document_title:'规则 '+(index+1),document_id:'doc-'+index}]};
     })};
     const preview={...group,preview_fingerprint:'a'.repeat(64),keep_id:'e',affected_records:{relations:4,attributes:2},attribute_conflicts:[{predicate:'平台职责',values:[{value:'职责甲'},{value:'职责乙'}]}]};
+    const deferred=new Map();
+    const scanned=items=>({groups:items.filter(item=>!deferred.has(item.key))
+      .map(item=>({...item,membership:item.key})),next_cursor:null});
     window.api=async(url,body)=>{
       calls.push({url,body});
       if(url.endsWith('/resolution-reviews'))return {reviews:[]};
@@ -51,7 +54,7 @@ async function fixture(width=1440){
       if(window.partitionScenario&&url.endsWith('/duplicates/scan')){
         const receipt=window.partitionReceipt;
         const members=receipt?seven.members.filter(member=>receipt.targets.some(target=>target.keep_id===member.id)):seven.members;
-        return {groups:[{...seven,members,member_count:members.length,review_receipt:receipt}],next_cursor:null};
+        return scanned([{...seven,members,member_count:members.length,review_receipt:receipt}]);
       }
       if(body?.key==='seven'&&url.endsWith('/duplicates/members'))return {key:'seven',members:seven.members,next_after_id:null};
       if(url.includes('/duplicates/partition/')){
@@ -66,7 +69,17 @@ async function fixture(width=1440){
           kept_count:targets.length,merged_count:Object.keys(body.assignments).length-targets.length,targets};
         return {...window.partitionReceipt,records:[]};
       }
-      if(url.endsWith('/duplicates/scan'))return {groups:window.reviewMode?[incompatible,oversized]:body.document_mode==='related'?[group,second]:[group],next_cursor:null};
+      if(url.endsWith('/duplicates/scan'))return scanned(window.reviewMode?[incompatible,oversized]:body.document_mode==='related'?[group,second]:[group]);
+      if(url.includes('/duplicates/deferred?'))return {groups:[...deferred.values()],next_cursor:null};
+      if(url.endsWith('/duplicates/deferred/defer')){
+        const item=[group,second,incompatible,oversized,seven].find(item=>item.key===body.key);
+        const saved={id:item.key,name:item.name,type:item.type,member_count:item.member_count??item.members.length};
+        deferred.set(saved.id,saved);return saved;
+      }
+      if(url.endsWith('/duplicates/deferred/restore')){
+        const item=[group,second,incompatible,oversized,seven].find(item=>item.key===body.id);
+        return {restored:deferred.delete(body.id),group:scanned([item]).groups[0]};
+      }
       if(url.endsWith('/duplicates/preview'))return preview;
       if(url.endsWith('/duplicates/preview-batch'))return {results:window.reviewMode?
         [{key:'mixed',status:'review_required',error:'组内有成员的业务有效期、适用范围不同，需逐对复核。'}]:
@@ -168,10 +181,17 @@ test('scoped batch previews show partial failures to read-only reviewers on narr
   await scanner.getByText('候选实体修订已变化',{exact:true}).waitFor();
   await scanner.getByText('核对身份、来源和合并影响',{exact:true}).click();
   await scanner.getByText('补充规则',{exact:true}).waitFor();
-  await scanner.getByRole('button',{name:'本轮暂缓',exact:true}).first().click();
-  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'本轮暂缓 · 1 组');
-  await scanner.getByRole('button',{name:'恢复本轮复核'}).click();
-  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'核对身份、来源和合并影响');
+  await scanner.getByRole('button',{name:'暂不合并',exact:true}).first().click();
+  const deferredHeading=scanner.getByText('暂不合并清单',{exact:true});
+  await scanner.getByText('「美团平台」已移入暂不合并清单。',{exact:true}).waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'暂不合并清单');
+  await scan.click();
+  await scanner.getByText('扫描完成，已找到 1 组疑似重复实体。',{exact:true}).waitFor();
+  await page.evaluate(()=>EntityGovernance.mount(document.getElementById('governance')));
+  await deferredHeading.click();
+  await scanner.getByRole('button',{name:'恢复复核'}).click();
+  await scanner.getByRole('button',{name:'预览本组影响'}).waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement.textContent),'预览本组影响');
   assert.equal(await scanner.getByRole('button',{name:'确认合并所选组'}).count(),0);
   const calls=await page.evaluate(()=>window.calls);
   assert.deepEqual(calls.find(call=>call.url.endsWith('/scan')).body,
@@ -217,8 +237,10 @@ test('blocked and incompatible groups can be reviewed, paged and merged as an ex
   await review.getByRole('button',{name:'关闭复核'}).click();
 
   const large=scanner.locator('.duplicate-candidate').filter({hasText:'商品分享权限'});
-  await large.getByRole('button',{name:'本轮暂缓',exact:true}).click();
-  await scanner.getByRole('button',{name:'恢复本轮复核'}).click();
+  await large.getByRole('button',{name:'暂不合并',exact:true}).click();
+  await scanner.getByText('「商品分享权限」已移入暂不合并清单。',{exact:true}).waitFor();
+  await scanner.getByText('暂不合并清单',{exact:true}).click();
+  await scanner.getByRole('button',{name:'恢复复核'}).click();
   await large.getByRole('button',{name:'复核组内成员'}).click();
   await review.getByText('平台规则',{exact:true}).click();
   await review.getByRole('button',{name:'查看冻结原文'}).click();

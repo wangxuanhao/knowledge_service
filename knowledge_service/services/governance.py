@@ -428,11 +428,25 @@ class Governance:
         return [{'name':members[0]['text'],'type':key[1],'members':members}
                 for key,members in sorted(groups.items()) if len(members)>1]
 
-    def scan_duplicates(self,p,*,limit=20,cursor=None,document_id=None,document_version_id=None,document_mode=None):
+    def scan_duplicates(self,p,*,limit=20,cursor=None,document_id=None,document_version_id=None,document_mode=None,
+                        reviewer=None):
         from ..repository.duplicate_entities import DuplicateReads
         with self.repo.independent_read_view() as reader:
             return DuplicateReads(reader).scan(p,limit=limit,cursor=cursor,document_id=document_id,
-                document_version_id=document_version_id,document_mode=document_mode)
+                document_version_id=document_version_id,document_mode=document_mode,reviewer=reviewer)
+
+    def deferred_duplicate_groups(self, p, *, reviewer, limit=20, before=None):
+        from ..repository.duplicate_entities import DuplicateReads
+        with self.repo.independent_read_view() as reader:
+            return DuplicateReads(reader).deferred_groups(p, reviewer, limit=limit, before=before)
+
+    def defer_duplicate_group(self, p, key, membership, *, reviewer):
+        from ..repository.duplicate_entities import DuplicateReads
+        return DuplicateReads(self.repo).defer_group(p, reviewer, key, membership)
+
+    def restore_duplicate_group(self, p, ident, *, reviewer, **scope):
+        from ..repository.duplicate_entities import DuplicateReads
+        return DuplicateReads(self.repo).restore_deferred_group(p, reviewer, ident, **scope)
 
     def preview_duplicate_group(self,p,key):
         from .duplicate_governance import DuplicateGovernance

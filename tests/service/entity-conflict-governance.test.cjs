@@ -61,7 +61,7 @@ test('document scope survives async mount and batch preview keeps per-group erro
       addEventListener(name,handler){this.listeners[name]=handler;}};
   }
   const calls=[];
-  const group=(key,memberIds)=>({key,name:key,type:'urn:test#Platform',members:memberIds.map(id=>({id,text:'平台规则',version:1,
+  const group=(key,memberIds)=>({key,membership:key,name:key,type:'urn:test#Platform',members:memberIds.map(id=>({id,text:'平台规则',version:1,
     metadata:{aliases:['平台']},source_contexts: id==='id-2' ? [] : [{document_id:'doc',document_title:'冻结规则',quote:'平台和职责'}],
     relation_context:id==='id-1' ? {total:6,examples:[{id:'r',type:'关联',subject_label:'平台乙',object_label:'审批规范'}]} : {total:0,examples:[]}}))});
   const groups=[group('甲组',['id-1','id-2']),group('乙组',['id-2','id-3']),group('失败组',['id-4','id-5'])];
@@ -71,13 +71,25 @@ test('document scope survives async mount and batch preview keeps per-group erro
       {value:'乙',valid_from:'2025-02-01',valid_until:group.key==='甲组'?'2025-03-01':null}]}],fact_deduplication_total:1});
   let finishReviews;
   const reviews=new Promise(resolve=>{finishReviews=resolve;});
+  const deferred=new Map();
   const context={current:'p',endpoint:s=>'/p'+s,document:{createElement:element},
     labelOf:type=>type==='urn:test#Platform' ? '平台' : type,window:{DisplayTime:require('../../knowledge_service/web/display-time.js'),Auth:{isAdmin:()=>true}},
     api:async(url,body)=>{
       calls.push({url,body:JSON.parse(JSON.stringify(body??null))});
       if(url.includes('/sources?')) return {documents:[{id:'search-doc',version_id:'search-v1',metadata:{title:'关键词文档'}}]};
       if(url.endsWith('/resolution-reviews'))return reviews;
-      if(url.endsWith('/scan'))return {groups,next_cursor:null};
+      if(url.endsWith('/scan'))return {groups:groups.filter(group=>!deferred.has(group.key)),next_cursor:null};
+      if(url.endsWith('/deferred/defer')) {
+        const group=groups.find(item=>item.key===body.key);
+        const saved={id:group.key,name:group.name,type:group.type,member_count:group.members.length};
+        deferred.set(saved.id,saved);
+        return saved;
+      }
+      if(url.endsWith('/deferred/restore')) {
+        const restored=deferred.delete(body.id);
+        return {restored,group:groups.find(group=>group.key===body.id)};
+      }
+      if(url.includes('/deferred?'))return {groups:[...deferred.values()],next_cursor:null};
       if(url.endsWith('/preview-batch'))return {results:[ready(groups[0]),ready(groups[1]),{key:'失败组',status:'failed',error:'版本变化'}]};
       throw Error(url);
     }};
@@ -118,10 +130,20 @@ test('document scope survives async mount and batch preview keeps per-group erro
   assert.equal(second.disabled,true);
   assert.ok(children().some(node=>String(node.textContent).includes('逐组统计')));
   assert.equal(byId('duplicate-merge-ack').checked,false);
-  byText('本轮暂缓').listeners.click();
-  assert.ok(byText('本轮暂缓 · 1 组'));
-  byText('恢复本轮复核').listeners.click();
-  assert.equal(byText('本轮暂缓 · 1 组'),undefined);
+  await byText('暂不合并').listeners.click();
+  const showsGroup=()=>byClass('entity-review-card duplicate-candidate').some(node=>
+    children(node).some(child=>child.textContent==='甲组'));
+  assert.equal(showsGroup(),false);
+  await byText('扫描已有重复实体').listeners.click();
+  assert.equal(showsGroup(),false);
+  await ui.mount(host);
+  const savedList=byClass('duplicate-deferred')[0];
+  savedList.open=true;
+  await savedList.listeners.toggle();
+  assert.ok(byText('恢复复核'));
+  await byText('恢复复核').listeners.click();
+  assert.ok(showsGroup());
+  assert.equal(byText('恢复复核'),undefined);
   byId('duplicate-document-query').value='原文 关键词';
   await byClass('duplicate-document-search')[0].listeners.submit({preventDefault(){}});
   assert.deepEqual(calls.at(-1),{url:'/p/sources?summary_only=true&state=all&limit=20&query=%E5%8E%9F%E6%96%87%20%E5%85%B3%E9%94%AE%E8%AF%8D',body:{}});

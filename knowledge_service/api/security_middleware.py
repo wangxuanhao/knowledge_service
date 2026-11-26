@@ -95,10 +95,11 @@ _READ_ONLY_POST_PATTERNS = (
 )
 _READ_ONLY_POST = tuple(re.compile(p) for p in _READ_ONLY_POST_PATTERNS)
 
-# Authenticated viewers may edit only their private QA snapshots. The router
-# derives owner_id from the verified identity and every store query scopes it.
+# Authenticated viewers may edit their private QA snapshots and duplicate deferrals.
+# The routers derive ownership from the verified identity.
 _PRIVATE_QA_COLLECTION = re.compile(r'^/api/projects/[^/]+/qa/conversations$')
 _PRIVATE_QA_ITEM = re.compile(r'^/api/projects/[^/]+/qa/conversations/[^/]+$')
+_PRIVATE_DUPLICATE_DEFERRAL = re.compile(r'^/api/projects/[^/]+/duplicates/deferred/(defer|restore)$')
 
 # 例外：这几个路径即使方法是 GET 也**需要管理员（admin/superadmin）**。
 # 理由：它不是"读知识"，而是"读账号"——属于管理面。GET 默认放行那条规则
@@ -134,7 +135,7 @@ def requires_write_access(method: str, path: str) -> bool:
         return True
     if method in ('GET', 'HEAD', 'OPTIONS'):
         return False
-    if method == 'POST' and _PRIVATE_QA_COLLECTION.fullmatch(path):
+    if method == 'POST' and (_PRIVATE_QA_COLLECTION.fullmatch(path) or _PRIVATE_DUPLICATE_DEFERRAL.fullmatch(path)):
         return False
     if method in ('PUT', 'PATCH', 'DELETE') and _PRIVATE_QA_ITEM.fullmatch(path):
         return False

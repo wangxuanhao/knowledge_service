@@ -4,11 +4,14 @@ import hashlib
 import json
 from dataclasses import dataclass
 
+from ..core.time import utc_now
 from ..domain.entity_identity import DuplicateReviewRequired
 
 
 KEY_COLUMNS = ('class_iri', 'identity_scope', 'match_kind', 'match_key')
 QUALIFIED_KEYS = ','.join(f'k.{column}' for column in KEY_COLUMNS)
+MEMBERSHIP = "encode(sha256(convert_to(array_agg(k.record_id ORDER BY k.record_id)::text,'UTF8')),'hex')"
+DEFERRED_KIND = 'duplicate_deferred'
 
 
 @dataclass(frozen=True)
@@ -148,7 +151,27 @@ class DuplicateReads:
             raise KeyError(entity_id)
         return self.repo._record(rows[0]), scope
 
-    def scan(self, project, *, limit=20, cursor=None, document_id=None, document_version_id=None, document_mode=None):
+    def _candidate(self, parts, scope, member_count, membership=None):
+        blocked = member_count > self.MAX_MEMBERS
+        members = [] if blocked else self._members(parts, scope)
+        group = dict(key=encode_key([*parts, *(scope.key_parts if scope else ())]),
+            name=members[0]['text'] if members else parts[4], type=parts[1], match_kind=parts[3],
+            member_count=member_count, members=members, review_receipt=None, blocked=blocked,
+            blocked_reason='整组预览最多支持 20 个实体，请分批查看成员并逐对复核。' if blocked else None)
+        if membership is not None:
+            group['membership'] = membership
+        return group
+
+    def _current_candidate(self, parts, scope):
+        prefix, join, params = self._key_source(parts[0], scope)
+        row = self.repo._db.execute(f'''{prefix}
+            SELECT count(*) AS member_count,{MEMBERSHIP} AS membership FROM entity_duplicate_keys k {join}
+            WHERE k.project_id=? AND ({QUALIFIED_KEYS})=(?,?,?,?) HAVING count(*)>1''',
+            [*params, *parts]).fetchone()
+        return self._candidate(parts, scope, row['member_count'], row['membership']) if row else None
+
+    def scan(self, project, *, limit=20, cursor=None, document_id=None, document_version_id=None,
+             document_mode=None, reviewer=None):
         if type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError('重复扫描分页上限为50组')
         self.repo.get_project(project)
@@ -163,20 +186,25 @@ class DuplicateReads:
                 raise ValueError('扫描游标不属于当前项目或扫描范围')
             clauses += f' AND ({QUALIFIED_KEYS})>(?,?,?,?)'
             params.extend(parts[1:5])
-        keys = self.repo._db.execute(f'''{prefix}
-            SELECT {QUALIFIED_KEYS},count(*) AS member_count FROM entity_duplicate_keys k {join}
-            WHERE {clauses} GROUP BY {QUALIFIED_KEYS} HAVING count(*)>1
-            ORDER BY {QUALIFIED_KEYS} LIMIT ?''', [*params, limit + 1]).fetchall()
+        membership = f', {MEMBERSHIP} AS membership' if reviewer is not None else ''
+        grouped = f'''{prefix}
+            SELECT {QUALIFIED_KEYS},count(*) AS member_count{membership} FROM entity_duplicate_keys k {join}
+            WHERE {clauses} GROUP BY {QUALIFIED_KEYS} HAVING count(*)>1'''
+        if reviewer is not None:
+            grouped = f'''SELECT candidates.* FROM ({grouped}) candidates WHERE NOT EXISTS (
+                SELECT 1 FROM artifacts WHERE project_id=? AND kind=? AND id=? || candidates.membership)'''
+            params.extend((project, DEFERRED_KIND, self._deferred_prefix(project, reviewer)))
+        keys = self.repo._db.execute(f'{grouped} ORDER BY {",".join(KEY_COLUMNS)} LIMIT ?',
+                                    [*params, limit + 1]).fetchall()
         groups = []
         for row in keys[:limit]:
             parts = [project, *(row[column] for column in KEY_COLUMNS)]
-            key = encode_key([*parts, *scope_parts])
-            blocked = row['member_count'] > self.MAX_MEMBERS
-            members = [] if blocked else self._members(parts, scope)
-            groups.append(dict(key=key, name=members[0]['text'] if members else row['match_key'], type=row['class_iri'],
-                match_kind=row['match_kind'], member_count=row['member_count'], members=members,
-                review_receipt=None,
-                blocked=blocked, blocked_reason='整组预览最多支持 20 个实体，请分批查看成员并逐对复核。' if blocked else None))
+            groups.append(self._candidate(parts, scope, row['member_count'],
+                row['membership'] if reviewer is not None else None))
+        self._attach_review_receipts(project, groups, scope)
+        return dict(groups=groups, next_cursor=groups[-1]['key'] if len(keys) > limit else None)
+
+    def _attach_review_receipts(self, project, groups, scope):
         pointers = {group['key']: self._review_pointer(project, [m['id'] for m in group['members']])
                     for group in groups if group['members']}
         if pointers:
@@ -188,7 +216,63 @@ class DuplicateReads:
                 if pointer:
                     group['review_receipt'] = self._validated_receipt(project, group['key'],
                         [m['id'] for m in group['members']], scope, pointer)
-        return dict(groups=groups, next_cursor=groups[-1]['key'] if len(keys) > limit else None)
+
+    @staticmethod
+    def _deferred_prefix(project, reviewer):
+        owner = json.dumps([project, reviewer], ensure_ascii=False, separators=(',', ':'))
+        return 'duplicate-deferred:' + hashlib.sha256(owner.encode()).hexdigest() + ':'
+
+    def _mark_deferred(self, project, reviewer, groups):
+        if not groups:
+            return
+        prefix = self._deferred_prefix(project, reviewer)
+        ids = [prefix + group['membership'] for group in groups]
+        rows = self.repo._db.execute('''SELECT id FROM artifacts WHERE project_id=? AND kind=?
+            AND id=ANY(?::text[])''', (project, DEFERRED_KIND, ids)).fetchall()
+        saved = {row['id'] for row in rows}
+        for group, ident in zip(groups, ids):
+            if ident in saved:
+                group['deferred_id'] = ident
+
+    def deferred_groups(self, project, reviewer, *, limit, before):
+        self.repo.get_project(project)
+        rows = self.repo._db.execute('''SELECT seq,payload FROM artifacts
+            WHERE project_id=? AND kind=? AND id LIKE ? AND seq<? ORDER BY seq DESC LIMIT ?''',
+            (project, DEFERRED_KIND, self._deferred_prefix(project, reviewer) + '%',
+             before if before is not None else 2**63 - 1, limit + 1)).fetchall()
+        return dict(groups=[json.loads(row['payload']) for row in rows[:limit]],
+                    next_cursor=rows[limit - 1]['seq'] if len(rows) > limit else None)
+
+    def defer_group(self, project, reviewer, key, membership):
+        with self.repo._transaction():
+            parts, scope = self._group_key(project, key)
+            group = self._current_candidate(parts, scope)
+            if not group or group['membership'] != membership:
+                raise ValueError('重复组成员已变化，请重新扫描后再标记暂不合并。')
+            ident = self._deferred_prefix(project, reviewer) + membership
+            item = {**{field: group[field] for field in ('key', 'name', 'type', 'member_count')},
+                    'id': ident, 'project_id': project, 'deferred_at': utc_now()}
+            self.repo._db.execute('''INSERT INTO artifacts (id,kind,project_id,payload) VALUES (?,?,?,?)
+                ON CONFLICT (id) DO NOTHING''', (ident, DEFERRED_KIND, project, json.dumps(item, ensure_ascii=False)))
+            return self.repo.get_artifact(DEFERRED_KIND, ident)
+
+    def restore_deferred_group(self, project, reviewer, ident, *, document_id=None,
+                               document_version_id=None, document_mode=None):
+        self.repo.get_project(project)
+        if not ident.startswith(self._deferred_prefix(project, reviewer)):
+            return dict(restored=False, group=None)
+        with self.repo._transaction():
+            scope = self._document_scope(project, document_id, document_version_id, document_mode)
+            saved = self.repo._db.execute('''DELETE FROM artifacts WHERE project_id=? AND kind=? AND id=?
+                RETURNING payload''', (project, DEFERRED_KIND, ident)).fetchone()
+            if not saved:
+                return dict(restored=False, group=None)
+            parts = decode_key(json.loads(saved['payload'])['key'])[:5]
+            group = self._current_candidate(parts, scope)
+            if group:
+                self._mark_deferred(project, reviewer, [group])
+                self._attach_review_receipts(project, [group], scope)
+            return dict(restored=True, group=group)
 
     def review_signature(self, project, ids, scope):
         """Bind a review to the currently visible identities, their facts, evidence and published ontology."""
